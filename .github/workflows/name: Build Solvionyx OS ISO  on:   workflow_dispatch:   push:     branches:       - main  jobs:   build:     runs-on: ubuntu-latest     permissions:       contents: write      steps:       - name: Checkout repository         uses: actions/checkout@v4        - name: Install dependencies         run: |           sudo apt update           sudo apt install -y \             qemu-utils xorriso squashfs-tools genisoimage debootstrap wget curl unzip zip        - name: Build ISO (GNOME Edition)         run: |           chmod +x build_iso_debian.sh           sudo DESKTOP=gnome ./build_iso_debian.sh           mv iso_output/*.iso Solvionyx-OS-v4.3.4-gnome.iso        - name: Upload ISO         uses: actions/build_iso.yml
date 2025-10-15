@@ -1,0 +1,35 @@
+name: Build Solvionyx OS ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl unzip zip
+
+      - name: Build ISO (GNOME Edition)
+        run: |
+          chmod +x build_iso_debian.sh
+          sudo DESKTOP=gnome ./build_iso_debian.sh
+          mv iso_output/*.iso Solvionyx-OS-v4.3.4-gnome.iso
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvionyx-OS-v4.3.4-GNOME
+          path: Solvionyx-OS-v4.3.4-gnome.iso
