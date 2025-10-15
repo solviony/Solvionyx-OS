@@ -16,7 +16,9 @@ sudo apt install -y debootstrap squashfs-tools genisoimage xorriso wget curl rsy
 BASE_ISO="$WORK_DIR/base.iso"
 if [ ! -f "$BASE_ISO" ]; then
   echo "📥 Downloading base Debian ISO..."
-  wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-12.5.0-amd64-netinst.iso"
+# Always pull the latest stable Debian netinst ISO
+LATEST_URL=$(curl -s https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/ | grep -oP 'href="debian-[0-9.]+-amd64-netinst.iso"' | head -1 | cut -d'"' -f2)
+wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/$LATEST_URL"
 fi
 
 echo "📂 Extracting base ISO..."
