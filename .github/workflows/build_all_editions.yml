@@ -1,0 +1,86 @@
+name: Build All Solvionyx OS Editions
+
+on:
+  workflow_dispatch:            # Manual trigger
+  push:
+    branches:
+      - main                    # Auto-run on push to main
+
+jobs:
+  build-gnome:
+    name: Aurora (GNOME Edition)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl unzip zip
+
+      - name: Build GNOME Edition
+        run: |
+          chmod +x build_iso_debian.sh
+          sudo DESKTOP=gnome ./build_iso_debian.sh
+          mv iso_output/*.iso Solvionyx-OS-v4.3.4-gnome.iso
+
+      - name: Upload GNOME ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvionyx-OS-v4.3.4-GNOME
+          path: Solvionyx-OS-v4.3.4-gnome.iso
+
+  build-xfce:
+    name: Aurora Lite (XFCE Edition)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl unzip zip
+
+      - name: Build XFCE Edition
+        run: |
+          chmod +x build_iso_debian.sh
+          sudo DESKTOP=xfce ./build_iso_debian.sh
+          mv iso_output/*.iso Solvionyx-OS-v4.3.4-xfce.iso
+
+      - name: Upload XFCE ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvionyx-OS-v4.3.4-XFCE
+          path: Solvionyx-OS-v4.3.4-xfce.iso
+
+  build-kde:
+    name: Aurora Studio (KDE Edition)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl unzip zip
+
+      - name: Build KDE Edition
+        run: |
+          chmod +x build_iso_debian.sh
+          sudo DESKTOP=kde ./build_iso_debian.sh
+          mv iso_output/*.iso Solvionyx-OS-v4.3.4-kde.iso
+
+      - name: Upload KDE ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvionyx-OS-v4.3.4-KDE
+          path: Solvionyx-OS-v4.3.4-kde.iso
