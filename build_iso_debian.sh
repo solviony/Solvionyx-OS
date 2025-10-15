@@ -11,14 +11,18 @@ mkdir -p "$WORK_DIR" "$OUT_DIR"
 
 echo "📦 Installing dependencies..."
 sudo apt update -y
-sudo apt install -y debootstrap squashfs-tools genisoimage xorriso wget curl rsync -y
+sudo apt install -y debootstrap squashfs-tools genisoimage xorriso # Always pull the latest stable Debian netinst ISOLATEST_URL=$(curl -s https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/ | grep -oP 'href="debian-[0-9.]+-amd64-netinst.iso"' | head -1 | cut -d'"' -f2)wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/$LATEST_URL" curl rsync -y
 
 BASE_ISO="$WORK_DIR/base.iso"
 if [ ! -f "$BASE_ISO" ]; then
   echo "📥 Downloading base Debian ISO..."
+ HEAD
 # Always pull the latest stable Debian netinst ISO
 LATEST_URL=$(curl -s https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/ | grep -oP 'href="debian-[0-9.]+-amd64-netinst.iso"' | head -1 | cut -d'"' -f2)
 wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/$LATEST_URL"
+
+  # Always pull the latest stable Debian netinst ISOLATEST_URL=$(curl -s https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/ | grep -oP 'href="debian-[0-9.]+-amd64-netinst.iso"' | head -1 | cut -d'"' -f2)wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/$LATEST_URL"
+ cd16a6a (Add full multi-edition build and automatic release workflow)
 fi
 
 echo "📂 Extracting base ISO..."
