@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Aurora (${{ matrix.desktop }})
@@ -54,8 +57,12 @@ jobs:
           cd release || exit 0
           if ls *.iso >/dev/null 2>&1; then sha256sum *.iso > SHA256SUMS.txt; fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - - name: Create GitHub Release
+  uses: softprops/action-gh-release@v1
+  continue-on-error: true
+  with:
+    fail_on_unmatched_files: false
+
         with:
           tag_name: Aurora-v4.3.8
           name: "Solvionyx OS Aurora v4.3.8 — GNOME/XFCE/KDE"
