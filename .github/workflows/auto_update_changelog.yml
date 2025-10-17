@@ -1,22 +1,31 @@
-name: Auto Update Changelog
+name: Auto Update Changelog (Aurora Series)
+
 on:
   workflow_run:
-    workflows: ["Build & Release Solvionyx OS Editions"]
+    workflows: ["Auto Version Tag (Aurora Series)"]
     types: [completed]
 
+permissions:
+  contents: write
+
 jobs:
-  update:
+  changelog:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Append entry
+
+      - name: Append changelog entry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          TAG="Aurora-v4.3.8"
-          DATE=$(date -u +'%Y-%m-%d')
-          echo -e "\n## ${TAG} — ${DATE}\n- Built GNOME/XFCE/KDE with Bash-enforced CI\n- Debian Live ISO auto-detected\n- Partial release enabled (publishes available ISOs)\n" >> CHANGELOG.md
+          tag=$(git describe --tags `git rev-list --tags --max-count=1` || echo "Aurora-v4.3.9")
+          date=$(date -u +'%Y-%m-%d')
+          echo -e "\n## ${tag} — ${date}\n- Automated build and release of GNOME/XFCE/KDE editions\n- Version bump handled by GitHub Actions\n" >> CHANGELOG.md
+
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add CHANGELOG.md
-          git commit -m "chore(changelog): append ${TAG}" || true
+          git commit -m "docs(changelog): update for ${tag}" || true
           git push
+
