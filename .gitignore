@@ -1,0 +1,8 @@
+# Ignore build outputs and cache
+iso_output/
+solvionyx_build/
+backup/
+*.save
+*.log
+*.iso
+custom-disk/
