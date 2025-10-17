@@ -40,7 +40,7 @@ fi
 echo "🎨 Desktop flavor: ${FLAVOR^^}"
 
 # --- Fetch latest Debian Live ISO URL for the chosen flavor ---
-ISO_DIR="https://cdimage.debian.org/debian-cd/bookworm-live/amd64/iso-hybrid"
+ISO_DIR="https://cdimage.debian.org/mirror/cdimage/archive/12.6.0-live/amd64/iso-hybrid"
 echo "🌐 Resolving latest Debian Live ISO for '$FLAVOR'..."
 LIVE_NAME="$(curl -fsSL "$ISO_DIR/" | grep -oP "debian-live-[0-9.]+-amd64-${FLAVOR}\.iso" | sort -V | tail -1 || true)"
 
