@@ -1,0 +1,37 @@
+name: Auto Version Tag (Aurora Series)
+
+on:
+  workflow_run:
+    workflows: ["Build & Release Solvionyx OS Editions"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine next version
+        id: version
+        run: |
+          # Extract latest Aurora tag like Aurora-v4.3.9
+          latest=$(git tag --list 'Aurora-v*' | sed -E 's/[^0-9.]//g' | sort -V | tail -1)
+          base=${latest:-"4.3.9"}
+          IFS='.' read -r major minor patch <<< "$base"
+          patch=$((patch+1))
+          next="Aurora-v${major}.${minor}.${patch}"
+          echo "next=$next" >> $GITHUB_OUTPUT
+          echo "Next tag: $next"
+
+      - name: Create and push new tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git tag -a "${{ steps.version.outputs.next }}" -m "Auto-tag ${{ steps.version.outputs.next }}"
+          git push origin "${{ steps.version.outputs.next }}"
