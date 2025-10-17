@@ -4,14 +4,12 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
-  schedule:
-    - cron: "0 3 * * *" # optional nightly
 
 permissions:
   contents: write
 
 env:
-  AURORA_VERSION: v4.4.2
+  AURORA_VERSION: v4.4.3
   GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
 defaults:
@@ -26,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-            - name: Install build deps (auto-detect for Ubuntu/Debian)
+      - name: Install build deps (auto-detect for Ubuntu/Debian)
         run: |
           sudo apt-get update
           if grep -qi ubuntu /etc/os-release; then
@@ -34,7 +32,7 @@ jobs:
             sudo apt-get install -y --no-install-recommends \
               debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
               grub-pc-bin grub-efi-amd64-bin grub2-common grub-common \
-              genisoimage ca-certificates curl rsync zip rclone jq
+              genisoimage ca-certificates curl rsync zip rclone jq unzip zstd
             echo "Installing AWS CLI v2..."
             curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
             unzip awscliv2.zip >/dev/null
@@ -44,109 +42,54 @@ jobs:
             sudo apt-get install -y --no-install-recommends \
               debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
               grub-pc-bin grub-efi-amd64-bin grub-mkrescue \
-              genisoimage ca-certificates curl rsync zip rclone jq
+              genisoimage ca-certificates curl rsync zip rclone jq unzip zstd
             echo "Installing AWS CLI v2..."
             curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
             unzip awscliv2.zip >/dev/null
             sudo ./aws/install
           fi
 
-      - name: Build ISO
+      - name: Build Solvionyx OS ISO
         run: |
-          chmod +x ./build_iso_debian.sh
-          sudo AURORA_VERSION="${AURORA_VERSION}" ./build_iso_debian.sh
+          chmod +x build_iso_debian.sh
+          sudo DESKTOP=gnome ./build_iso_debian.sh
 
-      - name: Upload ISO artifact (always)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Solvionyx-OS-Aurora-gnome
-          path: iso_output/*.iso
-          compression-level: 0
-
-  release:
-    name: Publish Release (Smart AutoUploader)
-    needs: [ gnome ]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: Solvionyx-OS-Aurora-gnome
-          path: release
+      - name: Compress ISO to under 2 GB (zstd)
+        run: |
+          mkdir -p release
+          ISO=$(ls iso_output/*.iso | head -n 1)
+          if [ -f "$ISO" ]; then
+            echo "Compressing $ISO..."
+            zstd -T0 -19 "$ISO" -o "release/$(basename $ISO .iso).zst"
+            du -h "release/$(basename $ISO .iso).zst"
+          else
+            echo "❌ No ISO found to compress."
+            exit 1
+          fi
 
       - name: Generate checksums
         run: |
-          cd release
-          sha256sum *.iso > SHA256SUMS.txt
-          ls -lh
+          cd release || exit 1
+          sha256sum *.zst > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-      - name: Compress if ISO > 2 GiB
-        id: compress
-        run: |
-          F=$(ls -1 release/*.iso | head -n1)
-          BYTES=$(stat -c%s "$F")
-          LIMIT=$((2*1024*1024*1024))
-          if [ "$BYTES" -gt "$LIMIT" ]; then
-            echo "Compressing ISO to fit GitHub release limit..."
-            zip -r9 "${F}.zip" "$F"
-            echo "final_file=${F}.zip" >> $GITHUB_OUTPUT
-          else
-            echo "final_file=$F" >> $GITHUB_OUTPUT
-          fi
+      - name: Upload compressed ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvionyx-Aurora-v4.4.3
+          path: release/
 
-      - name: Upload to GitHub Release if ≤ 2 GiB
-        if: endsWith(steps.compress.outputs.final_file, '.iso')
+      - name: Publish GitHub Release (Auto)
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: Aurora-${{ env.AURORA_VERSION }}
-          name: "Solvionyx OS Aurora ${{ env.AURORA_VERSION }} — GNOME"
+          files: release/*.zst
           body: |
-            Solvionyx OS Aurora (GNOME) AutoBuilder (v4.4.2)
-            ✅ Bootable ISO (UEFI + BIOS)
-            ✅ Includes checksum file
-          files: |
-            release/*.iso
-            release/SHA256SUMS.txt
+            ✅ **Solvionyx OS Aurora (GNOME) v4.4.3**
+            - Auto-built and compressed under 2 GB.
+            - Bootable hybrid ISO with GNOME desktop.
+            - SHA256 checksums included.
+            - Built via GitHub Actions AutoBuilder.
+          tag_name: Aurora-v4.4.3
+          name: Solvionyx OS Aurora v4.4.3 (GNOME)
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-
-      - name: Upload large build to Google Drive / S3
-        if: endsWith(steps.compress.outputs.final_file, '.zip')
-        id: upload
-        run: |
-          echo "ISO exceeds 2 GiB — using external upload."
-          F="${{ steps.compress.outputs.final_file }}"
-          LINK=""
-          
-          if [ -n "${{ secrets.RCLONE_CONF }}" ]; then
-            echo "${{ secrets.RCLONE_CONF }}" > ~/.config/rclone/rclone.conf
-            echo "Uploading to Google Drive..."
-            rclone copy "$F" "drive:Solvionyx-ISOs" --progress
-            LINK=$(rclone link "drive:Solvionyx-ISOs/$(basename "$F")" || true)
-          elif [ -n "${{ secrets.S3_BUCKET }}" ]; then
-            echo "Uploading to S3..."
-            aws s3 cp "$F" "s3://${{ secrets.S3_BUCKET }}/" --acl public-read
-            LINK="https://${{ secrets.S3_BUCKET }}.s3.amazonaws.com/$(basename "$F")"
-          else
-            echo "::warning::No external upload config found."
-          fi
-
-          echo "download_link=$LINK" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release with External Link
-        if: endsWith(steps.compress.outputs.final_file, '.zip')
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: Aurora-${{ env.AURORA_VERSION }}
-          name: "Solvionyx OS Aurora ${{ env.AURORA_VERSION }} — GNOME (External Upload)"
-          body: |
-            Solvionyx OS Aurora (GNOME) AutoBuilder (v4.4.2)
-            🚀 ISO exceeded 2 GiB — uploaded externally.
-            🔗 Download: **${{ steps.upload.outputs.download_link }}**
-            Includes checksum file and compression log.
-          files: release/SHA256SUMS.txt
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-
