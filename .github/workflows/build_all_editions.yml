@@ -1,8 +1,10 @@
 name: Build & Release Solvionyx OS Editions
 on:
-  workflow_dispatch:
-  push:
+  workflow_dispatch:     # Manual trigger
+  push:                  # Trigger on main branch updates
     branches: [ main ]
+  schedule:              # Nightly rebuild at 03:00 UTC
+    - cron: "0 3 * * *"
 
 permissions:
   contents: write
