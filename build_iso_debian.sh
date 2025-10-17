@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 # Relaxed error handling for GitHub Actions
 set -eo pipefail
@@ -6,7 +7,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Default flavor fallback
 FLAVOR="${DESKTOP:-gnome}"
-echo "🍱 Desktop flavor: $FLAVOR"
+echo "==> Desktop flavor: $FLAVOR"
 
 # Ensure flavor variable is always defined
 FLAVOR="${DESKTOP:-gnome}"
@@ -65,7 +66,7 @@ if [ -z "${LATEST_VERSION:-}" ]; then
 fi
 
 ISO_DIR="https://cdimage.debian.org/debian-cd/${LATEST_VERSION}-live/amd64/iso-hybrid"
-echo "🌐 Using Debian Live version: $LATEST_VERSION"
+echo "==> Network:Using Debian Live version: $LATEST_VERSION"
 
 # Try to fetch ISO name for all flavors dynamically
 LIVE_NAME="$(curl -fsSL "$ISO_DIR/" | grep -oP "debian-live-[0-9.]+-amd64-${FLAVOR}\.iso" | sort -V | tail -1 || true)"
@@ -106,7 +107,7 @@ sudo umount "$MNT" || true
 # --- Bootstrap a minimal Debian rootfs we will pack into squashfs ---
 CHROOT="$WORK_DIR/chroot"
 if [ -d "$CHROOT" ]; then sudo rm -rf "$CHROOT"; fi
-echo "⚙️  Bootstrapping Debian (bookworm, amd64) rootfs..."
+echo "==> Configuring:  Bootstrapping Debian (bookworm, amd64) rootfs..."
 sudo debootstrap --arch=amd64 bookworm "$CHROOT" http://deb.debian.org/debian/
 
 # --- Basic customization inside chroot ---
@@ -178,4 +179,4 @@ xorriso -as mkisofs -r -V "SOLVIONYX_AURORA_${DESKTOP^^}" \
 popd >/dev/null
 
 chown "$OWNER:$OWNER" "$OUT_ISO" || true
-echo "✅ ISO ready: $OUT_ISO"
+echo "==> Done. ISO ready: $OUT_ISO"
