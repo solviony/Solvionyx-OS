@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
 jobs:
   build:
     name: Aurora (${{ matrix.desktop }})
