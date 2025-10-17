@@ -58,11 +58,9 @@ cat << 'EOF' | sudo chroot "$CHROOT_DIR" /bin/bash
 set -eo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends ubuntu-gnome-desktop gdm3 \
-  network-manager firefox gnome-terminal nautilus gedit \
-  sudo nano plymouth-theme-ubuntu-text \
-  grub-pc-bin grub-efi-amd64-bin systemd-sysv \
-  casper lupin-casper linux-generic
+apt-get install -y --no-install-recommends ubuntu-desktop-minimal gdm3 \
+  network-manager firefox gnome-terminal nautilus gnome-text-editor \
+  sudo nano plymouth-theme-spinner casper linux-generic
 
 # Branding
 echo "Solvionyx OS Aurora v4.5.0" > /etc/issue
