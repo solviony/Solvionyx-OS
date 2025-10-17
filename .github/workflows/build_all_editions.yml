@@ -35,7 +35,7 @@ jobs:
               genisoimage ca-certificates curl rsync zip rclone jq unzip zstd
             echo "Installing AWS CLI v2..."
             curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip >/dev/null
+            unzip -q awscliv2.zip
             sudo ./aws/install
           else
             echo "Detected Debian runner — using grub-mkrescue"
@@ -45,7 +45,7 @@ jobs:
               genisoimage ca-certificates curl rsync zip rclone jq unzip zstd
             echo "Installing AWS CLI v2..."
             curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip >/dev/null
+            unzip -q awscliv2.zip
             sudo ./aws/install
           fi
 
@@ -60,8 +60,8 @@ jobs:
           ISO=$(ls iso_output/*.iso | head -n 1)
           if [ -f "$ISO" ]; then
             echo "Compressing $ISO..."
-            zstd -T0 -19 "$ISO" -o "release/$(basename $ISO .iso).zst"
-            du -h "release/$(basename $ISO .iso).zst"
+            zstd -T0 -19 "$ISO" -o "release/$(basename "$ISO" .iso).zst"
+            du -h "release/$(basename "$ISO" .iso).zst"
           else
             echo "❌ No ISO found to compress."
             exit 1
@@ -79,17 +79,17 @@ jobs:
           name: Solvionyx-Aurora-v4.4.3
           path: release/
 
-      - name: Publish GitHub Release (Auto)
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: release/*.zst
-          body: |
-            ✅ **Solvionyx OS Aurora (GNOME) v4.4.3**
-            - Auto-built and compressed under 2 GB.
-            - Bootable hybrid ISO with GNOME desktop.
-            - SHA256 checksums included.
-            - Built via GitHub Actions AutoBuilder.
           tag_name: Aurora-v4.4.3
           name: Solvionyx OS Aurora v4.4.3 (GNOME)
+          body: |
+            ✅ **Solvionyx OS Aurora (GNOME)** v4.4.3  
+            - Auto-built and compressed under 2 GB  
+            - Bootable hybrid ISO with GNOME desktop  
+            - SHA-256 checksums included  
+            - Built via GitHub Actions AutoBuilder
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
