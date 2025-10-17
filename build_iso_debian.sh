@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Ensure flavor variable is always defined
+FLAVOR="${DESKTOP:-gnome}"
 
 # Solvionyx OS — Aurora AutoBuilder (v4.3.5)
 
