@@ -1,4 +1,4 @@
-# Ignore build outputs and cache
+# Build artefacts
 iso_output/
 solvionyx_build/
 backup/
