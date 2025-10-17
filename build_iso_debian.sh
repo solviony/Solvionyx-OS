@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# Relaxed error handling for GitHub Actions
+set -eo pipefail
+shopt -s nullglob
+export DEBIAN_FRONTEND=noninteractive
+
+# Default flavor fallback
+FLAVOR="${DESKTOP:-gnome}"
+echo "🍱 Desktop flavor: $FLAVOR"
+
 # Ensure flavor variable is always defined
 FLAVOR="${DESKTOP:-gnome}"
 
