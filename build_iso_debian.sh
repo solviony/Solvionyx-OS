@@ -23,10 +23,11 @@ sudo apt-get install -y --no-install-recommends \
 # --- Choose flavor for Debian Live base ISO ---
 case "${DESKTOP,,}" in
   gnome) FLAVOR="gnome" ;;
-  xfce)  FLAVOR="xfce"  ;;
+  xfce)  FLAVOR="xfce" ;;
   kde|plasma) FLAVOR="kde" ;;
-  *)     FLAVOR="gnome" ;;
-endesac 2>/dev/null || true
+  *) FLAVOR="gnome" ;;
+esac
+
 # For shells that don't support 'endesac', fall back (POSIX sh style)
 if [ -z "${FLAVOR:-}" ]; then
   case "${DESKTOP}" in
