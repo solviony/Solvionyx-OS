@@ -1,111 +1,89 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
-# ───────────────────────────────
-# Solvionyx OS Aurora AutoBuilder v4.5.0
-# ───────────────────────────────
-
-ISO_NAME="Solvionyx-OS-Aurora-v4.5.0-GNOME.iso"
+AURORA_VERSION="v4.5.0"
+DESKTOP="${DESKTOP:-gnome}"
 WORK_DIR="$(pwd)/solvionyx_build"
-CHROOT_DIR="$WORK_DIR/chroot"
 OUT_DIR="$(pwd)/iso_output"
+CHROOT_DIR="$WORK_DIR/chroot"
 
-echo "🌌 Solvionyx OS Aurora Builder v4.5.0"
-echo "🏗  Setting up workspace..."
+echo "🌌 Solvionyx OS Aurora AutoBuilder — ${AURORA_VERSION}"
+echo "💻 Desktop: ${DESKTOP}"
+
+# Clean up previous build directories
 sudo rm -rf "$WORK_DIR"
-mkdir -p "$CHROOT_DIR" "$OUT_DIR"
+mkdir -p "$WORK_DIR" "$OUT_DIR"
 
-# ───────────────────────────────
-# Install Dependencies
-# ───────────────────────────────
 echo "📦 Installing build dependencies..."
 sudo apt-get update -y
+sudo apt-get install -y --no-install-recommends \
+  debootstrap xorriso squashfs-tools grub2-common isolinux syslinux-utils \
+  genisoimage dosfstools rsync zstd
 
-if grep -qi ubuntu /etc/os-release; then
-  echo "Detected Ubuntu — using grub2-common."
-  sudo apt-get install -y --no-install-recommends \
-    debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
-    grub-pc-bin grub-efi-amd64-bin grub2-common grub-common \
-    genisoimage ca-certificates curl rsync zip jq zstd systemd-container
-else
-  echo "Detected Debian — using grub-mkrescue."
-  sudo apt-get install -y --no-install-recommends \
-    debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
-    grub-pc-bin grub-efi-amd64-bin grub-mkrescue \
-    genisoimage ca-certificates curl rsync zip jq zstd systemd-container
-fi
-
-# ───────────────────────────────
-# Bootstrap base system
-# ───────────────────────────────
-echo "🧱 Bootstrapping minimal system..."
+echo "🌍 Bootstrapping base system..."
 sudo debootstrap --arch=amd64 noble "$CHROOT_DIR" http://archive.ubuntu.com/ubuntu/
 
-# ───────────────────────────────
-# Configure chroot environment
-# ───────────────────────────────
-echo "⚙️  Configuring chroot..."
+echo "🧩 Configuring chroot..."
 sudo mount --bind /dev "$CHROOT_DIR/dev"
-sudo mount -t proc /proc "$CHROOT_DIR/proc"
-sudo mount -t sysfs /sys "$CHROOT_DIR/sys"
-sudo mount -t devpts /dev/pts "$CHROOT_DIR/dev/pts"
+sudo mount --bind /run "$CHROOT_DIR/run"
 
-# ───────────────────────────────
-# Install desktop and branding
-# ───────────────────────────────
-cat << 'EOF' | sudo chroot "$CHROOT_DIR" /bin/bash
-set -eo pipefail
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
-apt-get install -y --no-install-recommends ubuntu-desktop-minimal gdm3 \
-  network-manager firefox gnome-terminal nautilus gnome-text-editor \
-  sudo nano plymouth-theme-spinner casper linux-generic
+sudo chroot "$CHROOT_DIR" bash -c "
+  set -e
+  apt-get update
+  apt-get install -y --no-install-recommends ubuntu-desktop-minimal gdm3 \
+    network-manager firefox gnome-terminal nautilus gnome-text-editor \
+    sudo nano plymouth-theme-spinner casper linux-generic grub-pc-bin grub-efi-amd64-bin
 
-# Branding
-echo "Solvionyx OS Aurora v4.5.0" > /etc/issue
-echo "Welcome to Solvionyx Aurora (GNOME)" > /etc/motd
+  useradd -m -s /bin/bash solvionyx || true
+  echo 'solvionyx:solvionyx' | chpasswd
+  usermod -aG sudo solvionyx
 
-useradd -m solvionyx -s /bin/bash
-echo "solvionyx:solvionyx" | chpasswd
-adduser solvionyx sudo
+  echo 'Solvionyx OS Aurora ${AURORA_VERSION}' > /etc/issue
+  echo 'Solvionyx OS Aurora ${AURORA_VERSION}' > /etc/motd
+
+  apt-get clean
+"
+
+sudo umount "$CHROOT_DIR/dev" || true
+sudo umount "$CHROOT_DIR/run" || true
+
+echo "🪄 Preparing filesystem..."
+mkdir -p "$WORK_DIR/image/{casper,boot,isolinux}"
+sudo mksquashfs "$CHROOT_DIR" "$WORK_DIR/image/casper/filesystem.squashfs" -e boot
+
+# Kernel + initrd
+sudo cp "$CHROOT_DIR/boot/vmlinuz"* "$WORK_DIR/image/casper/vmlinuz"
+sudo cp "$CHROOT_DIR/boot/initrd"* "$WORK_DIR/image/casper/initrd"
+
+# ISOLINUX config
+cat <<EOF | sudo tee "$WORK_DIR/image/isolinux/isolinux.cfg"
+UI menu.c32
+PROMPT 0
+TIMEOUT 50
+DEFAULT live
+
+LABEL live
+  menu label ^Start Solvionyx OS Aurora ${AURORA_VERSION}
+  kernel /casper/vmlinuz
+  append initrd=/casper/initrd boot=casper quiet splash ---
 EOF
 
-# ───────────────────────────────
-# Unmount and clean up
-# ───────────────────────────────
-sudo umount -lf "$CHROOT_DIR/dev/pts" || true
-sudo umount -lf "$CHROOT_DIR/proc" || true
-sudo umount -lf "$CHROOT_DIR/sys" || true
-sudo umount -lf "$CHROOT_DIR/dev" || true
+sudo cp /usr/lib/ISOLINUX/isolinux.bin "$WORK_DIR/image/isolinux/"
 
-# ───────────────────────────────
-# Build bootable ISO
-# ───────────────────────────────
-echo "💿 Building ISO..."
-mkdir -p "$WORK_DIR/iso/{casper,boot/grub}"
-sudo mksquashfs "$CHROOT_DIR" "$WORK_DIR/iso/casper/filesystem.squashfs" -e boot
+echo "🏗️ Building ISO..."
+mkdir -p "$OUT_DIR"
+ISO_NAME="Solvionyx-Aurora-${AURORA_VERSION}.iso"
 
-cat << 'GRUBEOF' > "$WORK_DIR/iso/boot/grub/grub.cfg"
-set default=0
-set timeout=5
+xorriso -as mkisofs -r -V "Solvionyx_OS_${AURORA_VERSION}" \
+  -o "$OUT_DIR/$ISO_NAME" \
+  -J -l -cache-inodes -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+  -b isolinux/isolinux.bin -c isolinux/boot.cat \
+  -no-emul-boot -boot-load-size 4 -boot-info-table \
+  "$WORK_DIR/image"
 
-menuentry "Solvionyx OS Aurora GNOME Live" {
-    linux /casper/vmlinuz boot=casper quiet splash ---
-    initrd /casper/initrd
-}
-GRUBEOF
+echo "🧠 Compressing ISO to stay under 2GB..."
+zstd -f -q -T0 "$OUT_DIR/$ISO_NAME"
 
-sudo cp "$CHROOT_DIR/boot/vmlinuz"* "$WORK_DIR/iso/casper/vmlinuz"
-sudo cp "$CHROOT_DIR/boot/initrd.img"* "$WORK_DIR/iso/casper/initrd"
-
-grub-mkrescue -o "$OUT_DIR/$ISO_NAME" "$WORK_DIR/iso" || grub2-mkrescue -o "$OUT_DIR/$ISO_NAME" "$WORK_DIR/iso" || true
-
-# ───────────────────────────────
-# Compress final ISO
-# ───────────────────────────────
-echo "📦 Compressing ISO..."
-zstd -T0 -19 "$OUT_DIR/$ISO_NAME" -o "$OUT_DIR/${ISO_NAME%.iso}.zst"
-
-echo "✅ Done! Bootable ISO ready:"
-ls -lh "$OUT_DIR"
+echo "✅ Done! ISO available at:"
+echo "   → $OUT_DIR/${ISO_NAME}.zst"
