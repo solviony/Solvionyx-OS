@@ -1,0 +1,22 @@
+name: Auto Update Changelog
+on:
+  workflow_run:
+    workflows: ["Build & Release Solvionyx OS Editions"]
+    types: [completed]
+
+jobs:
+  update:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Append entry
+        run: |
+          TAG="Aurora-v4.3.8"
+          DATE=$(date -u +'%Y-%m-%d')
+          echo -e "\n## ${TAG} — ${DATE}\n- Built GNOME/XFCE/KDE with Bash-enforced CI\n- Debian Live ISO auto-detected\n- Partial release enabled (publishes available ISOs)\n" >> CHANGELOG.md
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add CHANGELOG.md
+          git commit -m "chore(changelog): append ${TAG}" || true
+          git push
