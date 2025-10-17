@@ -40,9 +40,32 @@ fi
 echo "🎨 Desktop flavor: ${FLAVOR^^}"
 
 # --- Fetch latest Debian Live ISO URL for the chosen flavor ---
-ISO_DIR="https://cdimage.debian.org/mirror/cdimage/archive/12.6.0-live/amd64/iso-hybrid"
-echo "🌐 Resolving latest Debian Live ISO for '$FLAVOR'..."
+# --- Fetch latest Debian Live ISO dynamically ---
+MAIN_URL="https://cdimage.debian.org/debian-cd/"
+LATEST_VERSION=$(curl -fsSL "$MAIN_URL" | grep -oP '>[0-9]+\.[0-9]+(?=/)' | sort -V | tail -1)
+if [ -z "${LATEST_VERSION:-}" ]; then
+  LATEST_VERSION="12.6.0"  # fallback
+fi
+
+# --- Auto-detect the latest Debian Live ISO version ---
+MAIN_URL="https://cdimage.debian.org/debian-cd/"
+LATEST_VERSION=$(curl -fsSL "$MAIN_URL" | grep -oP '>[0-9]+\.[0-9]+(?=/)' | sort -V | tail -1)
+if [ -z "${LATEST_VERSION:-}" ]; then
+  LATEST_VERSION="12.6.0"  # fallback if curl fails
+fi
+
+ISO_DIR="https://cdimage.debian.org/debian-cd/${LATEST_VERSION}-live/amd64/iso-hybrid"
+echo "🌐 Using Debian Live version: $LATEST_VERSION"
+
+# Try to fetch ISO name for all flavors dynamically
 LIVE_NAME="$(curl -fsSL "$ISO_DIR/" | grep -oP "debian-live-[0-9.]+-amd64-${FLAVOR}\.iso" | sort -V | tail -1 || true)"
+
+if [ -z "${LIVE_NAME:-}" ]; then
+  echo "❌ Could not find Debian Live ISO for flavor '$FLAVOR' in $ISO_DIR"
+  echo "   Please check Debian mirrors or network connectivity."
+  exit 2
+fi
+
 
 if [ -z "${LIVE_NAME:-}" ]; then
   echo "❌ Could not detect latest Debian Live ISO for flavor '$FLAVOR' at $ISO_DIR"
