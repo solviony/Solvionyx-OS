@@ -8,11 +8,11 @@ on:
     - cron: "0 3 * * *" # optional nightly
 
 permissions:
-  contents: write    # required for creating releases
+  contents: write
 
 env:
   AURORA_VERSION: v4.4.0
-  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }} # create GH_TOKEN with 'repo' scope
+  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
 defaults:
   run:
@@ -26,13 +26,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build deps
+      - name: Install build deps (auto-detect for Ubuntu/Debian)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
-            grub-pc-bin grub-efi-amd64-bin grub2-common grub-common \
-            genisoimage ca-certificates curl rsync
+          # Detect Ubuntu or Debian runner and install the right GRUB tools
+          if grep -qi ubuntu /etc/os-release; then
+            echo "Detected Ubuntu runner — using grub2-common and grub-common"
+            sudo apt-get install -y --no-install-recommends \
+              debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
+              grub-pc-bin grub-efi-amd64-bin grub2-common grub-common \
+              genisoimage ca-certificates curl rsync
+          else
+            echo "Detected Debian runner — using grub-mkrescue"
+            sudo apt-get install -y --no-install-recommends \
+              debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
+              grub-pc-bin grub-efi-amd64-bin grub-mkrescue \
+              genisoimage ca-certificates curl rsync
+          fi
 
       - name: Build ISO
         run: |
