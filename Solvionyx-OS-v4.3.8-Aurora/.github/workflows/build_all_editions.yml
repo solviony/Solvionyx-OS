@@ -1,0 +1,12 @@
+name: Test Aurora AutoBuilder
+on: [workflow_dispatch]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Builder
+        shell: bash
+        run: |
+          chmod +x build_iso_debian.sh
+          ./build_iso_debian.sh
