@@ -1,4 +1,5 @@
 name: Build & Release Solvionyx OS Editions
+
 on:
   workflow_dispatch:     # Manual trigger
   push:                  # Trigger on main branch updates
@@ -17,9 +18,9 @@ jobs:
     name: Aurora (${{ matrix.desktop }})
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        desktop: [ gnome, xfce, kde ]
+        desktop: [gnome, xfce, kde]
+
     steps:
       - uses: actions/checkout@v4
   publish:
