@@ -3,139 +3,100 @@ name: Build & Release Solvionyx OS Editions
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   build-gnome:
-    name: Aurora (GNOME Edition)
+    name: Aurora (GNOME)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      gnome_iso: ${{ steps.upload.outputs.artifact-url }}
+    permissions: { contents: write }
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - uses: actions/checkout@v4
+      - name: Install deps
         run: |
-          sudo apt update
-          sudo apt install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl unzip zip
-
-      - name: Build GNOME Edition
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl rsync
+      - name: Build GNOME
         run: |
           chmod +x build_iso_debian.sh
           sudo DESKTOP=gnome ./build_iso_debian.sh
-          mv iso_output/*.iso Solvionyx-OS-v4.3.4-gnome.iso
-
+          mv iso_output/*.iso Solvionyx-OS-v4.3.5-gnome.iso
       - name: Upload GNOME ISO
-        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: Solvionyx-OS-v4.3.4-GNOME
-          path: Solvionyx-OS-v4.3.4-gnome.iso
+          name: Solvionyx-OS-v4.3.5-GNOME
+          path: Solvionyx-OS-v4.3.5-gnome.iso
 
   build-xfce:
-    name: Aurora Lite (XFCE Edition)
+    name: Aurora Lite (XFCE)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      xfce_iso: ${{ steps.upload.outputs.artifact-url }}
+    permissions: { contents: write }
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - uses: actions/checkout@v4
+      - name: Install deps
         run: |
-          sudo apt update
-          sudo apt install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl unzip zip
-
-      - name: Build XFCE Edition
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl rsync
+      - name: Build XFCE
         run: |
           chmod +x build_iso_debian.sh
           sudo DESKTOP=xfce ./build_iso_debian.sh
-          mv iso_output/*.iso Solvionyx-OS-v4.3.4-xfce.iso
-
+          mv iso_output/*.iso Solvionyx-OS-v4.3.5-xfce.iso
       - name: Upload XFCE ISO
-        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: Solvionyx-OS-v4.3.4-XFCE
-          path: Solvionyx-OS-v4.3.4-xfce.iso
+          name: Solvionyx-OS-v4.3.5-XFCE
+          path: Solvionyx-OS-v4.3.5-xfce.iso
 
   build-kde:
-    name: Aurora Studio (KDE Edition)
+    name: Aurora Studio (KDE)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      kde_iso: ${{ steps.upload.outputs.artifact-url }}
+    permissions: { contents: write }
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - uses: actions/checkout@v4
+      - name: Install deps
         run: |
-          sudo apt update
-          sudo apt install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl unzip zip
-
-      - name: Build KDE Edition
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl rsync
+      - name: Build KDE
         run: |
           chmod +x build_iso_debian.sh
           sudo DESKTOP=kde ./build_iso_debian.sh
-          mv iso_output/*.iso Solvionyx-OS-v4.3.4-kde.iso
-
+          mv iso_output/*.iso Solvionyx-OS-v4.3.5-kde.iso
       - name: Upload KDE ISO
-        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: Solvionyx-OS-v4.3.4-KDE
-          path: Solvionyx-OS-v4.3.4-kde.iso
+          name: Solvionyx-OS-v4.3.5-KDE
+          path: Solvionyx-OS-v4.3.5-kde.iso
 
   release:
     name: Publish Release
     runs-on: ubuntu-latest
     needs: [build-gnome, build-xfce, build-kde]
-    permissions:
-      contents: write
+    permissions: { contents: write }
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
+      - uses: actions/checkout@v4
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: release/
-          pattern: Solvionyx-OS-v4.3.4-*
-
-      - name: Create checksums
+          pattern: Solvionyx-OS-v4.3.5-*
+      - name: Checksums
         run: |
           cd release
           sha256sum * > SHA256SUMS.txt
-          ls -lh
-
-      - name: Publish GitHub Release
+      - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: Aurora-v4.3.4
-          name: "Solvionyx OS Aurora v4.3.4 — GNOME, XFCE, KDE"
+          tag_name: Aurora-v4.3.5
+          name: "Solvionyx OS Aurora v4.3.5 — GNOME, XFCE, KDE"
           body: |
-            🚀 **Solvionyx OS Aurora v4.3.4 — Official Build**
-            
-            **Included Editions**
-            - 🖥️ Aurora (GNOME)
-            - 💻 Aurora Lite (XFCE)
-            - 🎨 Aurora Studio (KDE)
-            
-            **Changelog Highlights**
-            - Debian 12.6 base
-            - Updated desktop environments
-            - Optimized boot time
-            - Improved ISO build process
-            
-            **SHA256SUMS** included for verification.
+            🚀 **Solvionyx OS Aurora v4.3.5**
+            - GNOME, XFCE, KDE editions
+            - Auto-fetched Debian Live base
+            - Custom rootfs and branding
+            - Checksums included
+            © 2025 Solviony Labs by Solviony Inc. — Aurora Series. All Rights Reserved.
           files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

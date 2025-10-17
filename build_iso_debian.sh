@@ -1,70 +1,147 @@
 #!/usr/bin/env bash
-set -e
-echo "🔧 Building Solvionyx OS (Debian Aurora Edition)..."
+set -euo pipefail
 
-DESKTOP="${DESKTOP:-gnome}"
-BASE_NAME="Solvionyx-OS-v4.3.4"
+# Solvionyx OS — Aurora AutoBuilder (v4.3.5)
+
+echo "🔧 Solvionyx OS — Aurora AutoBuilder (v4.3.5)"
+
+DESKTOP="${DESKTOP:-gnome}"              # gnome | xfce | kde
+BASE_NAME="Solvionyx-OS-v4.3.5"
 WORK_DIR="$(pwd)/solvionyx_build"
 OUT_DIR="$(pwd)/iso_output"
+OWNER="${SUDO_USER:-$USER}"
 
 mkdir -p "$WORK_DIR" "$OUT_DIR"
 
-echo "📦 Installing dependencies..."
-sudo apt update -y
-sudo apt install -y debootstrap squashfs-tools genisoimage xorriso # Always pull the latest stable Debian netinst ISOLATEST_URL=$(curl -s https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/ | grep -oP 'href="debian-[0-9.]+-amd64-netinst.iso"' | head -1 | cut -d'"' -f2)wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/$LATEST_URL" curl rsync -y
+# --- Dependencies ---
+echo "📦 Installing build deps..."
+sudo apt-get update -y
+sudo apt-get install -y --no-install-recommends \
+  curl wget rsync xorriso genisoimage squashfs-tools debootstrap ca-certificates \
+  gdisk dosfstools
 
-BASE_ISO="$WORK_DIR/base.iso"
-if [ ! -f "$BASE_ISO" ]; then
-  echo "📥 Downloading base Debian ISO..."
- HEAD
-# Always pull the latest stable Debian netinst ISO
-LATEST_URL=$(curl -s https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/ | grep -oP 'href="debian-[0-9.]+-amd64-netinst.iso"' | head -1 | cut -d'"' -f2)
-wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/$LATEST_URL"
+# --- Choose flavor for Debian Live base ISO ---
+case "${DESKTOP,,}" in
+  gnome) FLAVOR="gnome" ;;
+  xfce)  FLAVOR="xfce"  ;;
+  kde|plasma) FLAVOR="kde" ;;
+  *)     FLAVOR="gnome" ;;
+endesac 2>/dev/null || true
+# For shells that don't support 'endesac', fall back (POSIX sh style)
+if [ -z "${FLAVOR:-}" ]; then
+  case "${DESKTOP}" in
+    gnome) FLAVOR="gnome" ;;
+    xfce)  FLAVOR="xfce"  ;;
+    kde|plasma) FLAVOR="kde" ;;
+    *)     FLAVOR="gnome" ;;
+  esac
+fi
+echo "🎨 Desktop flavor: ${FLAVOR^^}"
 
-  # Always pull the latest stable Debian netinst ISOLATEST_URL=$(curl -s https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/ | grep -oP 'href="debian-[0-9.]+-amd64-netinst.iso"' | head -1 | cut -d'"' -f2)wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/$LATEST_URL"
- cd16a6a (Add full multi-edition build and automatic release workflow)
+# --- Fetch latest Debian Live ISO URL for the chosen flavor ---
+ISO_DIR="https://cdimage.debian.org/debian-cd/bookworm-live/amd64/iso-hybrid"
+echo "🌐 Resolving latest Debian Live ISO for '$FLAVOR'..."
+LIVE_NAME="$(curl -fsSL "$ISO_DIR/" | grep -oP "debian-live-[0-9.]+-amd64-${FLAVOR}\.iso" | sort -V | tail -1 || true)"
+
+if [ -z "${LIVE_NAME:-}" ]; then
+  echo "❌ Could not detect latest Debian Live ISO for flavor '$FLAVOR' at $ISO_DIR"
+  echo "   Please check your network or the Debian mirrors."
+  exit 2
 fi
 
-echo "📂 Extracting base ISO..."
-MNT="$WORK_DIR/mnt"
-sudo mount -o loop "$BASE_ISO" "$MNT" || true
-rsync -a --exclude=/install "$MNT/" "$WORK_DIR/extracted/"
+BASE_ISO="$WORK_DIR/base-${FLAVOR}.iso"
+LIVE_URL="${ISO_DIR}/${LIVE_NAME}"
+
+if [ -f "$BASE_ISO" ] && [ -s "$BASE_ISO" ]; then
+  echo "⚡ FAST MODE: Re-using cached base ISO: $BASE_ISO"
+else
+  echo "⬇️  Downloading: $LIVE_URL"
+  wget -q -O "$BASE_ISO" "$LIVE_URL"
+fi
+
+# --- Mount and copy the base ISO (to preserve bootloader structure) ---
+MNT="$WORK_DIR/mnt"; ISO_SRC="$WORK_DIR/iso_src"
+mkdir -p "$MNT" "$ISO_SRC"
+if mount | grep -q "$MNT"; then sudo umount "$MNT" || true; fi
+
+echo "📂 Extracting base ISO layout..."
+sudo mount -o loop "$BASE_ISO" "$MNT"
+rsync -aH --delete "$MNT/" "$ISO_SRC/"
 sudo umount "$MNT" || true
 
-echo "⚙️  Bootstrapping Debian system..."
-sudo debootstrap --arch=amd64 bookworm "$WORK_DIR/chroot" http://deb.debian.org/debian/
+# --- Bootstrap a minimal Debian rootfs we will pack into squashfs ---
+CHROOT="$WORK_DIR/chroot"
+if [ -d "$CHROOT" ]; then sudo rm -rf "$CHROOT"; fi
+echo "⚙️  Bootstrapping Debian (bookworm, amd64) rootfs..."
+sudo debootstrap --arch=amd64 bookworm "$CHROOT" http://deb.debian.org/debian/
 
-echo "🎨 Installing $DESKTOP desktop environment..."
-sudo chroot "$WORK_DIR/chroot" /bin/bash -c "
+# --- Basic customization inside chroot ---
+echo "🧩 Customizing rootfs (branding, DE install)..."
+sudo chroot "$CHROOT" /bin/bash -e <<'EOF'
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-if [ '$DESKTOP' = 'gnome' ]; then
-  apt-get install -y task-gnome-desktop gdm3
-elif [ '$DESKTOP' = 'xfce' ]; then
-  apt-get install -y task-xfce-desktop lightdm
-elif [ '$DESKTOP' = 'kde' ]; then
-  apt-get install -y task-kde-desktop sddm
+
+# Choose desktop meta-packages
+case "${DESKTOP:-gnome}" in
+  gnome) apt-get install -y task-gnome-desktop gdm3 ;;
+  xfce)  apt-get install -y task-xfce-desktop lightdm ;;
+  kde|plasma) apt-get install -y task-kde-desktop sddm ;;
+  *)     apt-get install -y task-gnome-desktop gdm3 ;;
+esac
+
+# Common tools
+apt-get install -y sudo plymouth calamares network-manager net-tools locales \
+  bash-completion nano less
+
+# Create default user (solvionyx:solvionyx)
+id -u solvionyx >/dev/null 2>&1 || useradd -m -G sudo -s /bin/bash solvionyx
+echo "solvionyx:solvionyx" | chpasswd
+
+# Branding (MOTD)
+echo "Welcome to Solvionyx OS — Aurora Series (v4.3.5) — ${DESKTOP^^} Edition" > /etc/motd
+echo "© 2025 Solviony Labs by Solviony Inc. — Aurora Series. All Rights Reserved." >> /etc/motd
+
+# Enable NetworkManager at boot (if systemd image is used later)
+systemctl enable NetworkManager || true
+EOF
+
+# --- Pack the customized rootfs into squashfs ---
+echo "📦 Creating live filesystem.squashfs ..."
+SQUASH="$WORK_DIR/filesystem.squashfs"
+sudo mksquashfs "$CHROOT" "$SQUASH" -b 1048576 -comp xz -Xbcj x86 -noappend
+
+# --- Prepare final ISO tree by copying base ISO content and replacing live FS ---
+ISO_TREE="$WORK_DIR/iso"
+rm -rf "$ISO_TREE"
+rsync -aH --delete "$ISO_SRC/" "$ISO_TREE/"
+# Replace the live filesystem from Debian Live with our own
+if [ -d "$ISO_TREE/live" ]; then
+  sudo cp -f "$SQUASH" "$ISO_TREE/live/filesystem.squashfs"
 else
-  apt-get install -y task-gnome-desktop
+  echo "❌ Base ISO does not contain a /live directory. Aborting."
+  exit 3
 fi
-apt-get install -y calamares plymouth
-"
 
-echo "🧩 Adding Solvionyx branding..."
-sudo mkdir -p "$WORK_DIR/chroot/usr/share/solvionyx"
-echo "Welcome to Solvionyx OS (Aurora $DESKTOP Edition)" | sudo tee "$WORK_DIR/chroot/etc/motd"
+# --- Build the final bootable ISO (reuse Debian's boot assets) ---
+OUT_ISO="$OUT_DIR/${BASE_NAME}-${DESKTOP}.iso"
+echo "💿 Mastering ISO → $OUT_ISO"
 
-echo "📦 Creating filesystem.squashfs..."
-sudo mksquashfs "$WORK_DIR/chroot" "$WORK_DIR/filesystem.squashfs" -b 1048576 -comp xz -Xbcj x86 -noappend
+pushd "$ISO_TREE" >/dev/null
 
-echo "💿 Building final ISO..."
-mkdir -p "$WORK_DIR/iso/live"
-cp "$WORK_DIR/filesystem.squashfs" "$WORK_DIR/iso/live/"
-(
-  cd "$WORK_DIR/iso"
-  xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames \
-    -volid "SOLVIONYX_OS" -o "$OUT_DIR/${BASE_NAME}-${DESKTOP}.iso" .
-)
+xorriso -as mkisofs -r -V "SOLVIONYX_AURORA_${DESKTOP^^}" \
+  -o "$OUT_ISO" \
+  -isohybrid-mbr isolinux/isohdpfx.bin \
+  -partition_offset 16 \
+  -J -joliet-long -cache-inodes -l -iso-level 3 -udf \
+  -c isolinux/boot.cat \
+  -b isolinux/isolinux.bin \
+     -no-emul-boot -boot-load-size 4 -boot-info-table \
+  -eltorito-alt-boot \
+  -e boot/grub/efi.img \
+     -no-emul-boot -isohybrid-gpt-basdat \
+  .
 
-echo "✅ ISO build complete!"
-echo "Saved to: $OUT_DIR/${BASE_NAME}-${DESKTOP}.iso"
+popd >/dev/null
+
+chown "$OWNER:$OWNER" "$OUT_ISO" || true
+echo "✅ ISO ready: $OUT_ISO"
