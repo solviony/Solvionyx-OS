@@ -1,48 +1,206 @@
 #!/usr/bin/env bash
+# Solvionyx OS — Aurora (v4.4.0, GNOME)
+# Bootable (UEFI+BIOS), heavily cleaned, and compressed to target < 2 GiB.
+
 set -euo pipefail
+shopt -s nullglob
 export DEBIAN_FRONTEND=noninteractive
 
-echo "==> Solvionyx OS Aurora AutoBuilder (v4.3.9)"
-DESKTOP="${DESKTOP:-gnome}"
-WORK_DIR="$(pwd)/solvionyx_build"
-OUT_DIR="$(pwd)/iso_output"
-mkdir -p "$WORK_DIR" "$OUT_DIR"
+# ---- Versions / names -------------------------------------------------------
+CODENAME="bookworm"
+LABEL="Solvionyx-OS-Aurora"
+EDITION="gnome"
+VERSION="${AURORA_VERSION:-v4.4.0}"
 
-BASE_ISO="$WORK_DIR/base.iso"
-MNT="$WORK_DIR/mnt"
+# ---- Layout -----------------------------------------------------------------
+ROOT="$(pwd)"
+WORK="$ROOT/solvionyx_build"
+CHROOT="$WORK/chroot"
+ISO_DIR="$WORK/iso"
+OUT_DIR="$ROOT/iso_output"
+mkdir -p "$WORK" "$CHROOT" "$ISO_DIR/live" "$OUT_DIR"
 
-echo "==> Installing dependencies..."
+# ---- Dependencies -----------------------------------------------------------
+echo "[*] Installing build deps…"
 sudo apt-get update -y
-sudo apt-get install -y --no-install-recommends wget curl rsync xorriso genisoimage squashfs-tools debootstrap ca-certificates
+sudo apt-get install -y --no-install-recommends \
+  debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
+  grub-pc-bin grub-efi-amd64-bin grub-mkrescue genisoimage \
+  ca-certificates curl rsync
 
-# --- Smart ISO Fetcher ---
-echo "==> Fetching base ISO for ${DESKTOP^^}..."
-if [ ! -f "$BASE_ISO" ]; then
-  echo "   -> Trying Debian Live first..."
-  LIVE_URL=$(curl -fsSL https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/ \
-              | grep -Eo "debian-live-[0-9]+\\.[0-9]+\\.[0-9]+-amd64-${DESKTOP}.iso" | sort -V | tail -n1 || true)
-  if [ -n "$LIVE_URL" ]; then
-    wget -q -O "$BASE_ISO" "https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/$LIVE_URL" && echo "✅ Debian ISO downloaded: $LIVE_URL"
-  else
-    echo "   -> Debian ISO not found, falling back to Ubuntu Noble..."
-    UBUNTU_URL="https://releases.ubuntu.com/24.04.1/ubuntu-24.04.1-desktop-amd64.iso"
-    wget -q -O "$BASE_ISO" "$UBUNTU_URL" && echo "✅ Ubuntu ISO downloaded: $(basename "$UBUNTU_URL")"
-  fi
+# ---- Bootstrap minimal Debian ----------------------------------------------
+if [ ! -d "$CHROOT/bin" ]; then
+  echo "[*] debootstrap ($CODENAME, minimal)…"
+  sudo debootstrap --variant=minbase --include=systemd-sysv,live-boot,live-config \
+    "$CODENAME" "$CHROOT" http://deb.debian.org/debian
 fi
 
-# --- Mount + Copy Base Files ---
-echo "==> Preparing build environment..."
-sudo mkdir -p "$MNT"
-sudo mount -o loop "$BASE_ISO" "$MNT" || { echo "❌ Mount failed"; exit 1; }
+# ---- Mount for chroot -------------------------------------------------------
+mount_in() {
+  sudo mount --bind /dev  "$CHROOT/dev"
+  sudo mount --bind /proc "$CHROOT/proc"
+  sudo mount --bind /sys  "$CHROOT/sys"
+}
+umount_in() {
+  sudo umount -lf "$CHROOT/dev" || true
+  sudo umount -lf "$CHROOT/proc" || true
+  sudo umount -lf "$CHROOT/sys"  || true
+}
 
-rsync -a "$MNT/" "$WORK_DIR/iso-root/"
-sudo umount "$MNT" || true
+# ---- Configure & install GNOME (slim, no recommends) -----------------------
+echo "[*] Configuring apt + installing GNOME core (slim)…"
+sudo tee "$CHROOT/etc/apt/sources.list" >/dev/null <<EOF
+deb http://deb.debian.org/debian $CODENAME main contrib non-free-firmware
+deb http://security.debian.org/debian-security $CODENAME-security main contrib non-free-firmware
+deb http://deb.debian.org/debian $CODENAME-updates main contrib non-free-firmware
+EOF
 
-# --- Generate Placeholder ISO (for CI validation) ---
-echo "==> Generating placeholder ISO (test stage)..."
-xorriso -as mkisofs -iso-level 3 -full-iso9660-filenames \
-  -volid "SOLVIONYX_OS_AURORA_${DESKTOP^^}" \
-  -o "$OUT_DIR/Solvionyx-OS-v4.3.9-${DESKTOP}.iso" "$WORK_DIR/iso-root" || true
+sudo tee "$CHROOT/etc/apt/apt.conf.d/99norecommends" >/dev/null <<'EOF'
+APT::Install-Recommends "0";
+APT::Install-Suggests "0";
+Acquire::Languages "none";
+EOF
 
-echo "✅ ISO build complete!"
-ls -lh "$OUT_DIR"
+mount_in
+sudo chroot "$CHROOT" bash -eux <<'EOS'
+set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+
+# Base kernel + firmware subset (only common)
+apt-get install -y --no-install-recommends \
+  linux-image-amd64 firmware-linux-free \
+  network-manager net-tools iproute2 \
+  xorg xserver-xorg-video-vesa mesa-vulkan-drivers \
+  gdm3 gnome-shell gnome-session gnome-control-center \
+  gnome-terminal nautilus gnome-software \
+  gnome-disk-utility gedit file-roller evince \
+  fonts-dejavu fonts-liberation \
+  sudo less vim nano curl wget ca-certificates \
+  policykit-1 dbus-user-session \
+  # live
+  live-boot live-config \
+  # audio/bluetooth minimal
+  pipewire wireplumber libspa-0.2-bluetooth pulseaudio-utils \
+  # networking UI
+  network-manager-gnome \
+  # browser
+  firefox-esr || true
+
+# Make 'solviony' user (no password; live session autologin)
+id -u solviony >/dev/null 2>&1 || useradd -m -s /bin/bash solviony
+adduser solviony sudo
+
+# Light locales/en_US only
+apt-get install -y locales
+sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+locale-gen
+update-locale LANG=en_US.UTF-8
+
+# Autologin GDM for live user
+mkdir -p /etc/gdm3
+cat >/etc/gdm3/daemon.conf <<EOT
+[daemon]
+AutomaticLogin=solviony
+AutomaticLoginEnable=true
+EOT
+
+# NetworkManager enabled
+systemctl enable NetworkManager || true
+systemctl set-default graphical.target
+
+# Slim down: purge docs/manpages/locale junk
+rm -rf /usr/share/doc/* /usr/share/info/* /usr/share/man/* /usr/share/locale/* \
+       /usr/share/i18n/charmaps/* || true
+mkdir -p /usr/share/locale && cp -a /usr/share/zoneinfo/UTC /etc/localtime || true
+
+# Remove apt caches
+apt-get clean
+rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+# Ensure live boot works cleanly
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat >/etc/systemd/system/getty@tty1.service.d/override.conf <<EOT
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin solviony --noclear %I \$TERM
+EOT
+EOS
+umount_in
+
+# ---- Copy Kernel & Initrd ---------------------------------------------------
+KERNEL_PATH="$(ls -1t "$CHROOT/boot"/vmlinuz-* | head -n1)"
+INITRD_PATH="$(ls -1t "$CHROOT/boot"/initrd.img-* | head -n1)"
+cp -av "$KERNEL_PATH" "$ISO_DIR/vmlinuz"
+cp -av "$INITRD_PATH" "$ISO_DIR/initrd"
+
+# ---- Make SquashFS root -----------------------------------------------------
+echo "[*] Making squashfs (zstd, level 19)…"
+sudo mksquashfs "$CHROOT" "$ISO_DIR/live/filesystem.squashfs" \
+  -comp zstd -Xcompression-level 19 -noappend -wildcards -ef <(cat <<'EOF'
+dev/*
+proc/*
+sys/*
+run/*
+tmp/*
+var/tmp/*
+var/log/journal/*
+EOF
+)
+
+# ---- GRUB: BIOS + UEFI ------------------------------------------------------
+echo "[*] Writing GRUB config…"
+mkdir -p "$ISO_DIR/boot/grub" "$ISO_DIR/EFI/BOOT"
+
+cat >"$ISO_DIR/boot/grub/grub.cfg" <<'EOF'
+set default=0
+set timeout=3
+
+menuentry "Solvionyx OS Aurora (GNOME)" {
+    linux  /vmlinuz boot=live quiet splash toram
+    initrd /initrd
+}
+menuentry "Solvionyx OS (debug)" {
+    linux  /vmlinuz boot=live systemd.log_level=debug
+    initrd /initrd
+}
+EOF
+
+# EFI image
+grub-mkstandalone -O x86_64-efi \
+  -o "$ISO_DIR/EFI/BOOT/BOOTX64.EFI" \
+  "boot/grub/grub.cfg=$ISO_DIR/boot/grub/grub.cfg"
+
+# BIOS core image (eltorito)
+BIOS_IMG="$WORK/core-bios.img"
+grub-mkstandalone -O i386-pc \
+  -o "$BIOS_IMG" \
+  "boot/grub/grub.cfg=$ISO_DIR/boot/grub/grub.cfg"
+
+# GRUB BIOS embedding (eltorito boot image)
+cat /usr/lib/grub/i386-pc/cdboot.img "$BIOS_IMG" > "$WORK/bios.img"
+
+# ---- Build ISO (hybrid, BIOS+UEFI) -----------------------------------------
+ISO_OUT="$OUT_DIR/${LABEL}-${VERSION}-${EDITION}.iso"
+VOLID="${LABEL}-${VERSION}"
+echo "[*] Creating ISO: $ISO_OUT"
+
+xorriso -as mkisofs \
+  -r -V "$VOLID" \
+  -o "$ISO_OUT" \
+  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+  -eltorito-boot boot/grub/bios.img \
+     -no-emul-boot -boot-load-size 4 -boot-info-table \
+  -eltorito-alt-boot \
+     -e EFI/BOOT/BOOTX64.EFI -no-emul-boot \
+  -append_partition 2 0xef "$ISO_DIR/EFI/BOOT/BOOTX64.EFI" \
+  -graft-points \
+    /boot/grub/bios.img="$WORK/bios.img" \
+    /="$ISO_DIR"
+
+echo "[*] ISO done."
+ls -lh "$ISO_OUT"
+
+# Final hint
+echo "✅ Bootable GNOME ISO created:"
+echo "    $ISO_OUT"
