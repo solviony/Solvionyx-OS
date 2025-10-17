@@ -56,21 +56,21 @@ jobs:
         run: |
           cd release || exit 0
           if ls *.iso >/dev/null 2>&1; then sha256sum *.iso > SHA256SUMS.txt; fi
-
-      - - name: Create GitHub Release
-  uses: softprops/action-gh-release@v1
-  continue-on-error: true
-  with:
-    fail_on_unmatched_files: false
-
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        continue-on-error: true
         with:
+          fail_on_unmatched_files: false
           tag_name: Aurora-v4.3.8
-          name: "Solvionyx OS Aurora v4.3.8 — GNOME/XFCE/KDE"
+          name: "Solvionyx OS Aurora v4.3.8 – GNOME/XFCE/KDE"
           body: |
-            - CI runs builder with Bash (fixed 'pipefail' error)
-            - Debian Live auto-detection
-            - Partial release publishes available ISOs
+            ✅ Fixed build pipeline
+            ✅ Smart ISO auto-detection with Debian/Ubuntu fallback
+            ✅ Includes Aurora GNOME, XFCE, and KDE editions
           files: |
+            iso_output/*.iso
+            SHA256SUMS.txt
+
             release/*.iso
             release/SHA256SUMS.txt
         env:
