@@ -1,102 +1,70 @@
 name: Build & Release Solvionyx OS Editions
-
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
 
 jobs:
-  build-gnome:
-    name: Aurora (GNOME)
+  build:
+    name: Aurora (${{ matrix.desktop }})
     runs-on: ubuntu-latest
-    permissions: { contents: write }
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: [ gnome, xfce, kde ]
     steps:
       - uses: actions/checkout@v4
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl rsync
-      - name: Build GNOME
-        run: |
-          chmod +x build_iso_debian.sh
-          sudo DESKTOP=gnome ./build_iso_debian.sh
-          mv iso_output/*.iso Solvionyx-OS-v4.3.5-gnome.iso
-      - name: Upload GNOME ISO
-        uses: actions/upload-artifact@v4
-        with:
-          name: Solvionyx-OS-v4.3.5-GNOME
-          path: Solvionyx-OS-v4.3.5-gnome.iso
 
-  build-xfce:
-    name: Aurora Lite (XFCE)
-    runs-on: ubuntu-latest
-    permissions: { contents: write }
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl rsync
-      - name: Build XFCE
-        run: |
-          chmod +x build_iso_debian.sh
-          sudo DESKTOP=xfce ./build_iso_debian.sh
-          mv iso_output/*.iso Solvionyx-OS-v4.3.5-xfce.iso
-      - name: Upload XFCE ISO
-        uses: actions/upload-artifact@v4
-        with:
-          name: Solvionyx-OS-v4.3.5-XFCE
-          path: Solvionyx-OS-v4.3.5-xfce.iso
+          sudo apt-get install -y qemu-utils xorriso squashfs-tools genisoimage wget curl rsync debootstrap
 
-  build-kde:
-    name: Aurora Studio (KDE)
-    runs-on: ubuntu-latest
-    permissions: { contents: write }
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-utils xorriso squashfs-tools genisoimage debootstrap wget curl rsync
-      - name: Build KDE
+      # ✅ Run builder under *bash* even with sudo; pass DESKTOP via env
+      - name: Build ${{ matrix.desktop }}
+        shell: bash
+        env:
+          DESKTOP: ${{ matrix.desktop }}
         run: |
           chmod +x build_iso_debian.sh
-          sudo DESKTOP=kde ./build_iso_debian.sh
-          mv iso_output/*.iso Solvionyx-OS-v4.3.5-kde.iso
-      - name: Upload KDE ISO
+          sudo bash build_iso_debian.sh
+
+      # Upload whatever builds, even if other editions fail later
+      - name: Upload ISO artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Solvionyx-OS-v4.3.5-KDE
-          path: Solvionyx-OS-v4.3.5-kde.iso
+          name: Solvionyx-OS-v4.3.8-${{ matrix.desktop }}
+          path: iso_output/*.iso
 
   release:
-    name: Publish Release
+    name: Publish Release (Partial OK)
     runs-on: ubuntu-latest
-    needs: [build-gnome, build-xfce, build-kde]
-    permissions: { contents: write }
+    needs: [ build ]
+    if: always()
     steps:
-      - uses: actions/checkout@v4
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: release/
-          pattern: Solvionyx-OS-v4.3.5-*
-      - name: Checksums
+          pattern: Solvionyx-OS-v4.3.8-*
+          merge-multiple: true
+
+      - name: Prepare checksums
         run: |
-          cd release
-          sha256sum * > SHA256SUMS.txt
-      - name: Release
+          cd release || exit 0
+          if ls *.iso >/dev/null 2>&1; then sha256sum *.iso > SHA256SUMS.txt; fi
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: Aurora-v4.3.5
-          name: "Solvionyx OS Aurora v4.3.5 — GNOME, XFCE, KDE"
+          tag_name: Aurora-v4.3.8
+          name: "Solvionyx OS Aurora v4.3.8 — GNOME/XFCE/KDE"
           body: |
-            🚀 **Solvionyx OS Aurora v4.3.5**
-            - GNOME, XFCE, KDE editions
-            - Auto-fetched Debian Live base
-            - Custom rootfs and branding
-            - Checksums included
-            © 2025 Solviony Labs by Solviony Inc. — Aurora Series. All Rights Reserved.
-          files: release/*
+            - CI runs builder with Bash (fixed 'pipefail' error)
+            - Debian Live auto-detection
+            - Partial release publishes available ISOs
+          files: |
+            release/*.iso
+            release/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
