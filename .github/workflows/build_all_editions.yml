@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build deps (auto-detect for Ubuntu/Debian)
+            - name: Install build deps (auto-detect for Ubuntu/Debian)
         run: |
           sudo apt-get update
           if grep -qi ubuntu /etc/os-release; then
@@ -34,13 +34,21 @@ jobs:
             sudo apt-get install -y --no-install-recommends \
               debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
               grub-pc-bin grub-efi-amd64-bin grub2-common grub-common \
-              genisoimage ca-certificates curl rsync zip rclone awscli jq
+              genisoimage ca-certificates curl rsync zip rclone jq
+            echo "Installing AWS CLI v2..."
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip >/dev/null
+            sudo ./aws/install
           else
             echo "Detected Debian runner — using grub-mkrescue"
             sudo apt-get install -y --no-install-recommends \
               debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
               grub-pc-bin grub-efi-amd64-bin grub-mkrescue \
-              genisoimage ca-certificates curl rsync zip rclone awscli jq
+              genisoimage ca-certificates curl rsync zip rclone jq
+            echo "Installing AWS CLI v2..."
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip >/dev/null
+            sudo ./aws/install
           fi
 
       - name: Build ISO
