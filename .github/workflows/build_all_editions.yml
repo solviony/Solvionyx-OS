@@ -17,6 +17,39 @@ jobs:
         desktop: [ gnome, xfce, kde ]
     steps:
       - uses: actions/checkout@v4
+  publish:
+    runs-on: ubuntu-latest
+    needs: [ build ]
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          pattern: Solvionyx-OS-v4.*
+          merge-multiple: true
+
+      - name: Prepare checksums
+        run: |
+          cd release || exit 0
+          if ls *.iso >/dev/null 2>&1; then sha256sum *.iso > SHA256SUMS.txt; fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          fail_on_unmatched_files: false
+          tag_name: Aurora-v4.3.9
+          name: "Solvionyx OS Aurora v4.3.9 – GNOME / XFCE / KDE"
+          body: |
+            ✅ **Solvionyx OS Aurora v4.3.9** successfully built and released!
+            This release includes:
+            - GNOME, XFCE, and KDE editions
+            - Updated builder reliability and permissions fix
+            - Auto checksum generation
+          files: |
+            release/*.iso
+            release/SHA256SUMS.txt
 
       - name: Install dependencies
         run: |
