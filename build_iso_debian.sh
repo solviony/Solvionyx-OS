@@ -1,86 +1,120 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
-# ==========================================================
-#  Solvionyx Aurora GNOME ISO Builder (v4.6.0 - Installer Edition)
-# ==========================================================
+# ==============================
+# Solvionyx OS Aurora ISO Builder
+# ==============================
+# Ubuntu/Debian base auto-builder for GNOME edition.
+# Adds Solvionyx branding, Calamares installer, and Plymouth splash.
+# Tagline: "The engine behind the vision."
+# ==============================
 
-AURORA_VERSION="v4.6.0"
-WORKDIR="$(pwd)/solvionyx_build"
-CHROOT="$WORKDIR/chroot"
-ISO_DIR="$WORKDIR/image"
-CASPER_DIR="$ISO_DIR/casper"
+export LANG=C
+export LC_ALL=C
 
-echo "🧩 Preparing build environment..."
-sudo rm -rf "$WORKDIR"
-mkdir -p "$CHROOT" "$CASPER_DIR"
+ISO_NAME="Solvionyx-Aurora-v4.6.0"
+WORK_DIR="$PWD/solvionyx_build"
+CHROOT="$WORK_DIR/chroot"
+ISO_DIR="$WORK_DIR/image"
+DIST="noble"   # Ubuntu 24.04 LTS base
+ARCH="amd64"
 
-echo "📦 Bootstrapping base system..."
-sudo debootstrap --arch=amd64 noble "$CHROOT" http://archive.ubuntu.com/ubuntu/
+# ==============================
+# Cleanup previous builds
+# ==============================
+echo "🧹 Cleaning previous build..."
+sudo rm -rf "$WORK_DIR"
+mkdir -p "$CHROOT" "$ISO_DIR"
 
-echo "🔗 Mounting system directories..."
-for m in dev run proc sys; do
-  sudo mount --bind "/$m" "$CHROOT/$m"
-done
+# ==============================
+# Bootstrap base system
+# ==============================
+echo "📦 Bootstrapping Ubuntu $DIST system..."
+sudo debootstrap --arch="$ARCH" "$DIST" "$CHROOT" http://archive.ubuntu.com/ubuntu/
 
-echo "🧠 Installing GNOME desktop and Calamares installer..."
-sudo chroot "$CHROOT" bash -c "
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y ubuntu-desktop-minimal gdm3 gnome-shell gnome-terminal nautilus network-manager \
-                     grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-amd64-signed \
-                     casper lupin-support isolinux syslinux-utils plymouth-theme-spinner plymouth-label \
-                     calamares calamares-settings-ubuntu ubiquity ubiquity-frontend-gtk \
-                     os-prober squashfs-tools xorriso
-  apt-get clean
-"
+# ==============================
+# Mount essential filesystems
+# ==============================
+echo "🔗 Mounting /dev, /proc, /sys..."
+sudo mount --bind /dev "$CHROOT/dev"
+sudo mount -t proc proc "$CHROOT/proc"
+sudo mount -t sysfs sys "$CHROOT/sys"
 
+# ==============================
+# Install essential packages inside chroot
+# ==============================
+echo "🧠 Installing core packages..."
+sudo chroot "$CHROOT" apt-get update
+sudo chroot "$CHROOT" apt-get install -y --no-install-recommends \
+  systemd-sysv network-manager sudo bash-completion gdm3 gnome-shell gnome-session gnome-terminal nautilus \
+  gedit gnome-control-center gnome-software \
+  xinit xserver-xorg lightdm plymouth plymouth-x11 \
+  casper squashfs-tools xorriso isolinux syslinux-utils \
+  calamares calamares-settings-debian calamares-settings-ubuntu \
+  git curl wget rsync nano vim ca-certificates locales tzdata
+
+# ==============================
+# Install kernel + initramfs (fix)
+# ==============================
+echo "🧩 Installing Linux kernel and initramfs..."
+sudo chroot "$CHROOT" apt-get install -y --no-install-recommends \
+  linux-generic linux-image-generic linux-headers-generic initramfs-tools \
+  plymouth-theme-ubuntu-logo plymouth-theme-ubuntu-text || {
+    echo "❌ Failed to install kernel or initramfs inside chroot."
+    exit 1
+  }
+
+sudo chroot "$CHROOT" update-initramfs -c -k all
+echo "✅ Kernel and initramfs installed successfully."
+
+# ==============================
+# Add Solvionyx branding
+# ==============================
+echo "🎨 Applying Solvionyx branding..."
+sudo mkdir -p "$CHROOT/usr/share/plymouth/themes/solvionyx"
+cat << 'EOF' | sudo tee "$CHROOT/usr/share/plymouth/themes/solvionyx/solvionyx.plymouth" >/dev/null
+[Plymouth Theme]
+Name=Solvionyx Aurora
+Description=Solvionyx boot splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/solvionyx
+ScriptFile=/usr/share/plymouth/themes/solvionyx/solvionyx.script
+EOF
+
+# Minimal logo placeholder (use actual Solvionyx logo PNG if available)
+sudo mkdir -p "$CHROOT/usr/share/plymouth/themes/solvionyx"
+echo "message_sprite = Sprite(); message_sprite.SetPosition(0.5, 0.5, 0); message_sprite.SetText('Solvionyx OS – The engine behind the vision.');" \
+  | sudo tee "$CHROOT/usr/share/plymouth/themes/solvionyx/solvionyx.script" >/dev/null
+
+sudo chroot "$CHROOT" update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth 100
+sudo chroot "$CHROOT" update-initramfs -u
+
+# ==============================
+# Create live user and autologin
+# ==============================
 echo "👤 Creating live user..."
-sudo chroot "$CHROOT" bash -c "
-  useradd -m solvionyx -s /bin/bash
-  echo 'solvionyx:solvionyx' | chpasswd
-  usermod -aG sudo solvionyx
-  echo 'Solvionyx OS Aurora GNOME $AURORA_VERSION' > /etc/issue
-"
-echo "👤 Adding live session autologin..."
+sudo chroot "$CHROOT" useradd -m -s /bin/bash solvionyx
+echo "solvionyx:live" | sudo chroot "$CHROOT" chpasswd
+sudo chroot "$CHROOT" usermod -aG sudo solvionyx
 
-# Ensure GDM3 configuration directory exists
-sudo mkdir -p "$CHROOT/etc/gdm3" "$CHROOT/etc/gdm"
+# Enable autologin for GNOME
+sudo mkdir -p "$CHROOT/etc/gdm3"
+echo "[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=solvionyx" | sudo tee "$CHROOT/etc/gdm3/custom.conf" >/dev/null
 
-# Autologin for the live user (works on Ubuntu 22.04–24.04)
-if [ -d "$CHROOT/etc/gdm3" ]; then
-  cat <<EOF | sudo tee "$CHROOT/etc/gdm3/custom.conf" >/dev/null
-[daemon]
-AutomaticLoginEnable = true
-AutomaticLogin = liveuser
-EOF
-elif [ -d "$CHROOT/etc/gdm" ]; then
-  cat <<EOF | sudo tee "$CHROOT/etc/gdm/custom.conf" >/dev/null
-[daemon]
-AutomaticLoginEnable = true
-AutomaticLogin = liveuser
-EOF
-else
-  echo "⚠️ Warning: GDM directory not found; skipping autologin setup."
-fi
-
-echo "🎶 Copying kernel and initrd..."
-
-# Locate the latest kernel and initrd dynamically
-KERNEL_PATH=$(find "$CHROOT/boot" -name "vmlinuz-*" | sort | tail -n 1)
-INITRD_PATH=$(find "$CHROOT/boot" -name "initrd.img-*" | sort | tail -n 1)
-
+# ==============================
+# Copy kernel + initrd (cross-distro safe)
+# ==============================
 echo "🎶 Copying kernel and initrd (cross-distro safe)..."
 
-# Define a helper to find the newest matching file
 find_latest() {
   local pattern="$1"
-  local result
-  result=$(find "$CHROOT/boot" -type f -name "$pattern" 2>/dev/null | sort -V | tail -n 1)
-  echo "$result"
+  find "$CHROOT/boot" -type f -name "$pattern" 2>/dev/null | sort -V | tail -n 1
 }
 
-# Try all common patterns used by Ubuntu, Debian, and derivatives
 KERNEL_PATH=$(find_latest "vmlinuz-*")
 [ -z "$KERNEL_PATH" ] && KERNEL_PATH=$(find_latest "kernel-*")
 [ -z "$KERNEL_PATH" ] && KERNEL_PATH=$(find_latest "linux-*")
@@ -89,132 +123,47 @@ INITRD_PATH=$(find_latest "initrd.img-*")
 [ -z "$INITRD_PATH" ] && INITRD_PATH=$(find_latest "initrd-*")
 [ -z "$INITRD_PATH" ] && INITRD_PATH=$(find_latest "initramfs-*")
 
-# Validate and copy
 if [ -n "$KERNEL_PATH" ] && [ -n "$INITRD_PATH" ]; then
   echo "📦 Found kernel: $(basename "$KERNEL_PATH")"
   echo "📦 Found initrd: $(basename "$INITRD_PATH")"
-
   sudo mkdir -p "$ISO_DIR/casper"
   sudo cp "$KERNEL_PATH" "$ISO_DIR/casper/vmlinuz"
   sudo cp "$INITRD_PATH" "$ISO_DIR/casper/initrd"
 else
   echo "❌ Error: Kernel or initrd not found inside chroot!"
-  echo "🔍 Boot directory contents:"
+  echo "⚠️ Boot directory contents:"
   ls -lh "$CHROOT/boot" || true
   echo "⚠️ The builder will exit to prevent creating a broken ISO."
   exit 1
 fi
 
-echo "✅ Kernel and initrd copied successfully."
+# ==============================
+# Create ISO filesystem
+# ==============================
+echo "📦 Creating filesystem.squashfs..."
+sudo mksquashfs "$CHROOT" "$ISO_DIR/casper/filesystem.squashfs" -e boot
 
-echo "🧱 Generating filesystem.squashfs..."
-sudo mksquashfs "$CHROOT" "$CASPER_DIR/filesystem.squashfs" -e boot
+# ==============================
+# Write filesystem manifest
+# ==============================
+sudo chroot "$CHROOT" dpkg-query -W --showformat='${Package} ${Version}\n' > "$ISO_DIR/casper/filesystem.manifest"
 
-echo "📂 Creating GRUB configuration..."
-mkdir -p "$ISO_DIR/boot/grub"
-cat <<EOF | sudo tee "$ISO_DIR/boot/grub/grub.cfg"
-set default=0
-set timeout=5
+# ==============================
+# Create bootable ISO
+# ==============================
+echo "🚀 Building bootable ISO..."
+sudo grub-mkrescue -o "$WORK_DIR/$ISO_NAME.iso" "$ISO_DIR"
 
-menuentry "Try Solvionyx OS Aurora (Live)" {
-    linux /casper/vmlinuz boot=casper quiet splash ---
-    initrd /casper/initrd
-}
+# ==============================
+# Compress & checksum
+# ==============================
+echo "🪶 Compressing ISO..."
+zstd -19 "$WORK_DIR/$ISO_NAME.iso" -o "$WORK_DIR/${ISO_NAME}.zst"
 
-menuentry "Install Solvionyx OS Aurora" {
-    linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
-    initrd /casper/initrd
-}
-EOF
+echo "🔐 Generating checksums..."
+cd "$WORK_DIR"
+sha256sum "$ISO_NAME.iso" > SHA256SUMS.txt
+sha256sum "${ISO_NAME}.zst" >> SHA256SUMS.txt
 
-echo "🧹 Unmounting chroot..."
-for m in dev run proc sys; do
-  sudo umount -lf "$CHROOT/$m" || true
-done
-
-echo "💿 Building final bootable ISO..."
-sudo grub-mkrescue -o "$WORKDIR/Solvionyx-Aurora-$AURORA_VERSION.iso" "$ISO_DIR" --compress=xz
-
-echo "✅ Build Complete: Solvionyx-Aurora-$AURORA_VERSION.iso"
-ls -lh "$WORKDIR"/Solvionyx-Aurora-*.iso
-
-### SOLVIONYX BRANDING START
-echo "🎨 Integrating Solvionyx branding & system info..."
-sudo apt-get update -y
-sudo apt-get install -y --no-install-recommends imagemagick librsvg2-bin gir1.2-webkit2-4.0 || true
-sudo chroot "$CHROOT" apt-get update -y
-sudo chroot "$CHROOT" apt-get install -y --no-install-recommends inxi lshw || true
-
-# Calamares theme
-sudo mkdir -p "$CHROOT/usr/share/calamares/branding/solvionyx"
-sudo rsync -a branding/calamares/branding/solvionyx/ "$CHROOT/usr/share/calamares/branding/solvionyx/"
-[ -d "$CHROOT/etc/calamares" ] && { sudo rm -f "$CHROOT/etc/calamares/branding"; sudo ln -s /usr/share/calamares/branding/solvionyx "$CHROOT/etc/calamares/branding"; }
-
-# Render assets (logo, backgrounds)
-rsvg-convert branding/calamares/branding/solvionyx/images/logo.svg -o /tmp/logo-dark.png -w 512 -h 512
-convert -size 1920x1080 gradient:"#0B0C10-#0E1113" \( -size 1920x1080 radial-gradient:#003b2e-#0B0C10 -evaluate multiply 0.6 \) -compose screen -composite /tmp/aurora-bg.png
-
-# Plymouth
-sudo rsync -a branding/plymouth/solvionyx-aurora/ "$CHROOT/usr/share/plymouth/themes/solvionyx-aurora/"
-sudo cp /tmp/logo-dark.png "$CHROOT/usr/share/plymouth/themes/solvionyx-aurora/logo.png"
-echo -e "[Daemon]\nTheme=solvionyx-aurora" | sudo tee "$CHROOT/etc/plymouth/plymouthd.conf" >/dev/null
-sudo chroot "$CHROOT" update-initramfs -u || true
-
-# GRUB background + menu
-mkdir -p "$ISO_DIR/boot/grub"
-sudo cp /tmp/aurora-bg.png "$ISO_DIR/boot/grub/background.png"
-cat > "$ISO_DIR/boot/grub/grub.cfg" <<'GRUBCFG'
-set default=0
-set timeout=5
-if [ -e /boot/grub/background.png ]; then
-  insmod png
-  background_image /boot/grub/background.png
-fi
-menuentry "Try Solvionyx OS Aurora (Live)" {
-    linux /casper/vmlinuz boot=casper quiet splash ---
-    initrd /casper/initrd
-}
-menuentry "Install Solvionyx OS Aurora" {
-    linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
-    initrd /casper/initrd
-}
-GRUBCFG
-
-# GNOME wallpaper default
-sudo mkdir -p "$CHROOT/usr/share/backgrounds/solvionyx"
-sudo cp /tmp/aurora-bg.png "$CHROOT/usr/share/backgrounds/solvionyx/aurora-default.png"
-sudo mkdir -p "$CHROOT/usr/share/glib-2.0/schemas"
-cat <<'GSC' | sudo tee "$CHROOT/usr/share/glib-2.0/schemas/99-solvionyx-defaults.gschema.override" >/dev/null
-[org.gnome.desktop.background]
-picture-uri='file:///usr/share/backgrounds/solvionyx/aurora-default.png'
-picture-options='zoom'
-primary-color='#0B0C10'
-secondary-color='#0B0C10'
-GSC
-sudo chroot "$CHROOT" glib-compile-schemas /usr/share/glib-2.0/schemas || true
-
-# About app + System Info
-sudo mkdir -p "$CHROOT/usr/share/solvionyx"
-sudo cp branding/solvionyx/brand.json "$CHROOT/usr/share/solvionyx/"
-sudo cp branding/solvionyx/info.html "$CHROOT/usr/share/solvionyx/"
-sudo cp branding/solvionyx/about-solvionyx.py "$CHROOT/usr/share/solvionyx/"
-sudo chmod +x "$CHROOT/usr/share/solvionyx/about-solvionyx.py"
-sudo cp branding/solvionyx/about-solvionyx.desktop "$CHROOT/usr/share/applications/"
-
-# GNOME Quick Settings extension
-sudo mkdir -p "$CHROOT/usr/share/gnome-shell/extensions/solvionyx-about@solvionyx"
-sudo rsync -a branding/gnome-extension/solvionyx-about@solvionyx/ "$CHROOT/usr/share/gnome-shell/extensions/solvionyx-about@solvionyx/"
-sudo mkdir -p "$CHROOT/etc/dconf/db/local.d/"
-cat <<'DCONF' | sudo tee "$CHROOT/etc/dconf/db/local.d/10-solvionyx-extensions" >/dev/null
-[org/gnome/shell]
-enabled-extensions=['solvionyx-about@solvionyx']
-DCONF
-sudo chroot "$CHROOT" dconf update || true
-
-# GNOME About integration
-sudo cp branding/solvionyx/os-release "$CHROOT/etc/os-release"
-sudo cp branding/solvionyx/solvionyx-release "$CHROOT/etc/solvionyx-release"
-echo "Welcome to Solvionyx OS Aurora (The engine behind the vision.)" | sudo tee "$CHROOT/etc/issue" >/dev/null
-echo "Solvionyx OS — Aurora GNOME Edition" | sudo tee "$CHROOT/etc/motd" >/dev/null
-
-### SOLVIONYX BRANDING END
+echo "✅ Solvionyx Aurora ISO build completed successfully!"
+ls -lh "$WORK_DIR"
