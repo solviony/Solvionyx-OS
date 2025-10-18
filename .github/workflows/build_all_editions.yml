@@ -1,7 +1,7 @@
 name: Build & Release Solvionyx OS Aurora (GNOME)
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger
   push:
     branches: [ main ]
 
@@ -9,95 +9,79 @@ permissions:
   contents: write
 
 env:
-  AURORA_VERSION: v4.4.3
   GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-
-defaults:
-  run:
-    shell: bash
+  AURORA_VERSION: v4.5.3  # auto-updated each release
 
 jobs:
   gnome:
     name: Aurora (GNOME)
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: 🧩 Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install build deps (auto-detect for Ubuntu/Debian)
+      - name: 🛠 Install build dependencies
         run: |
           sudo apt-get update
-          if grep -qi ubuntu /etc/os-release; then
-            echo "Detected Ubuntu runner — using grub2-common and grub-common"
-            sudo apt-get install -y --no-install-recommends \
-              debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
-              grub-pc-bin grub-efi-amd64-bin grub2-common grub-common \
-              genisoimage ca-certificates curl rsync zip rclone jq unzip zstd
-            echo "Installing AWS CLI v2..."
-            if ! command -v aws &>/dev/null; then
-              curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-              unzip -q awscliv2.zip
-              sudo ./aws/install
-            else
-              echo "AWS CLI v2 already installed — skipping reinstall."
-            fi
-          else
-            echo "Detected Debian runner — using grub-mkrescue"
-            sudo apt-get install -y --no-install-recommends \
-              debootstrap gdisk mtools dosfstools xorriso squashfs-tools \
-              grub-pc-bin grub-efi-amd64-bin grub-mkrescue \
-              genisoimage ca-certificates curl rsync zip rclone jq unzip zstd
-            echo "Installing AWS CLI v2..."
-            if ! command -v aws &>/dev/null; then
-              curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-              unzip -q awscliv2.zip
-              sudo ./aws/install
-            else
-              echo "AWS CLI v2 already installed — skipping reinstall."
-            fi
-          fi
+          sudo apt-get install -y \
+            qemu-utils xorriso squashfs-tools genisoimage \
+            debootstrap isolinux syslinux-utils grub2-common \
+            rsync zstd
 
-      - name: Build Solvionyx OS ISO
+      - name: 🏗 Run Solvionyx Aurora ISO Builder
         run: |
           chmod +x build_iso_debian.sh
           sudo DESKTOP=gnome ./build_iso_debian.sh
 
-      - name: Compress ISO to under 2 GB (zstd)
+      - name: 📦 Compress ISO (if exists)
         run: |
           mkdir -p release
-          ISO=$(ls iso_output/*.iso | head -n 1)
-          if [ -f "$ISO" ]; then
-            echo "Compressing $ISO..."
-            zstd -T0 -19 "$ISO" -o "release/$(basename "$ISO" .iso).zst"
-            du -h "release/$(basename "$ISO" .iso).zst"
+          if ls iso_output/*.iso >/dev/null 2>&1; then
+            for iso in iso_output/*.iso; do
+              name=$(basename "$iso")
+              zstd -f -T0 "$iso"
+              mv "${iso}.zst" release/
+            done
           else
-            echo "❌ No ISO found to compress."
-            exit 1
+            echo "⚠️ No ISO found in iso_output/"
           fi
 
-      - name: Generate checksums
+      - name: 🧮 Generate checksums
         run: |
-          cd release || exit 1
-          sha256sum *.zst > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          cd ..
 
-      - name: Upload compressed ISO artifact
+      - name: 🚀 Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Solvionyx-Aurora-v4.4.3
+          name: Solvionyx-Aurora-${{ env.AURORA_VERSION }}
           path: release/
 
-      - name: Publish GitHub Release
+  publish:
+    name: Publish GitHub Release
+    needs: gnome
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Download built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Solvionyx-Aurora-${{ env.AURORA_VERSION }}
+          path: release/
+
+      - name: 🧮 Recalculate SHA256SUMS
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          cd ..
+
+      - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: release/*.zst
-          tag_name: Aurora-v4.4.3
-          name: Solvionyx OS Aurora v4.4.3 (GNOME)
-          body: |
-            ✅ **Solvionyx OS Aurora (GNOME)** v4.4.3  
-            - Auto-built and compressed under 2 GB  
-            - Bootable hybrid ISO with GNOME desktop  
-            - SHA-256 checksums included  
-            - Built via GitHub Actions AutoBuilder
+          tag_name: Aurora-${{ env.AURORA_VERSION }}
+          name: Solvionyx OS Aurora ${{ env.AURORA_VERSION }}
+          files: release/*
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
