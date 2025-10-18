@@ -70,6 +70,26 @@ echo "🎶 Copying kernel and initrd..."
 KERNEL_PATH=$(find "$CHROOT/boot" -name "vmlinuz-*" | sort | tail -n 1)
 INITRD_PATH=$(find "$CHROOT/boot" -name "initrd.img-*" | sort | tail -n 1)
 
+echo "🎶 Copying kernel and initrd (cross-distro safe)..."
+
+# Define a helper to find the newest matching file
+find_latest() {
+  local pattern="$1"
+  local result
+  result=$(find "$CHROOT/boot" -type f -name "$pattern" 2>/dev/null | sort -V | tail -n 1)
+  echo "$result"
+}
+
+# Try all common patterns used by Ubuntu, Debian, and derivatives
+KERNEL_PATH=$(find_latest "vmlinuz-*")
+[ -z "$KERNEL_PATH" ] && KERNEL_PATH=$(find_latest "kernel-*")
+[ -z "$KERNEL_PATH" ] && KERNEL_PATH=$(find_latest "linux-*")
+
+INITRD_PATH=$(find_latest "initrd.img-*")
+[ -z "$INITRD_PATH" ] && INITRD_PATH=$(find_latest "initrd-*")
+[ -z "$INITRD_PATH" ] && INITRD_PATH=$(find_latest "initramfs-*")
+
+# Validate and copy
 if [ -n "$KERNEL_PATH" ] && [ -n "$INITRD_PATH" ]; then
   echo "📦 Found kernel: $(basename "$KERNEL_PATH")"
   echo "📦 Found initrd: $(basename "$INITRD_PATH")"
@@ -78,11 +98,14 @@ if [ -n "$KERNEL_PATH" ] && [ -n "$INITRD_PATH" ]; then
   sudo cp "$KERNEL_PATH" "$ISO_DIR/casper/vmlinuz"
   sudo cp "$INITRD_PATH" "$ISO_DIR/casper/initrd"
 else
-  echo "❌ Error: Could not locate kernel or initrd inside chroot!"
-  echo "Debug info: CHROOT=$CHROOT contents:"
-  ls -l "$CHROOT/boot" || true
+  echo "❌ Error: Kernel or initrd not found inside chroot!"
+  echo "🔍 Boot directory contents:"
+  ls -lh "$CHROOT/boot" || true
+  echo "⚠️ The builder will exit to prevent creating a broken ISO."
   exit 1
 fi
+
+echo "✅ Kernel and initrd copied successfully."
 
 echo "🧱 Generating filesystem.squashfs..."
 sudo mksquashfs "$CHROOT" "$CASPER_DIR/filesystem.squashfs" -e boot
