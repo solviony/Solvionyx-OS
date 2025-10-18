@@ -154,8 +154,9 @@ sudo grub-mkrescue -o "$BUILD_DIR/$ISO_NAME" "$ISO_DIR"
 # ==============================
 # Compress and finalize
 # ==============================
-echo "📦 Compressing ISO..."
-xz -T0 -z "$BUILD_DIR/$ISO_NAME"
+echo "🗜️ Compressing ISO..."
+sudo chmod -R a+rw "$BUILD_DIR"
+xz --no-sparse --no-preserve-owner -T0 -z "$BUILD_DIR/Solvionyx-Aurora-${VERSION}.iso" || true
 
 echo "✅ Solvionyx Aurora ISO build completed successfully!"
 echo "Output: $BUILD_DIR/$ISO_NAME.xz"
