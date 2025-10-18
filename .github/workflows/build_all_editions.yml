@@ -1,7 +1,7 @@
 name: Build & Release Solvionyx OS Aurora (GNOME)
 
 on:
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
   push:
     branches: [ main ]
 
@@ -9,79 +9,90 @@ permissions:
   contents: write
 
 env:
+  AURORA_VERSION: v4.5.6
   GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-  AURORA_VERSION: v4.5.3  # auto-updated each release
 
 jobs:
   gnome:
     name: Aurora (GNOME)
     runs-on: ubuntu-latest
+
     steps:
       - name: 🧩 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🛠 Install build dependencies
+      - name: 🧰 Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            qemu-utils xorriso squashfs-tools genisoimage \
-            debootstrap isolinux syslinux-utils grub2-common \
-            rsync zstd
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-ia32-bin \
+            xorriso squashfs-tools debootstrap dosfstools gdisk genisoimage rsync curl wget \
+            mtools isolinux syslinux syslinux-utils efibootmgr dosfstools \
+            apt-utils ca-certificates dialog locales systemd-sysv xz-utils
 
-      - name: 🏗 Run Solvionyx Aurora ISO Builder
+      - name: 🧠 Run Solvionyx Aurora ISO Builder
         run: |
           chmod +x build_iso_debian.sh
-          sudo DESKTOP=gnome ./build_iso_debian.sh
+          sudo ./build_iso_debian.sh
 
-      - name: 📦 Compress ISO (if exists)
+      - name: 🗜️ Compress ISO (if not already compressed)
         run: |
-          mkdir -p release
-          if ls iso_output/*.iso >/dev/null 2>&1; then
-            for iso in iso_output/*.iso; do
-              name=$(basename "$iso")
-              zstd -f -T0 "$iso"
-              mv "${iso}.zst" release/
-            done
-          else
-            echo "⚠️ No ISO found in iso_output/"
+          cd iso_output
+          if [ ! -f *.xz ]; then
+            echo "Compressing ISO..."
+            xz -T0 -9 *.iso
           fi
 
-      - name: 🧮 Generate checksums
+      - name: 🔒 Generate checksums
         run: |
-          cd release
-          sha256sum * > SHA256SUMS.txt
-          cd ..
+          cd iso_output
+          sha256sum *.xz > SHA256SUMS.txt
 
-      - name: 🚀 Upload build artifacts
+      - name: 📦 Upload compressed ISO artifact
         uses: actions/upload-artifact@v4
         with:
           name: Solvionyx-Aurora-${{ env.AURORA_VERSION }}
-          path: release/
+          path: |
+            iso_output/*.xz
+            iso_output/*.sha256
+            iso_output/SHA256SUMS.txt
 
   publish:
-    name: Publish GitHub Release
-    needs: gnome
+    name: 🚀 Publish GitHub Release
+    needs: [ gnome ]
     runs-on: ubuntu-latest
+
     steps:
-      - name: 📥 Download built artifacts
+      - name: 🧩 Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: Solvionyx-Aurora-${{ env.AURORA_VERSION }}
-          path: release/
+          path: release
 
-      - name: 🧮 Recalculate SHA256SUMS
+      - name: 🔒 Prepare checksums
         run: |
           cd release
-          sha256sum * > SHA256SUMS.txt
-          cd ..
+          if [ -f *.xz ]; then
+            sha256sum *.xz > SHA256SUMS.txt
+          fi
 
       - name: 🚀 Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: Aurora-${{ env.AURORA_VERSION }}
-          name: Solvionyx OS Aurora ${{ env.AURORA_VERSION }}
-          files: release/*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          name: Solvionyx OS Aurora GNOME ${{ env.AURORA_VERSION }}
+          body: |
+            ### 🌌 Solvionyx OS Aurora GNOME ${{ env.AURORA_VERSION }}
+            - Built automatically using Solvionyx AutoBuilder
+            - Optimized GNOME desktop
+            - Hybrid ISO (UEFI + BIOS)
+            - XZ compression and SHA256 integrity verification
+
+            🧠 **Checksum File:** `SHA256SUMS.txt`
+            💿 **Edition:** GNOME
+
+            ---
+            🔗 **Website:** [solviony.com/page/os](https://solviony.com/page/os)
+          files: |
+            release/*.xz
+            release/*.sha256
+            release/SHA256SUMS.txt
