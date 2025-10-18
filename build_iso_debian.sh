@@ -64,11 +64,25 @@ else
   echo "⚠️ Warning: GDM directory not found; skipping autologin setup."
 fi
 
-echo "🧬 Copying kernel and initrd..."
-KERNEL_PATH=$(find "$CHROOT/boot" -type f -name "vmlinuz-*" | head -n1)
-INITRD_PATH=$(find "$CHROOT/boot" -type f -name "initrd.img-*" | head -n1)
-sudo cp "$KERNEL_PATH" "$CASPER_DIR/vmlinuz"
-sudo cp "$INITRD_PATH" "$CASPER_DIR/initrd"
+echo "🎶 Copying kernel and initrd..."
+
+# Locate the latest kernel and initrd dynamically
+KERNEL_PATH=$(find "$CHROOT/boot" -name "vmlinuz-*" | sort | tail -n 1)
+INITRD_PATH=$(find "$CHROOT/boot" -name "initrd.img-*" | sort | tail -n 1)
+
+if [ -n "$KERNEL_PATH" ] && [ -n "$INITRD_PATH" ]; then
+  echo "📦 Found kernel: $(basename "$KERNEL_PATH")"
+  echo "📦 Found initrd: $(basename "$INITRD_PATH")"
+
+  sudo mkdir -p "$ISO_DIR/casper"
+  sudo cp "$KERNEL_PATH" "$ISO_DIR/casper/vmlinuz"
+  sudo cp "$INITRD_PATH" "$ISO_DIR/casper/initrd"
+else
+  echo "❌ Error: Could not locate kernel or initrd inside chroot!"
+  echo "Debug info: CHROOT=$CHROOT contents:"
+  ls -l "$CHROOT/boot" || true
+  exit 1
+fi
 
 echo "🧱 Generating filesystem.squashfs..."
 sudo mksquashfs "$CHROOT" "$CASPER_DIR/filesystem.squashfs" -e boot
