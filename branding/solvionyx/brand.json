@@ -1,0 +1,11 @@
+{
+  "name": "Solvionyx OS",
+  "edition": "Aurora GNOME",
+  "version": "v4.6.1",
+  "codename": "Aurora",
+  "tagline": "The engine behind the vision.",
+  "maintainer": "Solviony Labs by Solviony Inc.",
+  "website": "https://solviony.com/page/os",
+  "license": "MIT",
+  "built": "2025-10-18"
+}

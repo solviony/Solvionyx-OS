@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=About Solvionyx OS
+Comment=Learn more about Solvionyx OS Aurora
+Exec=python3 /usr/share/solvionyx/about-solvionyx.py
+Icon=/usr/share/plymouth/themes/solvionyx-aurora/logo.png
+Terminal=false
+Categories=System;

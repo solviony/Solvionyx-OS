@@ -1,0 +1,10 @@
+NAME="Solvionyx OS"
+VERSION="4.6.1 (Aurora)"
+ID=solvionyx
+ID_LIKE=debian
+PRETTY_NAME="Solvionyx OS Aurora"
+VERSION_ID=4.6.1
+HOME_URL="https://solviony.com/page/os"
+SUPPORT_URL="https://solviony.com/page/os"
+BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
+LOGO=/usr/share/plymouth/themes/solvionyx-aurora/logo.png

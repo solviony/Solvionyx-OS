@@ -1,0 +1,6 @@
+QWidget { background:#0B0C10; color:#E0E0E0; font-family:"Inter","Ubuntu",sans-serif; }
+QPushButton { background:linear-gradient(90deg,#4FE0B0,#66FFCC); color:#0B0C10; border:0; border-radius:8px; padding:8px 18px; font-weight:600; }
+QPushButton:hover { filter:brightness(1.1); }
+QProgressBar { background:#141414; border:1px solid #2A2A2A; border-radius:6px; color:#0B0C10; }
+QProgressBar::chunk { background:#4FE0B0; }
+QLabel#welcomeText { color:#4FE0B0; font-size:20pt; font-weight:700; }
