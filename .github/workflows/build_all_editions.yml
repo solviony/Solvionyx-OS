@@ -4,12 +4,14 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+  schedule:
+    - cron: "0 3 * * *"  # nightly build
 
 permissions:
   contents: write
 
 env:
-  AURORA_VERSION: v4.5.6
+  AURORA_VERSION: v4.6.0
   GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
 jobs:
@@ -18,83 +20,72 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧩 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🧰 Install dependencies
+      - name: Install dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-ia32-bin \
-            xorriso squashfs-tools debootstrap dosfstools gdisk genisoimage rsync curl wget \
-            mtools isolinux syslinux syslinux-utils efibootmgr dosfstools \
-            apt-utils ca-certificates dialog locales systemd-sysv xz-utils
+          sudo apt-get update
+          sudo apt-get install -y \
+            debootstrap squashfs-tools xorriso grub-pc-bin grub-efi-amd64-bin \
+            mtools isolinux syslinux-utils xz-utils git curl wget rsync
 
-      - name: 🧠 Run Solvionyx Aurora ISO Builder
+      - name: Run Solvionyx Aurora ISO Builder
         run: |
           chmod +x build_iso_debian.sh
-          sudo ./build_iso_debian.sh
+          ./build_iso_debian.sh
 
+      # 🔧 FIXED PATH: Properly locate and compress ISO
       - name: Compress ISO (if not already compressed)
         run: |
-    cd solvionyx_build || exit 1
-    if ls *.iso >/dev/null 2>&1; then
-      echo "Compressing Solvionyx ISO..."
-      xz -T0 -z *.iso
-    else
-      echo "⚠️ No uncompressed ISO found, skipping compression."
-    fi
+          cd solvionyx_build || exit 1
+          if ls *.iso >/dev/null 2>&1; then
+            echo "🗜️ Compressing Solvionyx ISO..."
+            xz -T0 -z *.iso
+          else
+            echo "⚠️ No uncompressed ISO found, skipping compression."
+          fi
 
-      - name: 🔒 Generate checksums
+      # ✅ Generate checksum file
+      - name: Generate checksums
         run: |
-          cd iso_output
+          cd solvionyx_build || exit 1
+          echo "📦 Generating SHA256SUMS.txt..."
+          sudo chmod -R a+rw .
           sha256sum *.xz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-      - name: 📦 Upload compressed ISO artifact
+      # ✅ Upload build artifact
+      - name: Upload compressed ISO artifact
         uses: actions/upload-artifact@v4
         with:
           name: Solvionyx-Aurora-${{ env.AURORA_VERSION }}
-          path: |
-            iso_output/*.xz
-            iso_output/*.sha256
-            iso_output/SHA256SUMS.txt
+          path: solvionyx_build/*.xz
 
-  publish:
-    name: 🚀 Publish GitHub Release
-    needs: [ gnome ]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: 🧩 Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release
-
-      - name: 🔒 Prepare checksums
-        run: |
-          cd release
-          if [ -f *.xz ]; then
-            sha256sum *.xz > SHA256SUMS.txt
-          fi
-
-      - name: 🚀 Create GitHub Release
+      # ✅ Publish GitHub Release automatically
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: Aurora-${{ env.AURORA_VERSION }}
-          name: Solvionyx OS Aurora GNOME ${{ env.AURORA_VERSION }}
+          name: "Solvionyx OS Aurora ${{ env.AURORA_VERSION }}"
           body: |
-            ### 🌌 Solvionyx OS Aurora GNOME ${{ env.AURORA_VERSION }}
-            - Built automatically using Solvionyx AutoBuilder
-            - Optimized GNOME desktop
-            - Hybrid ISO (UEFI + BIOS)
-            - XZ compression and SHA256 integrity verification
+            🌌 **Solvionyx OS Aurora (GNOME) — Official Build**
+            Version: **${{ env.AURORA_VERSION }}**
 
-            🧠 **Checksum File:** `SHA256SUMS.txt`
-            💿 **Edition:** GNOME
+            _“The engine behind the vision.”_
 
-            ---
-            🔗 **Website:** [solviony.com/page/os](https://solviony.com/page/os)
+            ### Included:
+            - GNOME Desktop Environment
+            - Calamares Installer (Solvionyx Branding)
+            - Live User: `solvionyx` / password: `solvionyx`
+
+            ### Checksums:
+            ```
+            $(cat solvionyx_build/SHA256SUMS.txt)
+            ```
+
           files: |
-            release/*.xz
-            release/*.sha256
-            release/SHA256SUMS.txt
+            solvionyx_build/*.xz
+            solvionyx_build/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
