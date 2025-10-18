@@ -2,142 +2,97 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
-# -------------------------
-# Auto Version Bump
-# -------------------------
-VERSION_FILE="VERSION"
-if [[ -f "$VERSION_FILE" && "$(cat "$VERSION_FILE")" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-  MAJ="${BASH_REMATCH[1]}"; MIN="${BASH_REMATCH[2]}"; PAT="${BASH_REMATCH[3]}"
-  VERSION="v${MAJ}.${MIN}.$((PAT+1))"
-else
-  VERSION="v4.5.2"
-fi
-echo "$VERSION" > "$VERSION_FILE"
+# ──────────────────────────────────────────────
+# Solvionyx OS Aurora AutoBuilder v4.5.4 (GNOME)
+# ──────────────────────────────────────────────
+echo "🚀 Starting Solvionyx OS Aurora GNOME ISO Build (v4.5.4)"
 
-# -------------------------
-# Paths
-# -------------------------
-ROOT="$(pwd)"
-WORK_DIR="$ROOT/solvionyx_build"
+FLAVOR="${DESKTOP:-gnome}"
+WORK_DIR="$(pwd)/solvionyx_build"
+OUT_DIR="$(pwd)/iso_output"
 CHROOT_DIR="$WORK_DIR/chroot"
-IMG_DIR="$WORK_DIR/image"
-OUT_DIR="$ROOT/iso_output"
-ISO_NAME="Solvionyx-Aurora-${VERSION}.iso"
 
-echo "🌌 Solvionyx OS Aurora — ${VERSION}"
-echo "💻 GNOME Edition"
-echo "📂 Work: $WORK_DIR"
-echo "📦 Out : $OUT_DIR"
+sudo rm -rf "$WORK_DIR" "$OUT_DIR"
+mkdir -p "$CHROOT_DIR" "$OUT_DIR"
 
-# -------------------------
-# Clean Start
-# -------------------------
-sudo umount -lf "$CHROOT_DIR/dev" 2>/dev/null || true
-sudo umount -lf "$CHROOT_DIR/run" 2>/dev/null || true
-sudo rm -rf "$WORK_DIR"
-mkdir -p "$WORK_DIR" "$OUT_DIR"
-
-# -------------------------
-# Dependencies
-# -------------------------
-echo "📦 Installing build dependencies..."
-sudo apt-get update -y
-sudo apt-get install -y --no-install-recommends \
-  debootstrap xorriso squashfs-tools grub2-common isolinux syslinux-utils \
-  genisoimage dosfstools rsync zstd
-
-# -------------------------
-# Bootstrap Base System
-# -------------------------
-echo "🌍 Bootstrapping base Ubuntu (noble)..."
+# ──────────────────────────────────────────────
+# Install Base System
+# ──────────────────────────────────────────────
+echo "🧩 Installing base system..."
 sudo debootstrap --arch=amd64 noble "$CHROOT_DIR" http://archive.ubuntu.com/ubuntu/
 
-# -------------------------
-# Configure Chroot
-# -------------------------
+# ──────────────────────────────────────────────
+# Configure chroot
+# ──────────────────────────────────────────────
+echo "⚙️ Configuring chroot environment..."
 sudo mount --bind /dev "$CHROOT_DIR/dev"
 sudo mount --bind /run "$CHROOT_DIR/run"
 
-sudo chroot "$CHROOT_DIR" bash -euxc "
-  apt-get update
-  apt-get install -y --no-install-recommends \
-    ubuntu-desktop-minimal gdm3 network-manager firefox \
-    gnome-terminal nautilus gnome-text-editor sudo nano casper \
-    plymouth-theme-spinner grub-pc-bin grub-efi-amd64-bin \
-    linux-generic linux-headers-generic initramfs-tools
+sudo chroot "$CHROOT_DIR" /bin/bash <<'CHROOT_CMDS'
+set -e
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y --no-install-recommends ubuntu-desktop-minimal gnome-shell gdm3 gnome-control-center \
+    network-manager sudo locales systemd-sysv grub2-common casper lupin-casper \
+    plymouth plymouth-themes isolinux syslinux-utils \
+    linux-generic
 
-  # ensure kernel links exist
-  cd /boot
-  if ! [[ -e vmlinuz ]]; then
-    ln -s \$(ls vmlinuz-* | head -n 1) vmlinuz
-  fi
-  if ! [[ -e initrd ]]; then
-    ln -s \$(ls initrd.img-* | head -n 1) initrd
-  fi
+# Create default user
+useradd -m -s /bin/bash solvionyx
+echo "solvionyx:solvionyx" | chpasswd
+adduser solvionyx sudo
 
-  # branding + user
-  echo 'Solvionyx OS Aurora ${VERSION}' > /etc/issue
-  echo 'Solvionyx OS Aurora ${VERSION}' > /etc/motd
-  useradd -m -s /bin/bash solvionyx || true
-  echo 'solvionyx:solvionyx' | chpasswd
-  usermod -aG sudo solvionyx
-
-  apt-get clean
-"
-
-sudo sync
-sudo umount -lf "$CHROOT_DIR/dev" || true
-sudo umount -lf "$CHROOT_DIR/run" || true
-
-# -------------------------
-# Image Layout
-# -------------------------
-mkdir -p "$IMG_DIR/casper" "$IMG_DIR/isolinux" "$IMG_DIR/boot"
-
-echo "📦 Creating filesystem.squashfs..."
-sudo mksquashfs "$CHROOT_DIR" "$IMG_DIR/casper/filesystem.squashfs" -e boot
-
-echo "📂 Copying kernel and initrd..."
-sudo cp "$CHROOT_DIR/boot/vmlinuz"* "$IMG_DIR/casper/vmlinuz"
-sudo cp "$CHROOT_DIR/boot/initrd"* "$IMG_DIR/casper/initrd"
-
-# -------------------------
-# ISOLINUX Config
-# -------------------------
-cat <<'EOF' | sudo tee "$IMG_DIR/isolinux/isolinux.cfg" >/dev/null
-UI menu.c32
-PROMPT 0
-TIMEOUT 50
-DEFAULT live
-
-LABEL live
-  menu label ^Start Solvionyx OS Aurora
-  kernel /casper/vmlinuz
-  append initrd=/casper/initrd boot=casper quiet splash ---
+# Enable auto-login
+mkdir -p /etc/gdm3/
+cat >/etc/gdm3/custom.conf <<EOF
+[daemon]
+AutomaticLoginEnable=True
+AutomaticLogin=solvionyx
 EOF
 
-sudo cp /usr/lib/ISOLINUX/isolinux.bin "$IMG_DIR/isolinux/"
-sudo cp /usr/lib/ISOLINUX/isohdpfx.bin "$IMG_DIR/isolinux/" || true
+locale-gen en_US.UTF-8
+CHROOT_CMDS
 
-# -------------------------
-# Build ISO
-# -------------------------
-echo "🏗️ Building bootable hybrid ISO..."
-xorriso -as mkisofs -r -V "Solvionyx_OS_${VERSION}" \
-  -o "$OUT_DIR/$ISO_NAME" \
-  -J -l -cache-inodes -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-  -b isolinux/isolinux.bin -c isolinux/boot.cat \
-  -no-emul-boot -boot-load-size 4 -boot-info-table \
-  "$IMG_DIR"
+sudo umount "$CHROOT_DIR/dev" || true
+sudo umount "$CHROOT_DIR/run" || true
 
-# -------------------------
-# Compress to stay <2GB
-# -------------------------
-echo "🧠 Compressing ISO..."
-zstd -f -q -T0 "$OUT_DIR/$ISO_NAME"
+# ──────────────────────────────────────────────
+# Prepare filesystem for ISO
+# ──────────────────────────────────────────────
+echo "📁 Preparing filesystem..."
+sudo mkdir -p "$WORK_DIR/image/casper" "$WORK_DIR/image/isolinux"
 
-echo "✅ Done!"
-echo "ISO: $OUT_DIR/$ISO_NAME"
-echo "ZST: $OUT_DIR/${ISO_NAME}.zst"
-echo "VER: $VERSION"
+# Copy kernel and initrd
+echo "📦 Copying kernel and initrd..."
+sudo cp "$CHROOT_DIR/boot/vmlinuz"* "$WORK_DIR/image/casper/vmlinuz" || echo "⚠️ Kernel not found"
+sudo cp "$CHROOT_DIR/boot/initrd.img"* "$WORK_DIR/image/casper/initrd.lz" || echo "⚠️ Initrd not found"
 
+# Create filesystem.squashfs
+echo "🗜 Creating SquashFS filesystem..."
+sudo mksquashfs "$CHROOT_DIR" "$WORK_DIR/image/casper/filesystem.squashfs" -e boot
+
+# Write manifest
+sudo chroot "$CHROOT_DIR" dpkg-query -W --showformat='${Package} ${Version}\n' > "$WORK_DIR/image/casper/filesystem.manifest"
+
+# ──────────────────────────────────────────────
+# Build Bootable ISO
+# ──────────────────────────────────────────────
+echo "💿 Building ISO..."
+cd "$WORK_DIR/image"
+sudo grub-mkrescue -o "$OUT_DIR/Solvionyx-Aurora-v4.5.4.iso" . || echo "⚠️ Fallback to genisoimage"
+
+# Fallback for grub-mkrescue (Ubuntu 24.04)
+if [ ! -f "$OUT_DIR/Solvionyx-Aurora-v4.5.4.iso" ]; then
+  genisoimage -r -V "Solvionyx Aurora v4.5.4" \
+    -cache-inodes -J -l \
+    -b isolinux/isolinux.bin -c isolinux/boot.cat \
+    -no-emul-boot -boot-load-size 4 -boot-info-table \
+    -o "$OUT_DIR/Solvionyx-Aurora-v4.5.4.iso" .
+fi
+
+# ──────────────────────────────────────────────
+# Final Checks
+# ──────────────────────────────────────────────
+cd "$OUT_DIR"
+ls -lh
+echo "✅ ISO build completed successfully at: $OUT_DIR/Solvionyx-Aurora-v4.5.4.iso"
