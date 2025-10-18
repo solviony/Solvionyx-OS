@@ -1,106 +1,138 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive
 
-# ──────────────────────────────────────────────
-# Solvionyx OS Aurora AutoBuilder v4.5.5 (GNOME)
-# Compatible with Ubuntu 24.04 Noble
-# ──────────────────────────────────────────────
-echo "🚀 Starting Solvionyx OS Aurora GNOME ISO Build (v4.5.5)"
+# ==============================================
+# Solvionyx OS — Aurora Series (GNOME Edition)
+# ISO Builder Script v4.5.6
+# ==============================================
 
-FLAVOR="${DESKTOP:-gnome}"
-WORK_DIR="$(pwd)/solvionyx_build"
-OUT_DIR="$(pwd)/iso_output"
-CHROOT_DIR="$WORK_DIR/chroot"
+AURORA_VERSION="v4.5.6"
+WORKDIR="$(pwd)/solvionyx_build"
+CHROOT_DIR="$WORKDIR/chroot"
+IMAGE_DIR="$WORKDIR/image"
+ISO_OUTPUT="$(pwd)/iso_output"
+LOGFILE="$WORKDIR/build.log"
 
-sudo rm -rf "$WORK_DIR" "$OUT_DIR"
-mkdir -p "$CHROOT_DIR" "$OUT_DIR"
+echo "🌌 Solvionyx Aurora — Building GNOME Edition ISO ($AURORA_VERSION)"
+echo "Working Directory: $WORKDIR"
+mkdir -p "$WORKDIR" "$CHROOT_DIR" "$IMAGE_DIR" "$ISO_OUTPUT"
 
-# ──────────────────────────────────────────────
-# 1️⃣ Bootstrap Base System
-# ──────────────────────────────────────────────
-echo "🧩 Bootstrapping base system..."
+# ------------------------------------------------
+# 🧩 Install build dependencies
+# ------------------------------------------------
+echo "🔧 Installing dependencies..."
+sudo apt-get update -y
+sudo apt-get install -y --no-install-recommends \
+  grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-ia32-bin \
+  xorriso squashfs-tools debootstrap dosfstools gdisk genisoimage rsync curl wget \
+  mtools isolinux syslinux syslinux-utils efibootmgr dosfstools \
+  apt-utils ca-certificates dialog locales systemd-sysv xz-utils
+
+# ------------------------------------------------
+# 🧱 Base system setup (Ubuntu Noble)
+# ------------------------------------------------
+echo "📦 Bootstrapping base system..."
 sudo debootstrap --arch=amd64 noble "$CHROOT_DIR" http://archive.ubuntu.com/ubuntu/
 
-# ──────────────────────────────────────────────
-# 2️⃣ Configure and Install Packages
-# ──────────────────────────────────────────────
+# ------------------------------------------------
+# 🧭 Configure system in chroot
+# ------------------------------------------------
 echo "⚙️ Configuring chroot environment..."
 sudo mount --bind /dev "$CHROOT_DIR/dev"
-sudo mount --bind /sys "$CHROOT_DIR/sys"
 sudo mount --bind /proc "$CHROOT_DIR/proc"
-sudo mount --bind /run "$CHROOT_DIR/run"
+sudo mount --bind /sys "$CHROOT_DIR/sys"
 
-sudo chroot "$CHROOT_DIR" /bin/bash <<'CHROOT_CMDS'
+sudo chroot "$CHROOT_DIR" /bin/bash <<'EOF'
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends ubuntu-desktop-minimal gnome-shell gdm3 gnome-control-center \
-    network-manager sudo locales systemd-sysv grub2-common grub-pc-bin \
-    plymouth plymouth-label plymouth-theme-spinner \
-    casper linux-generic
+apt-get install -y ubuntu-desktop-minimal gnome-shell gdm3 network-manager \
+  plymouth-theme-spinner plymouth-label plymouth-theme-ubuntu-logo \
+  systemd-sysv casper lupin-support linux-generic grub-efi-amd64-signed shim-signed
 
-# Add user
-useradd -m -s /bin/bash solvionyx
-echo "solvionyx:solvionyx" | chpasswd
-adduser solvionyx sudo
+echo "Solvionyx OS Aurora — GNOME Edition" > /etc/issue
+echo "127.0.0.1   localhost" > /etc/hosts
 
-# Enable auto-login in GDM
-mkdir -p /etc/gdm3/
-cat >/etc/gdm3/custom.conf <<EOF
-[daemon]
-AutomaticLoginEnable=True
-AutomaticLogin=solvionyx
+systemctl enable gdm3
+systemctl enable NetworkManager
+
+apt-get clean
+rm -rf /var/lib/apt/lists/*
 EOF
-
-locale-gen en_US.UTF-8
-update-initramfs -u
-CHROOT_CMDS
 
 sudo umount "$CHROOT_DIR/dev" || true
-sudo umount "$CHROOT_DIR/sys" || true
 sudo umount "$CHROOT_DIR/proc" || true
-sudo umount "$CHROOT_DIR/run" || true
+sudo umount "$CHROOT_DIR/sys" || true
 
-# ──────────────────────────────────────────────
-# 3️⃣ Build ISO Filesystem
-# ──────────────────────────────────────────────
-echo "📁 Preparing filesystem..."
-sudo mkdir -p "$WORK_DIR/image/boot/grub" "$WORK_DIR/image/casper"
+# ------------------------------------------------
+# 🧩 Prepare ISO filesystem
+# ------------------------------------------------
+echo "📂 Preparing filesystem..."
+sudo mkdir -p "$IMAGE_DIR"/{casper,boot/grub,efi/boot}
+sudo cp "$CHROOT_DIR"/boot/vmlinuz-* "$IMAGE_DIR/casper/vmlinuz" || true
+sudo cp "$CHROOT_DIR"/boot/initrd.img-* "$IMAGE_DIR/casper/initrd" || true
 
-echo "📦 Copying kernel and initrd..."
-sudo cp "$CHROOT_DIR/boot/vmlinuz"* "$WORK_DIR/image/casper/vmlinuz" || echo "⚠️ Kernel missing"
-sudo cp "$CHROOT_DIR/boot/initrd.img"* "$WORK_DIR/image/casper/initrd.img" || echo "⚠️ Initrd missing"
+sudo mksquashfs "$CHROOT_DIR" "$IMAGE_DIR/casper/filesystem.squashfs" -e boot || true
+printf "%s" "$(sudo du -sx --block-size=1 "$CHROOT_DIR" | cut -f1)" | sudo tee "$IMAGE_DIR/casper/filesystem.size"
 
-echo "🗜 Creating filesystem.squashfs..."
-sudo mksquashfs "$CHROOT_DIR" "$WORK_DIR/image/casper/filesystem.squashfs" -e boot
-
-sudo chroot "$CHROOT_DIR" dpkg-query -W --showformat='${Package} ${Version}\n' > "$WORK_DIR/image/casper/filesystem.manifest"
-
-# ──────────────────────────────────────────────
-# 4️⃣ Add GRUB Bootloader Configuration
-# ──────────────────────────────────────────────
-cat <<'EOF' | sudo tee "$WORK_DIR/image/boot/grub/grub.cfg" > /dev/null
+# ------------------------------------------------
+# 🧠 Grub config for hybrid ISO
+# ------------------------------------------------
+echo "🧠 Creating grub configuration..."
+cat <<'GRUBEOF' | sudo tee "$IMAGE_DIR/boot/grub/grub.cfg" > /dev/null
 set default=0
 set timeout=5
-menuentry "Solvionyx OS Aurora GNOME (Live)" {
+
+menuentry "Solvionyx OS Aurora (GNOME)" {
     linux /casper/vmlinuz boot=casper quiet splash ---
-    initrd /casper/initrd.img
+    initrd /casper/initrd
 }
-menuentry "Solvionyx OS (Safe Mode)" {
-    linux /casper/vmlinuz boot=casper nomodeset ---
-    initrd /casper/initrd.img
+menuentry "Check disk for defects" {
+    linux /casper/vmlinuz boot=casper integrity-check quiet splash ---
+    initrd /casper/initrd
 }
-EOF
+GRUBEOF
 
-# ──────────────────────────────────────────────
-# 5️⃣ Create Bootable ISO
-# ──────────────────────────────────────────────
+# ------------------------------------------------
+# 💿 Build Bootable ISO with fallback
+# ------------------------------------------------
 echo "💿 Building bootable ISO..."
-cd "$WORK_DIR/image"
+ISO_NAME="Solvionyx-Aurora-GNOME-${AURORA_VERSION}.iso"
+ISO_PATH="$ISO_OUTPUT/$ISO_NAME"
+mkdir -p "$ISO_OUTPUT"
 
-grub-mkrescue -o "$OUT_DIR/Solvionyx-Aurora-v4.5.5.iso" . --compress=xz
+if grub-mkrescue -o "$ISO_PATH" "$IMAGE_DIR" --compress=xz -- \
+  -volid "SOLVIONYX_AURORA_GNOME" 2>>"$LOGFILE"; then
+  echo "✅ grub-mkrescue completed successfully."
+else
+  echo "⚠️ grub-mkrescue failed — switching to xorriso fallback..."
+  xorriso -as mkisofs -r -V "SOLVIONYX_AURORA_GNOME" \
+    -o "$ISO_PATH" \
+    -J -l -cache-inodes -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -b isolinux/isolinux.bin -c isolinux/boot.cat \
+    -no-emul-boot -boot-load-size 4 -boot-info-table \
+    "$IMAGE_DIR"
+fi
 
-cd "$OUT_DIR"
-ls -lh
-echo "✅ ISO successfully built → $OUT_DIR/Solvionyx-Aurora-v4.5.5.iso"
+# ------------------------------------------------
+# 🗜️ Compress ISO & generate checksum
+# ------------------------------------------------
+echo "🗜️ Compressing ISO..."
+XZ_PATH="${ISO_PATH}.xz"
+sha_file="${ISO_PATH}.sha256"
+
+xz -T0 -9 --keep "$ISO_PATH"
+echo "✅ Compressed: $(du -h "$XZ_PATH" | cut -f1) -> $XZ_PATH"
+
+echo "🔒 Generating SHA256 checksum..."
+sha256sum "$XZ_PATH" | tee "$sha_file"
+
+# ------------------------------------------------
+# 🧹 Final Cleanup
+# ------------------------------------------------
+echo "🧹 Cleaning temporary files..."
+sudo rm -rf "$WORKDIR/chroot/tmp/*"
+
+echo "✅ ISO build and packaging complete!"
+echo "Output files:"
+ls -lh "$ISO_OUTPUT"
