@@ -9,7 +9,7 @@ set -euo pipefail
 # Tagline: "The engine behind the vision."
 # ==============================================
 
-VERSION="v4.6.8"
+VERSION="v4.6.9"
 ARCH="amd64"
 DIST="noble"
 BUILD_DIR="$PWD/solvionyx_build"
@@ -38,7 +38,7 @@ echo "📦 Bootstrapping Ubuntu $DIST system..."
 sudo debootstrap --arch="$ARCH" "$DIST" "$CHROOT" http://archive.ubuntu.com/ubuntu/
 
 # ==============================
-# Apt Sources
+# APT Sources
 # ==============================
 cat <<EOF | sudo tee "$CHROOT/etc/apt/sources.list"
 deb http://archive.ubuntu.com/ubuntu/ $DIST main restricted universe multiverse
@@ -106,17 +106,26 @@ HOOK
 # ==============================
 # ISO Structure
 # ==============================
-sudo mkdir -p "$BUILD_DIR/image/{casper,boot/grub,isolinux,EFI/boot}"
+echo "🧱 Preparing ISO structure..."
+sudo mkdir -p "$BUILD_DIR/image/casper"
+sudo mkdir -p "$BUILD_DIR/image/boot/grub"
+sudo mkdir -p "$BUILD_DIR/image/isolinux"
+sudo mkdir -p "$BUILD_DIR/image/EFI/boot"
 
-# Detect kernel/initrd
+# Make sure all subfolders are writable
+sudo chmod -R 777 "$BUILD_DIR/image" || true
+
+# ==============================
+# Kernel & Initrd Detection
+# ==============================
 KERNEL_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "vmlinuz*" | head -n1 || true)
 INITRD_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "initrd*.img*" | head -n1 || true)
 
 if [[ -f "$KERNEL_PATH" && -f "$INITRD_PATH" ]]; then
   echo "✅ Kernel found: $(basename "$KERNEL_PATH")"
   echo "✅ Initrd found: $(basename "$INITRD_PATH")"
-  sudo cp "$KERNEL_PATH" "$BUILD_DIR/image/casper/vmlinuz"
-  sudo cp "$INITRD_PATH" "$BUILD_DIR/image/casper/initrd"
+  sudo cp "$KERNEL_PATH" "$BUILD_DIR/image/casper/vmlinuz" || (echo "⚠ Could not copy kernel!" && exit 1)
+  sudo cp "$INITRD_PATH" "$BUILD_DIR/image/casper/initrd" || (echo "⚠ Could not copy initrd!" && exit 1)
 else
   echo "❌ Kernel or initrd missing!"
   sudo ls -lh "$CHROOT/boot"
@@ -126,6 +135,7 @@ fi
 # ==============================
 # SquashFS
 # ==============================
+echo "📦 Creating SquashFS..."
 sudo mksquashfs "$CHROOT" "$BUILD_DIR/image/casper/filesystem.squashfs" -e boot || true
 
 # ==============================
@@ -145,7 +155,7 @@ menuentry "Install Solvionyx OS Aurora" {
 EOF
 
 # ==============================
-# Copy Bootloaders (fix)
+# Bootloaders
 # ==============================
 ISOLINUX_PATH=$(sudo find /usr/lib -type f -name "isolinux.bin" | head -n1 || true)
 MBR_BIN=$(sudo find /usr/lib -type f -name "isohdpfx.bin" | head -n1 || true)
@@ -153,22 +163,9 @@ LDLINUX_C32=$(sudo find /usr/lib -type f -name "ldlinux.c32" | head -n1 || true)
 
 if [[ -f "$ISOLINUX_PATH" ]]; then
   sudo cp "$ISOLINUX_PATH" "$BUILD_DIR/image/isolinux/isolinux.bin"
-  echo "✅ Copied isolinux.bin"
-else
-  echo "⚠ isolinux.bin not found!"
 fi
-
 if [[ -f "$LDLINUX_C32" ]]; then
   sudo cp "$LDLINUX_C32" "$BUILD_DIR/image/isolinux/ldlinux.c32"
-  echo "✅ Copied ldlinux.c32"
-else
-  echo "⚠ ldlinux.c32 not found!"
-fi
-
-if [[ -f "$MBR_BIN" ]]; then
-  echo "✅ Found MBR binary: $MBR_BIN"
-else
-  echo "⚠ MBR binary missing!"
 fi
 
 # ==============================
