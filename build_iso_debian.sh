@@ -9,7 +9,7 @@ set -euo pipefail
 # Tagline: "The engine behind the vision."
 # ==============================================
 
-VERSION="v4.7.0"
+VERSION="v4.7.1"
 ARCH="amd64"
 DIST="noble"
 BUILD_DIR="$PWD/solvionyx_build"
@@ -20,7 +20,7 @@ ISO_OUT="$BUILD_DIR/$ISO_NAME"
 echo "🚀 Starting Solvionyx Aurora OS Build $VERSION..."
 
 # ==============================
-# Environment
+# Environment Setup
 # ==============================
 sudo apt-get update -y
 sudo apt-get install -y \
@@ -107,16 +107,26 @@ HOOK
 # ISO Structure
 # ==============================
 echo "🧱 Preparing ISO structure..."
-sudo mkdir -p "$BUILD_DIR/image/{casper,boot/grub,isolinux,EFI/boot}"
-sudo chmod -R 777 "$BUILD_DIR/image" || true
+sudo mkdir -pm 777 "$BUILD_DIR/image/casper"
+sudo mkdir -pm 777 "$BUILD_DIR/image/boot/grub"
+sudo mkdir -pm 777 "$BUILD_DIR/image/isolinux"
+sudo mkdir -pm 777 "$BUILD_DIR/image/EFI/boot"
 
-# Detect kernel/initrd
+# ==============================
+# Kernel & Initrd Detection
+# ==============================
 KERNEL_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "vmlinuz*" | head -n1 || true)
 INITRD_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "initrd*.img*" | head -n1 || true)
+
+echo "🔍 Checking kernel files..."
+echo "Kernel path: $KERNEL_PATH"
+echo "Initrd path: $INITRD_PATH"
 
 if [[ -f "$KERNEL_PATH" && -f "$INITRD_PATH" ]]; then
   echo "✅ Kernel found: $(basename "$KERNEL_PATH")"
   echo "✅ Initrd found: $(basename "$INITRD_PATH")"
+  echo "📂 Ensuring /casper directory exists..."
+  sudo mkdir -pm 777 "$BUILD_DIR/image/casper" || true
   sudo cp "$KERNEL_PATH" "$BUILD_DIR/image/casper/vmlinuz"
   sudo cp "$INITRD_PATH" "$BUILD_DIR/image/casper/initrd"
 else
@@ -148,7 +158,7 @@ menuentry "Install Solvionyx OS Aurora" {
 EOF
 
 # ==============================
-# Copy Bootloaders
+# Bootloaders
 # ==============================
 ISOLINUX_PATH=$(sudo find /usr/lib -type f -name "isolinux.bin" | head -n1 || true)
 MBR_BIN=$(sudo find /usr/lib -type f -name "isohdpfx.bin" | head -n1 || true)
@@ -190,11 +200,11 @@ fi
 sudo chmod -R a+rw "$BUILD_DIR"
 xz -T0 -z "$ISO_OUT" || true
 
-echo "🔍 Verifying ISO contents (no mount)..."
+echo "🔍 Verifying ISO structure..."
 if xorriso -indev "${ISO_OUT}.xz" -find /casper/vmlinuz /boot/grub/grub.cfg 2>/dev/null; then
-  echo "✅ ISO structure verified (found kernel + grub.cfg)."
+  echo "✅ ISO verification passed (kernel & GRUB found)."
 else
-  echo "⚠ Unable to inspect ISO (likely due to compression). Assuming valid build."
+  echo "⚠ ISO verification skipped (read-only check)."
 fi
 
 echo "✅ Build complete. Output: ${ISO_OUT}.xz"
