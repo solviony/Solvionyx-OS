@@ -125,10 +125,18 @@ fi
 # 8️⃣ Compress ISO and create checksum
 # ------------------------------------------------------------
 echo "==> 📦 Compressing ISO..."
-xz -T0 -9 "$OUT_DIR/$ISO_NAME"
+sudo xz -T0 -9 "$OUT_DIR/$ISO_NAME" || echo "⚠️ Compression skipped."
 
-echo "==> 🔒 Generating SHA256 checksum..."
-sha256sum "$OUT_DIR/$ISO_NAME.xz" > "$OUT_DIR/$ISO_NAME.xz.sha256"
+echo "==> 🔒 Fixing permissions and generating SHA256 checksum..."
+sudo chown -R $(whoami):$(whoami) "$OUT_DIR"
+cd "$OUT_DIR"
+
+if [ -f "$ISO_NAME.xz" ]; then
+    sha256sum "$ISO_NAME.xz" > SHA256SUMS.txt
+    echo "✅ Checksum created: $OUT_DIR/SHA256SUMS.txt"
+else
+    echo "⚠️ No ISO found for checksum — skipping."
+fi
 
 # ------------------------------------------------------------
 # ✅ Done
