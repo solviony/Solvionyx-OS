@@ -122,27 +122,29 @@ else
 fi
 
 # ------------------------------------------------------------
-# 8️⃣ Compress ISO and create checksum (with permission fix)
+# 8️⃣ Compress ISO and create checksum (final permission fix)
 # ------------------------------------------------------------
 echo "==> 📦 Compressing ISO..."
-sudo xz -T0 -9 "$OUT_DIR/$ISO_NAME" || echo "⚠️ Compression skipped or already compressed."
+sudo xz -T0 -9 "$OUT_DIR/$ISO_NAME" || echo "⚠️ Compression skipped."
 
-echo "==> 🔒 Fixing permissions and generating checksum..."
+echo "==> 🔒 Fixing permissions before checksum..."
 sudo chmod -R 777 "$OUT_DIR"
 sudo chown -R $(whoami):$(whoami) "$OUT_DIR"
 cd "$OUT_DIR"
 
 if [ -f "$ISO_NAME.xz" ]; then
     echo "✅ Found ISO: $ISO_NAME.xz"
-    sha256sum "$ISO_NAME.xz" | tee "$OUT_DIR/SHA256SUMS.txt"
-    echo "✅ Checksum file created: $OUT_DIR/SHA256SUMS.txt"
+    echo "==> Generating SHA256SUMS.txt..."
+    sudo bash -c "sha256sum $ISO_NAME.xz > $OUT_DIR/SHA256SUMS.txt"
+    sudo chmod 777 "$OUT_DIR/SHA256SUMS.txt"
+    echo "✅ Checksum file created successfully."
 else
-    echo "⚠️ No compressed ISO found for checksum generation."
+    echo "⚠️ No ISO found to checksum. Skipping."
 fi
 
 # ------------------------------------------------------------
 # ✅ Done
 # ------------------------------------------------------------
-echo "✅ Solvionyx Aurora GNOME ISO build complete!"
+echo "✅ Solvionyx OS Aurora GNOME ISO build complete!"
 echo "📁 Output directory: $OUT_DIR"
 ls -lh "$OUT_DIR"
