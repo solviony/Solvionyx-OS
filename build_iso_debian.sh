@@ -155,7 +155,10 @@ sudo grub-mkrescue -o "$BUILD_DIR/$ISO_NAME" "$ISO_DIR"
 # Compress and finalize
 # ==============================
 echo "🗜️ Compressing ISO..."
-sudo chmod -R a+rw "$BUILD_DIR"
+echo "🔒 Adjusting permissions safely..."
+sudo find "$BUILD_DIR" -mindepth 1 \
+  \( -path "$BUILD_DIR/chroot/proc" -o -path "$BUILD_DIR/chroot/sys" -o -path "$BUILD_DIR/chroot/dev" -o -path "$BUILD_DIR/chroot/run" \) -prune -o \
+  -exec sudo chmod -R a+rw {} + 2>/dev/null || true
 xz --no-sparse --no-preserve-owner -T0 -z "$BUILD_DIR/Solvionyx-Aurora-${VERSION}.iso" || true
 
 echo "✅ Solvionyx Aurora ISO build completed successfully!"
