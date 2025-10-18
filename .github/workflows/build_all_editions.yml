@@ -35,13 +35,15 @@ jobs:
           chmod +x build_iso_debian.sh
           sudo ./build_iso_debian.sh
 
-      - name: 🗜️ Compress ISO (if not already compressed)
+      - name: Compress ISO (if not already compressed)
         run: |
-          cd iso_output
-          if [ ! -f *.xz ]; then
-            echo "Compressing ISO..."
-            xz -T0 -9 *.iso
-          fi
+    cd solvionyx_build || exit 1
+    if ls *.iso >/dev/null 2>&1; then
+      echo "Compressing Solvionyx ISO..."
+      xz -T0 -z *.iso
+    else
+      echo "⚠️ No uncompressed ISO found, skipping compression."
+    fi
 
       - name: 🔒 Generate checksums
         run: |
