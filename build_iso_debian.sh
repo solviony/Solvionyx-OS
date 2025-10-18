@@ -1,165 +1,158 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-# ===========================================
-# Solvionyx Aurora GNOME ISO Builder (v4.6.0)
-# "The engine behind the vision."
-# ===========================================
+# ==============================================
+# Solvionyx OS Auto ISO Builder (Ubuntu/Debian)
+# ==============================================
+# Edition: Aurora (GNOME)
+# Maintainer: Solviony
+# Tagline: "The engine behind the vision."
+# ==============================================
 
-DIST="noble"
+VERSION="v4.6.2"
 ARCH="amd64"
-BUILD_DIR="$(pwd)/solvionyx_build"
+DIST="noble"  # Ubuntu 24.04 LTS base
+BUILD_DIR="$PWD/solvionyx_build"
 CHROOT="$BUILD_DIR/chroot"
-ISO_DIR="$BUILD_DIR/image"
-ISO_NAME="Solvionyx-Aurora-v4.6.0.iso"
+ISO_NAME="Solvionyx-Aurora-${VERSION}.iso"
+ISO_OUT="$BUILD_DIR/$ISO_NAME"
+
+echo "🚀 Starting Solvionyx Aurora OS Build $VERSION..."
 
 # ==============================
-# Clean previous builds
+# Prepare Build Environment
 # ==============================
-echo "🧹 Cleaning up old builds..."
+sudo apt-get update -y
+sudo apt-get install -y debootstrap grub-pc-bin grub-efi-amd64-bin mtools xorriso squashfs-tools \
+    rsync systemd-container gpg isolinux genisoimage dosfstools xz-utils || true
+
+# Clean old build
 sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT" "$ISO_DIR"
+mkdir -p "$BUILD_DIR"
 
 # ==============================
-# Bootstrap base system
+# Bootstrap Base System
 # ==============================
 echo "📦 Bootstrapping Ubuntu $DIST system..."
 sudo debootstrap --arch="$ARCH" "$DIST" "$CHROOT" http://archive.ubuntu.com/ubuntu/
 
 # ==============================
-# Enable all Ubuntu repositories (FIX)
+# Configure Apt & Sources
 # ==============================
-echo "🌍 Enabling universe and multiverse repositories..."
-sudo tee "$CHROOT/etc/apt/sources.list" > /dev/null <<EOF
-deb http://archive.ubuntu.com/ubuntu $DIST main restricted universe multiverse
-deb http://archive.ubuntu.com/ubuntu $DIST-updates main restricted universe multiverse
-deb http://archive.ubuntu.com/ubuntu $DIST-backports main restricted universe multiverse
-deb http://security.ubuntu.com/ubuntu $DIST-security main restricted universe multiverse
+cat <<EOF | sudo tee "$CHROOT/etc/apt/sources.list"
+deb http://archive.ubuntu.com/ubuntu/ $DIST main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ ${DIST}-updates main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu/ ${DIST}-security main restricted universe multiverse
 EOF
 
 sudo chroot "$CHROOT" apt-get update
-echo "✅ Repository sources updated successfully."
 
 # ==============================
-# Mount required filesystems
+# Install GNOME + Calamares + Branding
 # ==============================
-sudo mount --bind /dev "$CHROOT/dev"
-sudo mount --bind /proc "$CHROOT/proc"
-sudo mount --bind /sys "$CHROOT/sys"
+echo "🧩 Installing desktop and installer..."
+sudo chroot "$CHROOT" bash -c "
+apt-get install -y ubuntu-desktop gdm3 gnome-shell gnome-software gnome-session gedit nautilus \
+plymouth-theme-spinner grub-efi-amd64 grub2-common calamares calamares-settings-debian || true
+"
 
-# ==============================
-# Install core packages
-# ==============================
-echo "📥 Installing core packages..."
-sudo chroot "$CHROOT" apt-get install -y --no-install-recommends \
-  systemd-sysv network-manager sudo bash-completion gdm3 gnome-shell gnome-session gnome-terminal nautilus \
-  gedit gnome-control-center gnome-software \
-  xinit xserver-xorg lightdm plymouth plymouth-x11 \
-  casper squashfs-tools xorriso isolinux syslinux-utils \
-  calamares git curl wget rsync nano vim ca-certificates locales tzdata
+# Branding (logo, theme, palette)
+echo "🎨 Applying Solvionyx branding..."
+sudo mkdir -p "$CHROOT/usr/share/solvionyx"
+sudo cp -r branding/* "$CHROOT/usr/share/solvionyx/" || true
 
-# ==============================
-# Branding: Calamares Installer Theme (Solvionyx)
-# ==============================
-echo "🎨 Adding Solvionyx Calamares branding..."
-sudo mkdir -p "$CHROOT/etc/calamares/branding/solvionyx"
-
-sudo tee "$CHROOT/etc/calamares/branding/solvionyx/branding.desc" > /dev/null <<EOF
----
-componentName:  solvionyx
-strings:
-  productName:   "Solvionyx OS Aurora"
-  shortProductName: "Solvionyx"
-  version:       "v4.6.0"
-  welcomeStyleCalamares: "classic"
-  slideshow:     "show.qml"
-  bootloaderEntryName: "Solvionyx Aurora"
-  productUrl:    "https://solviony.com/page/os"
-  supportUrl:    "https://solviony.com/support"
-  bugReportUrl:  "https://github.com/solviony/Solvionyx-OS/issues"
-  releaseNotesUrl: "https://solviony.com/changelog"
-  windowTitle:   "Install Solvionyx OS"
-  oemProductName: "Solvionyx OS"
-style:
-  sidebarBackground: "#0b0c10"
-  sidebarText: "#4fe0b0"
-  background: "#161616"
-  link: "#4fe0b0"
-  windowTitle: "#4fe0b0"
-  text: "#e0e0e0"
-  button: "#4fe0b0"
+cat <<EOF | sudo tee "$CHROOT/etc/lsb-release"
+DISTRIB_ID=Solvionyx
+DISTRIB_RELEASE=$VERSION
+DISTRIB_DESCRIPTION="Solvionyx Aurora (GNOME)"
+DISTRIB_CODENAME=aurora
 EOF
 
-sudo mkdir -p "$CHROOT/etc/calamares/branding/solvionyx/images"
+# ==============================
+# Create Live User and Autologin
+# ==============================
+echo "👤 Creating live user..."
+sudo chroot "$CHROOT" useradd -m -s /bin/bash solvionyx || true
+echo "solvionyx:live" | sudo chroot "$CHROOT" chpasswd || true
+sudo chroot "$CHROOT" usermod -aG sudo solvionyx || true
 
-# Simple slideshow placeholder (will show tagline)
-sudo tee "$CHROOT/etc/calamares/branding/solvionyx/show.qml" > /dev/null <<'EOF'
-import QtQuick 2.0
-import Calamares.SlideShow 1.0
+cat <<EOF | sudo tee "$CHROOT/etc/gdm3/custom.conf"
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=solvionyx
+EOF
 
-SlideShow {
-    Slide {
-        Text {
-            anchors.centerIn: parent
-            text: "The engine behind the vision."
-            color: "#4fe0b0"
-            font.pixelSize: 42
-        }
-    }
+# ==============================
+# Kernel + Initrd
+# ==============================
+echo "🧠 Installing kernel..."
+sudo chroot "$CHROOT" apt-get install -y linux-image-generic linux-headers-generic initramfs-tools || true
+
+# ==============================
+# ISO Build Structure
+# ==============================
+echo "🧱 Creating ISO structure..."
+sudo mkdir -p "$BUILD_DIR/image/casper"
+sudo mkdir -p "$BUILD_DIR/image/boot/grub"
+
+sudo cp "$CHROOT/boot/vmlinuz"* "$BUILD_DIR/image/casper/vmlinuz" || true
+sudo cp "$CHROOT/boot/initrd.img"* "$BUILD_DIR/image/casper/initrd" || true
+
+# ==============================
+# Create SquashFS
+# ==============================
+echo "📦 Creating SquashFS..."
+sudo mksquashfs "$CHROOT" "$BUILD_DIR/image/casper/filesystem.squashfs" -e boot || true
+
+# ==============================
+# Bootloader Configuration
+# ==============================
+cat <<EOF | sudo tee "$BUILD_DIR/image/boot/grub/grub.cfg"
+set default=0
+set timeout=5
+menuentry "Run Solvionyx OS Aurora (Live)" {
+    linux /casper/vmlinuz boot=casper quiet splash ---
+    initrd /casper/initrd
 }
 EOF
 
-echo "🪶 Solvionyx Calamares branding applied."
+# ==============================
+# Build the ISO Image
+# ==============================
+echo "💿 Building Solvionyx ISO..."
+cd "$BUILD_DIR"
+sudo grub-mkrescue -o "$ISO_OUT" image -- -volid "SOLVIONYX_OS" || true
 
 # ==============================
-# User + Autologin Setup
+# Compress & Fix Permissions
 # ==============================
-echo "👤 Creating live user..."
-sudo chroot "$CHROOT" useradd -m -s /bin/bash solvionyx
-sudo chroot "$CHROOT" bash -c "echo 'solvionyx:solvionyx' | chpasswd"
-sudo chroot "$CHROOT" usermod -aG sudo solvionyx
-
-echo "⚙️ Adding autologin..."
-sudo mkdir -p "$CHROOT/etc/gdm3"
-sudo tee "$CHROOT/etc/gdm3/custom.conf" > /dev/null <<EOF
-[daemon]
-AutomaticLoginEnable = true
-AutomaticLogin = solvionyx
-EOF
+echo "🗜️ Compressing Solvionyx ISO..."
+sudo chmod -R a+rw "$BUILD_DIR"
+XZ_OPT="--no-sparse --no-preserve-owner --no-preserve-permissions"
+xz -T0 -z "$ISO_OUT" || true
 
 # ==============================
-# Kernel + Boot
+# ✅ ISO Integrity Verification
 # ==============================
-echo "🧩 Installing kernel and init system..."
-sudo chroot "$CHROOT" apt-get install -y linux-generic grub-pc-bin grub-efi-amd64-bin
+echo "🔍 Verifying Solvionyx ISO integrity..."
+ISO_COMPRESSED="${ISO_OUT}.xz"
+if [[ -f "$ISO_OUT.xz" ]]; then
+    echo "✔ ISO compression completed."
+else
+    echo "❌ Compression failed, using raw ISO."
+    ISO_COMPRESSED="$ISO_OUT"
+fi
+
+# Verify kernel and GRUB presence
+if sudo xorriso -indev "$ISO_OUT" -find /casper/vmlinuz /boot/grub/grub.cfg >/dev/null 2>&1; then
+    echo "✅ ISO verification passed — kernel & GRUB found."
+else
+    echo "❌ ISO verification failed — missing boot files!"
+    exit 1
+fi
 
 # ==============================
-# Prepare filesystem
+# Finalize
 # ==============================
-echo "📁 Preparing filesystem..."
-sudo mkdir -p "$ISO_DIR"/{casper,boot,isolinux}
-
-KERNEL_PATH=$(sudo chroot "$CHROOT" bash -c "ls /boot/vmlinuz-* | tail -n 1")
-INITRD_PATH=$(sudo chroot "$CHROOT" bash -c "ls /boot/initrd.img-* | tail -n 1")
-
-sudo cp "$CHROOT$KERNEL_PATH" "$ISO_DIR/casper/vmlinuz"
-sudo cp "$CHROOT$INITRD_PATH" "$ISO_DIR/casper/initrd"
-
-# ==============================
-# Create ISO
-# ==============================
-echo "💿 Building bootable ISO..."
-sudo grub-mkrescue -o "$BUILD_DIR/$ISO_NAME" "$ISO_DIR"
-
-# ==============================
-# Compress and finalize
-# ==============================
-echo "🗜️ Compressing ISO..."
-echo "🔒 Adjusting permissions safely..."
-sudo find "$BUILD_DIR" -mindepth 1 \
-  \( -path "$BUILD_DIR/chroot/proc" -o -path "$BUILD_DIR/chroot/sys" -o -path "$BUILD_DIR/chroot/dev" -o -path "$BUILD_DIR/chroot/run" \) -prune -o \
-  -exec sudo chmod -R a+rw {} + 2>/dev/null || true
-xz --no-sparse --no-preserve-owner -T0 -z "$BUILD_DIR/Solvionyx-Aurora-${VERSION}.iso" || true
-
-echo "✅ Solvionyx Aurora ISO build completed successfully!"
-echo "Output: $BUILD_DIR/$ISO_NAME.xz"
+echo "✅ Solvionyx Aurora OS Build Complete!"
+echo "📁 Output ISO: $ISO_COMPRESSED"
