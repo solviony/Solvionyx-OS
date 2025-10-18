@@ -9,7 +9,7 @@ set -euo pipefail
 # Tagline: "The engine behind the vision."
 # ==============================================
 
-VERSION="v4.6.5"
+VERSION="v4.6.6"
 ARCH="amd64"
 DIST="noble"
 BUILD_DIR="$PWD/solvionyx_build"
@@ -36,7 +36,7 @@ echo "📦 Bootstrapping Ubuntu $DIST system..."
 sudo debootstrap --arch="$ARCH" "$DIST" "$CHROOT" http://archive.ubuntu.com/ubuntu/
 
 # ==============================
-# Configure Apt & Sources
+# Configure Apt Sources
 # ==============================
 cat <<EOF | sudo tee "$CHROOT/etc/apt/sources.list"
 deb http://archive.ubuntu.com/ubuntu/ $DIST main restricted universe multiverse
@@ -47,7 +47,7 @@ EOF
 sudo chroot "$CHROOT" apt-get update
 
 # ==============================
-# Install GNOME + Calamares + Branding
+# Install GNOME + Calamares
 # ==============================
 echo "🧩 Installing GNOME + Calamares + Solvionyx branding..."
 sudo chroot "$CHROOT" bash -c "
@@ -55,8 +55,7 @@ apt-get install -y ubuntu-desktop gdm3 gnome-shell gnome-session gedit nautilus 
 plymouth-theme-spinner grub-efi-amd64 grub2-common calamares calamares-settings-debian --no-install-recommends || true
 "
 
-# Branding (logo, theme, palette)
-echo "🎨 Applying Solvionyx branding..."
+# Branding info
 sudo mkdir -p "$CHROOT/usr/share/solvionyx"
 sudo mkdir -p "$CHROOT/etc/solvionyx"
 cat <<EOM | sudo tee "$CHROOT/etc/lsb-release"
@@ -67,7 +66,7 @@ DISTRIB_CODENAME=aurora
 EOM
 
 # ==============================
-# Create Live User
+# Live User
 # ==============================
 echo "👤 Creating live user..."
 sudo chroot "$CHROOT" useradd -m -s /bin/bash solvionyx || true
@@ -81,15 +80,15 @@ AutomaticLogin=solvionyx
 EOF
 
 # ==============================
-# Kernel + Initrd
+# Kernel
 # ==============================
 echo "🧠 Installing kernel..."
 sudo chroot "$CHROOT" apt-get install -y linux-image-generic linux-headers-generic initramfs-tools || true
 
 # ==============================
-# Calamares Post-Install Hook
+# Calamares Post-install Hook
 # ==============================
-echo "🧩 Creating Calamares post-install hook..."
+echo "🧩 Adding Calamares post-install hook..."
 sudo mkdir -p "$CHROOT/etc/calamares/modules"
 cat <<'HOOK' | sudo tee "$CHROOT/etc/calamares/modules/solvionyx-finish.conf"
 ---
@@ -99,25 +98,24 @@ command: "bash"
 args:
   - "-c"
   - |
-      echo "✨ Applying Solvionyx system branding..."
-      HOSTNAME="Solvionyx-Aurora"
-      echo "$HOSTNAME" > /etc/hostname
-      echo "127.0.1.1 $HOSTNAME" >> /etc/hosts
-      # GNOME background + splash
+      echo "✨ Applying Solvionyx branding..."
+      echo "Solvionyx-Aurora" > /etc/hostname
+      echo "127.0.1.1 Solvionyx-Aurora" >> /etc/hosts
       gsettings set org.gnome.desktop.background picture-uri 'file:///usr/share/solvionyx/wallpaper.jpg' || true
       update-initramfs -u || true
-      echo "✅ Solvionyx branding applied successfully!"
+      echo "✅ Solvionyx branding applied."
 HOOK
 
 # ==============================
-# ISO Build Structure
+# ISO Structure
 # ==============================
 echo "🧱 Preparing ISO structure..."
 sudo mkdir -p "$BUILD_DIR/image/casper"
 sudo mkdir -p "$BUILD_DIR/image/boot/grub"
 
-KERNEL_PATH=$(sudo find "$CHROOT/boot" -type f -name "vmlinuz*" | head -n1 || true)
-INITRD_PATH=$(sudo find "$CHROOT/boot" -type f -name "initrd*.img" | head -n1 || true)
+# Fix: detect versioned kernel/initrd names
+KERNEL_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "vmlinuz*" | head -n1 || true)
+INITRD_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "initrd*.img*" | head -n1 || true)
 
 if [[ -f "$KERNEL_PATH" && -f "$INITRD_PATH" ]]; then
     echo "✅ Kernel: $(basename "$KERNEL_PATH")"
@@ -126,7 +124,7 @@ if [[ -f "$KERNEL_PATH" && -f "$INITRD_PATH" ]]; then
     sudo cp "$INITRD_PATH" "$BUILD_DIR/image/casper/initrd"
 else
     echo "❌ Kernel or initrd missing!"
-    ls -lh "$CHROOT/boot" || true
+    sudo ls -lh "$CHROOT/boot" || true
     exit 1
 fi
 
@@ -137,7 +135,7 @@ echo "📦 Creating SquashFS..."
 sudo mksquashfs "$CHROOT" "$BUILD_DIR/image/casper/filesystem.squashfs" -e boot || true
 
 # ==============================
-# GRUB Boot Config
+# GRUB Config
 # ==============================
 cat <<EOF | sudo tee "$BUILD_DIR/image/boot/grub/grub.cfg"
 set default=0
@@ -153,7 +151,7 @@ menuentry "Install Solvionyx OS Aurora" {
 EOF
 
 # ==============================
-# Hybrid ISO Builder (with Fallback)
+# Hybrid ISO Build
 # ==============================
 echo "💿 Building Solvionyx Aurora ISO..."
 cd "$BUILD_DIR"
@@ -187,23 +185,20 @@ fi
 # ==============================
 # Compress & Verify
 # ==============================
-echo "🗜️ Compressing Solvionyx ISO..."
+echo "🗜️ Compressing ISO..."
 sudo chmod -R a+rw "$BUILD_DIR"
-XZ_OPT="--no-sparse --no-preserve-owner --no-preserve-permissions"
 xz -T0 -z "$ISO_OUT" || true
 
-echo "🔍 Verifying Solvionyx ISO integrity..."
+echo "🔍 Verifying ISO..."
 MOUNT_DIR="$BUILD_DIR/iso_mount"
 mkdir -p "$MOUNT_DIR"
 sudo mount -o loop "$ISO_OUT" "$MOUNT_DIR" || true
 
 if [[ -f "$MOUNT_DIR/casper/vmlinuz" && -f "$MOUNT_DIR/boot/grub/grub.cfg" ]]; then
-    echo "✅ ISO verification passed — kernel & GRUB found."
+    echo "✅ ISO verification passed."
 else
-    echo "❌ ISO verification failed — missing boot files!"
-    echo "🔎 Contents of /casper:"
+    echo "❌ ISO verification failed!"
     sudo ls -l "$MOUNT_DIR/casper" || true
-    echo "🔎 Contents of /boot/grub:"
     sudo ls -l "$MOUNT_DIR/boot/grub" || true
     sudo umount "$MOUNT_DIR" || true
     exit 1
