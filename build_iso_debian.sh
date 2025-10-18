@@ -42,13 +42,27 @@ sudo chroot "$CHROOT" bash -c "
   usermod -aG sudo solvionyx
   echo 'Solvionyx OS Aurora GNOME $AURORA_VERSION' > /etc/issue
 "
+echo "👤 Adding live session autologin..."
 
-echo "🎨 Adding live session autologin..."
-sudo bash -c "cat <<EOF > $CHROOT/etc/gdm3/custom.conf
+# Ensure GDM3 configuration directory exists
+sudo mkdir -p "$CHROOT/etc/gdm3" "$CHROOT/etc/gdm"
+
+# Autologin for the live user (works on Ubuntu 22.04–24.04)
+if [ -d "$CHROOT/etc/gdm3" ]; then
+  cat <<EOF | sudo tee "$CHROOT/etc/gdm3/custom.conf" >/dev/null
 [daemon]
-AutomaticLoginEnable=true
-AutomaticLogin=solvionyx
-EOF"
+AutomaticLoginEnable = true
+AutomaticLogin = liveuser
+EOF
+elif [ -d "$CHROOT/etc/gdm" ]; then
+  cat <<EOF | sudo tee "$CHROOT/etc/gdm/custom.conf" >/dev/null
+[daemon]
+AutomaticLoginEnable = true
+AutomaticLogin = liveuser
+EOF
+else
+  echo "⚠️ Warning: GDM directory not found; skipping autologin setup."
+fi
 
 echo "🧬 Copying kernel and initrd..."
 KERNEL_PATH=$(find "$CHROOT/boot" -type f -name "vmlinuz-*" | head -n1)
