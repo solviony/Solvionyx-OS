@@ -9,7 +9,7 @@ set -euo pipefail
 # Tagline: "The engine behind the vision."
 # ==============================================
 
-VERSION="v4.7.1"
+VERSION="v4.7.5"
 ARCH="amd64"
 DIST="noble"
 BUILD_DIR="$PWD/solvionyx_build"
@@ -17,28 +17,28 @@ CHROOT="$BUILD_DIR/chroot"
 ISO_NAME="Solvionyx-Aurora-${VERSION}.iso"
 ISO_OUT="$BUILD_DIR/$ISO_NAME"
 
-echo "🚀 Starting Solvionyx Aurora OS Build $VERSION..."
+echo "🚀 Building Solvionyx Aurora OS $VERSION..."
 
 # ==============================
-# Environment Setup
+# Dependencies
 # ==============================
 sudo apt-get update -y
 sudo apt-get install -y \
   debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
   syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-  rsync systemd-container genisoimage dosfstools xz-utils plymouth-theme-spinner || true
+  rsync systemd-container genisoimage dosfstools xz-utils plymouth-theme-spinner
 
 sudo rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
 # ==============================
-# Bootstrap Base System
+# Bootstrap base system
 # ==============================
-echo "📦 Bootstrapping Ubuntu $DIST system..."
+echo "📦 Bootstrapping Ubuntu $DIST..."
 sudo debootstrap --arch="$ARCH" "$DIST" "$CHROOT" http://archive.ubuntu.com/ubuntu/
 
 # ==============================
-# APT Sources
+# Sources & update
 # ==============================
 cat <<EOF | sudo tee "$CHROOT/etc/apt/sources.list"
 deb http://archive.ubuntu.com/ubuntu/ $DIST main restricted universe multiverse
@@ -56,9 +56,10 @@ apt-get install -y ubuntu-desktop gdm3 gnome-shell gnome-session gedit nautilus 
 plymouth-theme-spinner grub-efi-amd64 grub2-common calamares calamares-settings-debian --no-install-recommends || true
 "
 
-# Branding
+# ==============================
+# Branding setup
+# ==============================
 sudo mkdir -p "$CHROOT/usr/share/solvionyx"
-sudo mkdir -p "$CHROOT/etc/solvionyx"
 cat <<EOM | sudo tee "$CHROOT/etc/lsb-release"
 DISTRIB_ID=Solvionyx
 DISTRIB_RELEASE=$VERSION
@@ -67,7 +68,7 @@ DISTRIB_CODENAME=aurora
 EOM
 
 # ==============================
-# Live User
+# Live user
 # ==============================
 sudo chroot "$CHROOT" useradd -m -s /bin/bash solvionyx || true
 echo "solvionyx:live" | sudo chroot "$CHROOT" chpasswd || true
@@ -84,7 +85,7 @@ EOF
 sudo chroot "$CHROOT" apt-get install -y linux-image-generic linux-headers-generic initramfs-tools || true
 
 # ==============================
-# Calamares Post-install Hook
+# Calamares Hook
 # ==============================
 sudo mkdir -p "$CHROOT/etc/calamares/modules"
 cat <<'HOOK' | sudo tee "$CHROOT/etc/calamares/modules/solvionyx-finish.conf"
@@ -100,35 +101,25 @@ args:
       echo "127.0.1.1 Solvionyx-Aurora" >> /etc/hosts
       gsettings set org.gnome.desktop.background picture-uri 'file:///usr/share/solvionyx/wallpaper.jpg' || true
       update-initramfs -u || true
-      echo "✅ Solvionyx branding applied."
+      echo "✅ Branding applied."
 HOOK
 
 # ==============================
-# ISO Structure
+# Prepare ISO structure
 # ==============================
 echo "🧱 Preparing ISO structure..."
-sudo mkdir -pm 777 "$BUILD_DIR/image/casper"
-sudo mkdir -pm 777 "$BUILD_DIR/image/boot/grub"
-sudo mkdir -pm 777 "$BUILD_DIR/image/isolinux"
-sudo mkdir -pm 777 "$BUILD_DIR/image/EFI/boot"
+sudo mkdir -pm 777 "$BUILD_DIR/image/casper" "$BUILD_DIR/image/boot/grub" "$BUILD_DIR/image/isolinux" "$BUILD_DIR/image/EFI/boot"
 
 # ==============================
-# Kernel & Initrd Detection
+# Kernel detection
 # ==============================
-KERNEL_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "vmlinuz*" | head -n1 || true)
-INITRD_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "initrd*.img*" | head -n1 || true)
-
-echo "🔍 Checking kernel files..."
-echo "Kernel path: $KERNEL_PATH"
-echo "Initrd path: $INITRD_PATH"
+KERNEL_PATH=$(sudo find "$CHROOT/boot" -type f -name "vmlinuz*" | head -n1 || true)
+INITRD_PATH=$(sudo find "$CHROOT/boot" -type f -name "initrd*.img*" | head -n1 || true)
 
 if [[ -f "$KERNEL_PATH" && -f "$INITRD_PATH" ]]; then
-  echo "✅ Kernel found: $(basename "$KERNEL_PATH")"
-  echo "✅ Initrd found: $(basename "$INITRD_PATH")"
-  echo "📂 Ensuring /casper directory exists..."
-  sudo mkdir -pm 777 "$BUILD_DIR/image/casper" || true
   sudo cp "$KERNEL_PATH" "$BUILD_DIR/image/casper/vmlinuz"
   sudo cp "$INITRD_PATH" "$BUILD_DIR/image/casper/initrd"
+  echo "✅ Kernel + initrd copied successfully."
 else
   echo "❌ Kernel or initrd missing!"
   sudo ls -lh "$CHROOT/boot"
@@ -138,11 +129,10 @@ fi
 # ==============================
 # SquashFS
 # ==============================
-echo "📦 Creating SquashFS..."
 sudo mksquashfs "$CHROOT" "$BUILD_DIR/image/casper/filesystem.squashfs" -e boot || true
 
 # ==============================
-# GRUB Config
+# GRUB
 # ==============================
 cat <<EOF | sudo tee "$BUILD_DIR/image/boot/grub/grub.cfg"
 set default=0
@@ -162,49 +152,21 @@ EOF
 # ==============================
 ISOLINUX_PATH=$(sudo find /usr/lib -type f -name "isolinux.bin" | head -n1 || true)
 MBR_BIN=$(sudo find /usr/lib -type f -name "isohdpfx.bin" | head -n1 || true)
-LDLINUX_C32=$(sudo find /usr/lib -type f -name "ldlinux.c32" | head -n1 || true)
 
-[[ -f "$ISOLINUX_PATH" ]] && sudo cp "$ISOLINUX_PATH" "$BUILD_DIR/image/isolinux/isolinux.bin" || echo "⚠ isolinux.bin not found"
-[[ -f "$LDLINUX_C32" ]] && sudo cp "$LDLINUX_C32" "$BUILD_DIR/image/isolinux/ldlinux.c32" || echo "⚠ ldlinux.c32 not found"
-
-# ==============================
-# Hybrid ISO Build
-# ==============================
-cd "$BUILD_DIR"
-echo "💿 Building Solvionyx Aurora ISO..."
-ISO_BUILT=false
-
-if [[ -f "$ISOLINUX_PATH" && -f "$MBR_BIN" ]]; then
-  sudo xorriso -as mkisofs \
-    -r -V "SOLVIONYX_OS" -J -l -cache-inodes \
-    -isohybrid-mbr "$MBR_BIN" \
-    -b isolinux/isolinux.bin -c isolinux/boot.cat \
-    -no-emul-boot -boot-load-size 4 -boot-info-table \
-    -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
-    -isohybrid-gpt-basdat -o "$ISO_OUT" image && ISO_BUILT=true
-fi
-
-if [[ "$ISO_BUILT" == false ]]; then
-  echo "⚠ xorriso failed, fallback to grub-mkrescue..."
-  sudo grub-mkrescue -o "$ISO_OUT" image -- -volid "SOLVIONYX_OS" || true
-fi
-
-if [[ ! -f "$ISO_OUT" ]]; then
-  echo "❌ Failed to build ISO. Bootloaders missing!"
-  exit 1
-fi
+sudo xorriso -as mkisofs \
+  -r -V "SOLVIONYX_OS" -J -l -cache-inodes \
+  -isohybrid-mbr "$MBR_BIN" \
+  -b isolinux/isolinux.bin -c isolinux/boot.cat \
+  -no-emul-boot -boot-load-size 4 -boot-info-table \
+  -o "$ISO_OUT" "$BUILD_DIR/image"
 
 # ==============================
 # Compress & Verify
 # ==============================
-sudo chmod -R a+rw "$BUILD_DIR"
-xz -T0 -z "$ISO_OUT" || true
+echo "🗜️ Compressing ISO (max level)..."
+xz -T0 -9e "$ISO_OUT"
 
-echo "🔍 Verifying ISO structure..."
-if xorriso -indev "${ISO_OUT}.xz" -find /casper/vmlinuz /boot/grub/grub.cfg 2>/dev/null; then
-  echo "✅ ISO verification passed (kernel & GRUB found)."
-else
-  echo "⚠ ISO verification skipped (read-only check)."
-fi
+echo "🔍 Verifying compressed ISO..."
+xz -t "${ISO_OUT}.xz" && echo "✅ Integrity OK" || echo "⚠️ Verification failed"
 
-echo "✅ Build complete. Output: ${ISO_OUT}.xz"
+echo "✅ Build complete: ${ISO_OUT}.xz"
