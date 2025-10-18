@@ -33,6 +33,21 @@ echo "📦 Bootstrapping Ubuntu $DIST system..."
 sudo debootstrap --arch="$ARCH" "$DIST" "$CHROOT" http://archive.ubuntu.com/ubuntu/
 
 # ==============================
+# Enable all Ubuntu repositories (FIX)
+# ==============================
+echo "🌍 Enabling universe and multiverse repositories..."
+sudo tee "$CHROOT/etc/apt/sources.list" > /dev/null <<EOF
+deb http://archive.ubuntu.com/ubuntu $DIST main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu $DIST-updates main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu $DIST-backports main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu $DIST-security main restricted universe multiverse
+EOF
+
+sudo chroot "$CHROOT" apt-get update
+echo "✅ Repository sources updated successfully."
+
+
+# ==============================
 # Mount essential filesystems
 # ==============================
 echo "🔗 Mounting /dev, /proc, /sys..."
