@@ -95,17 +95,29 @@ echo "🧱 Creating ISO structure..."
 sudo mkdir -p "$BUILD_DIR/image/casper"
 sudo mkdir -p "$BUILD_DIR/image/boot/grub"
 
-sudo cp "$CHROOT/boot/vmlinuz"* "$BUILD_DIR/image/casper/vmlinuz" || true
-sudo cp "$CHROOT/boot/initrd.img"* "$BUILD_DIR/image/casper/initrd" || true
+# Find kernel and initrd dynamically (handles versioned names)
+KERNEL_PATH=$(sudo find "$CHROOT/boot" -type f -name "vmlinuz*" | head -n1 || true)
+INITRD_PATH=$(sudo find "$CHROOT/boot" -type f -name "initrd*.img" | head -n1 || true)
+
+if [[ -f "$KERNEL_PATH" && -f "$INITRD_PATH" ]]; then
+    echo "✅ Kernel found: $(basename "$KERNEL_PATH")"
+    echo "✅ Initrd found: $(basename "$INITRD_PATH")"
+    sudo cp "$KERNEL_PATH" "$BUILD_DIR/image/casper/vmlinuz"
+    sudo cp "$INITRD_PATH" "$BUILD_DIR/image/casper/initrd"
+else
+    echo "❌ Kernel or initrd not found inside chroot!"
+    ls -lh "$CHROOT/boot" || true
+    exit 1
+fi
 
 # ==============================
 # Create SquashFS
 # ==============================
-echo "📦 Creating SquashFS..."
+echo "📦 Creating SquashFS filesystem..."
 sudo mksquashfs "$CHROOT" "$BUILD_DIR/image/casper/filesystem.squashfs" -e boot || true
 
 # ==============================
-# Bootloader Configuration
+# Bootloader Configuration (GRUB)
 # ==============================
 cat <<EOF | sudo tee "$BUILD_DIR/image/boot/grub/grub.cfg"
 set default=0
@@ -117,14 +129,15 @@ menuentry "Run Solvionyx OS Aurora (Live)" {
 EOF
 
 # ==============================
-# Build the ISO Image
+# Create ISO Image
 # ==============================
-echo "💿 Building Solvionyx ISO..."
+echo "💿 Building Solvionyx Aurora ISO..."
 cd "$BUILD_DIR"
-sudo grub-mkrescue -o "$ISO_OUT" image -- -volid "SOLVIONYX_OS" || true
+sudo grub-mkrescue -o "$ISO_OUT" image --modules="linux normal iso9660 biosdisk search part_msdos" \
+    -- -volid "SOLVIONYX_OS" || true
 
 # ==============================
-# Compress & Fix Permissions
+# Compress ISO Safely
 # ==============================
 echo "🗜️ Compressing Solvionyx ISO..."
 sudo chmod -R a+rw "$BUILD_DIR"
@@ -132,24 +145,36 @@ XZ_OPT="--no-sparse --no-preserve-owner --no-preserve-permissions"
 xz -T0 -z "$ISO_OUT" || true
 
 # ==============================
-# ✅ ISO Integrity Verification
+# Verify ISO Boot Integrity
 # ==============================
 echo "🔍 Verifying Solvionyx ISO integrity..."
 ISO_COMPRESSED="${ISO_OUT}.xz"
 if [[ -f "$ISO_OUT.xz" ]]; then
     echo "✔ ISO compression completed."
 else
-    echo "❌ Compression failed, using raw ISO."
+    echo "⚠ Compression failed, using raw ISO."
     ISO_COMPRESSED="$ISO_OUT"
 fi
 
-# Verify kernel and GRUB presence
-if sudo xorriso -indev "$ISO_OUT" -find /casper/vmlinuz /boot/grub/grub.cfg >/dev/null 2>&1; then
-    echo "✅ ISO verification passed — kernel & GRUB found."
+# Mount and check for kernel + GRUB
+MOUNT_DIR="$BUILD_DIR/iso_mount"
+mkdir -p "$MOUNT_DIR"
+sudo mount -o loop "$ISO_OUT" "$MOUNT_DIR" || true
+
+if [[ -f "$MOUNT_DIR/casper/vmlinuz" && -f "$MOUNT_DIR/boot/grub/grub.cfg" ]]; then
+    echo "✅ ISO verification passed — kernel & GRUB present."
 else
     echo "❌ ISO verification failed — missing boot files!"
+    echo "Contents of /casper:"
+    sudo ls -l "$MOUNT_DIR/casper" || true
+    echo "Contents of /boot/grub:"
+    sudo ls -l "$MOUNT_DIR/boot/grub" || true
+    sudo umount "$MOUNT_DIR" || true
     exit 1
 fi
+
+sudo umount "$MOUNT_DIR" || true
+rm -rf "$MOUNT_DIR"
 
 # ==============================
 # Finalize
