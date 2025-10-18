@@ -9,7 +9,7 @@ set -euo pipefail
 # Tagline: "The engine behind the vision."
 # ==============================================
 
-VERSION="v4.6.6"
+VERSION="v4.6.7"
 ARCH="amd64"
 DIST="noble"
 BUILD_DIR="$PWD/solvionyx_build"
@@ -23,8 +23,10 @@ echo "🚀 Starting Solvionyx Aurora OS Build $VERSION..."
 # Prepare Build Environment
 # ==============================
 sudo apt-get update -y
-sudo apt-get install -y debootstrap grub-pc-bin grub-efi-amd64-bin mtools xorriso squashfs-tools \
-    rsync systemd-container gpg isolinux genisoimage dosfstools xz-utils plymouth-theme-spinner || true
+sudo apt-get install -y \
+  debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
+  syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
+  rsync systemd-container gpg genisoimage dosfstools xz-utils plymouth-theme-spinner || true
 
 sudo rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -36,7 +38,7 @@ echo "📦 Bootstrapping Ubuntu $DIST system..."
 sudo debootstrap --arch="$ARCH" "$DIST" "$CHROOT" http://archive.ubuntu.com/ubuntu/
 
 # ==============================
-# Configure Apt Sources
+# Configure APT Sources
 # ==============================
 cat <<EOF | sudo tee "$CHROOT/etc/apt/sources.list"
 deb http://archive.ubuntu.com/ubuntu/ $DIST main restricted universe multiverse
@@ -55,7 +57,7 @@ apt-get install -y ubuntu-desktop gdm3 gnome-shell gnome-session gedit nautilus 
 plymouth-theme-spinner grub-efi-amd64 grub2-common calamares calamares-settings-debian --no-install-recommends || true
 "
 
-# Branding info
+# Branding
 sudo mkdir -p "$CHROOT/usr/share/solvionyx"
 sudo mkdir -p "$CHROOT/etc/solvionyx"
 cat <<EOM | sudo tee "$CHROOT/etc/lsb-release"
@@ -113,7 +115,7 @@ echo "🧱 Preparing ISO structure..."
 sudo mkdir -p "$BUILD_DIR/image/casper"
 sudo mkdir -p "$BUILD_DIR/image/boot/grub"
 
-# Fix: detect versioned kernel/initrd names
+# Detect kernel/initrd (handles versioned files)
 KERNEL_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "vmlinuz*" | head -n1 || true)
 INITRD_PATH=$(sudo find "$CHROOT/boot" -maxdepth 1 -type f -name "initrd*.img*" | head -n1 || true)
 
@@ -151,22 +153,40 @@ menuentry "Install Solvionyx OS Aurora" {
 EOF
 
 # ==============================
+# Locate Bootloaders
+# ==============================
+ISOLINUX_BIN=$(sudo find /usr/lib -name "isolinux.bin" | head -n1 || true)
+MBR_BIN=$(sudo find /usr/lib -name "isohdpfx.bin" | head -n1 || true)
+GRUB_EFI_MOD=$(sudo find /usr/lib/grub -name "biosdisk.mod" | head -n1 || true)
+
+echo "🔍 Detected bootloaders:"
+echo "ISOLINUX_BIN: ${ISOLINUX_BIN:-not found}"
+echo "MBR_BIN: ${MBR_BIN:-not found}"
+echo "GRUB_EFI_MOD: ${GRUB_EFI_MOD:-not found}"
+
+# ==============================
 # Hybrid ISO Build
 # ==============================
 echo "💿 Building Solvionyx Aurora ISO..."
 cd "$BUILD_DIR"
 ISO_BUILT=false
 
-if sudo grub-mkrescue -o "$ISO_OUT" image --modules="linux normal iso9660 biosdisk search part_msdos all_video gfxterm" -- -volid "SOLVIONYX_OS"; then
-    echo "✅ Built successfully with grub-mkrescue."
-    ISO_BUILT=true
+if [[ -n "$GRUB_EFI_MOD" ]]; then
+    if sudo grub-mkrescue -o "$ISO_OUT" image --modules="linux normal iso9660 biosdisk search part_msdos all_video gfxterm" -- -volid "SOLVIONYX_OS"; then
+        echo "✅ Built successfully with grub-mkrescue."
+        ISO_BUILT=true
+    fi
 else
-    echo "⚠ grub-mkrescue failed, retrying with xorriso..."
-    sleep 2
+    echo "⚠ grub-mkrescue unavailable or missing module — skipping."
+fi
+
+if [[ "$ISO_BUILT" == false && -n "$ISOLINUX_BIN" && -n "$MBR_BIN" ]]; then
+    echo "⚙ Building fallback ISO with xorriso..."
     sudo xorriso -as mkisofs \
       -r -V "SOLVIONYX_OS" -J -l -cache-inodes \
-      -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-      -b isolinux/isolinux.bin -c isolinux/boot.cat \
+      -isohybrid-mbr "$MBR_BIN" \
+      -b "$(basename "$ISOLINUX_BIN")" \
+      -c isolinux/boot.cat \
       -no-emul-boot -boot-load-size 4 -boot-info-table \
       -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
       -isohybrid-gpt-basdat -o "$ISO_OUT" image || true
@@ -178,14 +198,14 @@ else
 fi
 
 if [[ "$ISO_BUILT" == false ]]; then
-    echo "❌ Failed to build ISO with both grub-mkrescue and xorriso."
+    echo "❌ Failed to build ISO (no valid bootloader paths)."
     exit 1
 fi
 
 # ==============================
 # Compress & Verify
 # ==============================
-echo "🗜️ Compressing ISO..."
+echo "🗜️ Compressing Solvionyx ISO..."
 sudo chmod -R a+rw "$BUILD_DIR"
 xz -T0 -z "$ISO_OUT" || true
 
