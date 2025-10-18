@@ -1,0 +1,36 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<title>Solvionyx OS System Information</title>
+<style>
+body{background:#0B0C10;color:#E0E0E0;font-family:"Inter",sans-serif;margin:0;padding:20px}
+h1{color:#4FE0B0;text-align:center;margin-bottom:10px}.tagline{color:#66FFCC;text-align:center;font-style:italic;margin-bottom:25px}
+.info{max-width:700px;margin:auto;background:#141414;border-radius:12px;padding:20px;border:1px solid #2A2A2A}
+table{width:100%;border-collapse:collapse}th{text-align:left;color:#4FE0B0;padding-bottom:5px;font-size:14px}
+td{padding:6px 0;border-bottom:1px solid #222;font-size:13px}h2{color:#4FE0B0;border-bottom:1px solid #2A2A2A;padding-bottom:4px}
+pre{background:#101010;padding:10px;border-radius:8px;color:#E0E0E0;overflow-x:auto}.footer{text-align:center;color:#4FE0B0;margin-top:30px;font-size:12px}
+</style></head><body>
+<h1>Solvionyx OS Aurora GNOME</h1><div class="tagline">The engine behind the vision.</div>
+<div class="info">
+<h2>System Overview</h2>
+<table>
+<tr><th>Edition</th><td>Aurora GNOME</td></tr>
+<tr><th>Version</th><td>4.6.1</td></tr>
+<tr><th>Codename</th><td>Aurora</td></tr>
+<tr><th>Kernel</th><td>$(uname -r)</td></tr>
+<tr><th>Architecture</th><td>$(uname -m)</td></tr>
+<tr><th>Build Date</th><td>2025-10-18</td></tr>
+</table>
+<h2>Hardware</h2>
+<table>
+<tr><th>CPU</th><td>$(cpu_model)</td></tr>
+<tr><th>Memory</th><td>$(ram_size)</td></tr>
+<tr><th>GPU</th><td>$(gpu_model)</td></tr>
+<tr><th>Storage</th><td>$(disk_model)</td></tr>
+</table>
+<h2>Summary (inxi)</h2><pre>$(inxi_output)</pre>
+<h2>Maintainer</h2>
+<table>
+<tr><th>Organization</th><td>Solviony Labs by Solviony Inc.</td></tr>
+<tr><th>Website</th><td><a href="https://solviony.com/page/os" style="color:#66FFCC">solviony.com/page/os</a></td></tr>
+</table></div>
+<div class="footer">© 2025 Solviony Labs by Solviony Inc. — Aurora Series</div>
+</body></html>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="240" viewBox="0 0 800 240">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4FE0B0"/><stop offset="100%" stop-color="#66FFCC"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="100%" height="100%" fill="#0B0C10"/>
+  <g transform="translate(60,120)"><circle r="40" fill="none" stroke="url(#g)" stroke-width="6" filter="url(#glow)"/><circle r="6" fill="url(#g)" transform="translate(38,0)"/></g>
+  <text x="135" y="132" font-family="Inter, Ubuntu, sans-serif" font-weight="800" font-size="72" fill="url(#g)">Solvionyx</text>
+  <text x="135" y="168" font-family="Inter, Ubuntu, sans-serif" font-size="20" fill="#A0F5DA">The engine behind the vision.</text>
+</svg>

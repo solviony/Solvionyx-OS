@@ -86,3 +86,84 @@ sudo grub-mkrescue -o "$WORKDIR/Solvionyx-Aurora-$AURORA_VERSION.iso" "$ISO_DIR"
 
 echo "✅ Build Complete: Solvionyx-Aurora-$AURORA_VERSION.iso"
 ls -lh "$WORKDIR"/Solvionyx-Aurora-*.iso
+
+### SOLVIONYX BRANDING START
+echo "🎨 Integrating Solvionyx branding & system info..."
+sudo apt-get update -y
+sudo apt-get install -y --no-install-recommends imagemagick librsvg2-bin gir1.2-webkit2-4.0 || true
+sudo chroot "$CHROOT" apt-get update -y
+sudo chroot "$CHROOT" apt-get install -y --no-install-recommends inxi lshw || true
+
+# Calamares theme
+sudo mkdir -p "$CHROOT/usr/share/calamares/branding/solvionyx"
+sudo rsync -a branding/calamares/branding/solvionyx/ "$CHROOT/usr/share/calamares/branding/solvionyx/"
+[ -d "$CHROOT/etc/calamares" ] && { sudo rm -f "$CHROOT/etc/calamares/branding"; sudo ln -s /usr/share/calamares/branding/solvionyx "$CHROOT/etc/calamares/branding"; }
+
+# Render assets (logo, backgrounds)
+rsvg-convert branding/calamares/branding/solvionyx/images/logo.svg -o /tmp/logo-dark.png -w 512 -h 512
+convert -size 1920x1080 gradient:"#0B0C10-#0E1113" \( -size 1920x1080 radial-gradient:#003b2e-#0B0C10 -evaluate multiply 0.6 \) -compose screen -composite /tmp/aurora-bg.png
+
+# Plymouth
+sudo rsync -a branding/plymouth/solvionyx-aurora/ "$CHROOT/usr/share/plymouth/themes/solvionyx-aurora/"
+sudo cp /tmp/logo-dark.png "$CHROOT/usr/share/plymouth/themes/solvionyx-aurora/logo.png"
+echo -e "[Daemon]\nTheme=solvionyx-aurora" | sudo tee "$CHROOT/etc/plymouth/plymouthd.conf" >/dev/null
+sudo chroot "$CHROOT" update-initramfs -u || true
+
+# GRUB background + menu
+mkdir -p "$ISO_DIR/boot/grub"
+sudo cp /tmp/aurora-bg.png "$ISO_DIR/boot/grub/background.png"
+cat > "$ISO_DIR/boot/grub/grub.cfg" <<'GRUBCFG'
+set default=0
+set timeout=5
+if [ -e /boot/grub/background.png ]; then
+  insmod png
+  background_image /boot/grub/background.png
+fi
+menuentry "Try Solvionyx OS Aurora (Live)" {
+    linux /casper/vmlinuz boot=casper quiet splash ---
+    initrd /casper/initrd
+}
+menuentry "Install Solvionyx OS Aurora" {
+    linux /casper/vmlinuz boot=casper only-ubiquity quiet splash ---
+    initrd /casper/initrd
+}
+GRUBCFG
+
+# GNOME wallpaper default
+sudo mkdir -p "$CHROOT/usr/share/backgrounds/solvionyx"
+sudo cp /tmp/aurora-bg.png "$CHROOT/usr/share/backgrounds/solvionyx/aurora-default.png"
+sudo mkdir -p "$CHROOT/usr/share/glib-2.0/schemas"
+cat <<'GSC' | sudo tee "$CHROOT/usr/share/glib-2.0/schemas/99-solvionyx-defaults.gschema.override" >/dev/null
+[org.gnome.desktop.background]
+picture-uri='file:///usr/share/backgrounds/solvionyx/aurora-default.png'
+picture-options='zoom'
+primary-color='#0B0C10'
+secondary-color='#0B0C10'
+GSC
+sudo chroot "$CHROOT" glib-compile-schemas /usr/share/glib-2.0/schemas || true
+
+# About app + System Info
+sudo mkdir -p "$CHROOT/usr/share/solvionyx"
+sudo cp branding/solvionyx/brand.json "$CHROOT/usr/share/solvionyx/"
+sudo cp branding/solvionyx/info.html "$CHROOT/usr/share/solvionyx/"
+sudo cp branding/solvionyx/about-solvionyx.py "$CHROOT/usr/share/solvionyx/"
+sudo chmod +x "$CHROOT/usr/share/solvionyx/about-solvionyx.py"
+sudo cp branding/solvionyx/about-solvionyx.desktop "$CHROOT/usr/share/applications/"
+
+# GNOME Quick Settings extension
+sudo mkdir -p "$CHROOT/usr/share/gnome-shell/extensions/solvionyx-about@solvionyx"
+sudo rsync -a branding/gnome-extension/solvionyx-about@solvionyx/ "$CHROOT/usr/share/gnome-shell/extensions/solvionyx-about@solvionyx/"
+sudo mkdir -p "$CHROOT/etc/dconf/db/local.d/"
+cat <<'DCONF' | sudo tee "$CHROOT/etc/dconf/db/local.d/10-solvionyx-extensions" >/dev/null
+[org/gnome/shell]
+enabled-extensions=['solvionyx-about@solvionyx']
+DCONF
+sudo chroot "$CHROOT" dconf update || true
+
+# GNOME About integration
+sudo cp branding/solvionyx/os-release "$CHROOT/etc/os-release"
+sudo cp branding/solvionyx/solvionyx-release "$CHROOT/etc/solvionyx-release"
+echo "Welcome to Solvionyx OS Aurora (The engine behind the vision.)" | sudo tee "$CHROOT/etc/issue" >/dev/null
+echo "Solvionyx OS — Aurora GNOME Edition" | sudo tee "$CHROOT/etc/motd" >/dev/null
+
+### SOLVIONYX BRANDING END
