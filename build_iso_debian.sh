@@ -150,30 +150,30 @@ EOF
 # ==============================
 # Bootloaders (auto-detect paths)
 # ==============================
-echo "⚙️  Setting up bootloader files..."
-
+echo "⚙️  Locating bootloader files..."
 ISOLINUX_PATH=$(sudo find /usr/lib -type f -name "isolinux.bin" | head -n1 || true)
 MBR_BIN=$(sudo find /usr/lib -type f -name "isohdpfx.bin" | head -n1 || true)
 
 if [[ ! -f "$ISOLINUX_PATH" ]]; then
-  echo "❌ isolinux.bin not found. Installing syslinux again..."
+  echo "❌ isolinux.bin not found, reinstalling syslinux..."
   sudo apt-get install --reinstall -y syslinux isolinux
   ISOLINUX_PATH=$(sudo find /usr/lib -type f -name "isolinux.bin" | head -n1 || true)
 fi
-
 if [[ ! -f "$MBR_BIN" ]]; then
-  echo "❌ isohdpfx.bin not found. Searching alternative path..."
+  echo "❌ isohdpfx.bin not found, searching again..."
   MBR_BIN=$(sudo find /usr/lib -type f -name "isohdpfx*.bin" | head -n1 || true)
 fi
-
 if [[ -z "$ISOLINUX_PATH" || -z "$MBR_BIN" ]]; then
-  echo "❌ Bootloader components missing — cannot proceed."
+  echo "❌ Bootloader files still missing, aborting."
   exit 1
-else
-  echo "✅ Found isolinux.bin at: $ISOLINUX_PATH"
-  echo "✅ Found isohdpfx.bin at: $MBR_BIN"
 fi
 
+sudo xorriso -as mkisofs \
+  -r -V "SOLVIONYX_OS" -J -l -cache-inodes \
+  -isohybrid-mbr "$MBR_BIN" \
+  -b isolinux/isolinux.bin -c isolinux/boot.cat \
+  -no-emul-boot -boot-load-size 4 -boot-info-table \
+  -o "$ISO_OUT" "$BUILD_DIR/image"
 # ==============================
 # ISO build
 # ==============================
