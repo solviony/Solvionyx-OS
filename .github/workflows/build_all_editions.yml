@@ -31,25 +31,36 @@ jobs:
     - name: 🗜️ Compress ISO (maximum compression)
       run: |
         cd solvionyx_build
-        echo "🗜️  Compressing Solvionyx Aurora ISO..."
-        if ls *.iso 1> /dev/null 2>&1; then
+        echo "🗜️ Checking for existing ISO..."
+
+        # Check if already compressed
+        if ls *.iso.xz 1> /dev/null 2>&1; then
+          echo "✅ ISO already compressed — skipping recompression."
+          ls -lh *.iso.xz
+        elif ls *.iso 1> /dev/null 2>&1; then
+          echo "🗜️ Compressing Solvionyx Aurora ISO..."
           xz -T0 -9e Solvionyx-Aurora-*.iso
           echo "✅ Compression complete."
           ls -lh Solvionyx-Aurora-*.iso.xz
+
           SIZE=$(stat -c%s Solvionyx-Aurora-*.iso.xz)
           if [ "$SIZE" -gt 2100000000 ]; then
-            echo "⚠️  Warning: File still above 2 GB. Consider splitting next time."
+            echo "⚠️  Warning: File still above 2 GB (GitHub limit). Consider chunked release."
+          else
+            echo "📦 Final size OK: $((SIZE / 1024 / 1024)) MB"
           fi
         else
-          echo "❌ No ISO found to compress."
+          echo "❌ No ISO found to compress!"
           exit 1
         fi
 
     - name: 🔐 Generate checksums
       run: |
         cd solvionyx_build
+        echo "🔐 Generating SHA256 checksums..."
         sha256sum *.xz > SHA256SUMS.txt
         chmod 644 SHA256SUMS.txt
+        cat SHA256SUMS.txt
 
     - name: 📦 Upload compressed ISO artifact
       uses: actions/upload-artifact@v4
