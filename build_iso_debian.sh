@@ -9,7 +9,7 @@ set -euo pipefail
 # Tagline: "The engine behind the vision."
 # ==============================================
 
-VERSION="v4.7.5"
+VERSION="v4.7.7"
 ARCH="amd64"
 DIST="noble"
 BUILD_DIR="$PWD/solvionyx_build"
@@ -132,7 +132,7 @@ fi
 sudo mksquashfs "$CHROOT" "$BUILD_DIR/image/casper/filesystem.squashfs" -e boot || true
 
 # ==============================
-# GRUB
+# GRUB menu
 # ==============================
 cat <<EOF | sudo tee "$BUILD_DIR/image/boot/grub/grub.cfg"
 set default=0
@@ -148,9 +148,9 @@ menuentry "Install Solvionyx OS Aurora" {
 EOF
 
 # ==============================
-# Bootloaders (auto-detect paths)
+# Bootloaders (auto-detect + copy)
 # ==============================
-echo "⚙️  Locating bootloader files..."
+echo "⚙️ Locating and preparing bootloader files..."
 ISOLINUX_PATH=$(sudo find /usr/lib -type f -name "isolinux.bin" | head -n1 || true)
 MBR_BIN=$(sudo find /usr/lib -type f -name "isohdpfx.bin" | head -n1 || true)
 
@@ -168,15 +168,14 @@ if [[ -z "$ISOLINUX_PATH" || -z "$MBR_BIN" ]]; then
   exit 1
 fi
 
-sudo xorriso -as mkisofs \
-  -r -V "SOLVIONYX_OS" -J -l -cache-inodes \
-  -isohybrid-mbr "$MBR_BIN" \
-  -b isolinux/isolinux.bin -c isolinux/boot.cat \
-  -no-emul-boot -boot-load-size 4 -boot-info-table \
-  -o "$ISO_OUT" "$BUILD_DIR/image"
+echo "✅ Found isolinux.bin: $ISOLINUX_PATH"
+echo "✅ Found isohdpfx.bin: $MBR_BIN"
+sudo cp "$ISOLINUX_PATH" "$BUILD_DIR/image/isolinux/isolinux.bin"
+
 # ==============================
-# ISO build
+# ISO Build
 # ==============================
+echo "💿 Building Solvionyx Aurora ISO..."
 sudo xorriso -as mkisofs \
   -r -V "SOLVIONYX_OS" -J -l -cache-inodes \
   -isohybrid-mbr "$MBR_BIN" \
