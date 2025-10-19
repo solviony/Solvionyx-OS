@@ -58,8 +58,14 @@ jobs:
       run: |
         cd solvionyx_build
         echo "🔐 Generating SHA256 checksums..."
-        sha256sum *.xz > SHA256SUMS.txt
+
+        # Fix permissions if files created by root
+        sudo chown -R $USER:$USER .
+
+        # Generate checksum safely
+        sha256sum *.xz | tee SHA256SUMS.txt > /dev/null
         chmod 644 SHA256SUMS.txt
+        echo "✅ Checksums generated:"
         cat SHA256SUMS.txt
 
     - name: 📦 Upload compressed ISO artifact
