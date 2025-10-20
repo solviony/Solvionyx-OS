@@ -5,9 +5,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     name: Aurora (GNOME)
@@ -24,38 +21,45 @@ jobs:
         sudo apt-get install -y \
           debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-          rsync systemd-container genisoimage dosfstools xz-utils plymouth-theme-spinner lftp
+          rsync systemd-container genisoimage dosfstools xz-utils plymouth-theme-spinner
 
     - name: 🧠 Run Solvionyx Aurora ISO Builder
       run: |
         chmod +x build_iso_debian.sh
         sudo bash build_iso_debian.sh
 
-    - name: 🗜️ Compress ISO
+    - name: 🗜️ Compress ISO (maximum compression)
       run: |
         cd solvionyx_build
-        for f in Solvionyx-Aurora-*.iso; do
-          mv "$f" "Solvionyx-Aurora-v${{ github.run_number }}.iso"
-        done
-        xz -T0 -9e Solvionyx-Aurora-v${{ github.run_number }}.iso
-        sha256sum Solvionyx-Aurora-v${{ github.run_number }}.iso.xz > SHA256SUMS.txt
+        echo "🗜️ Compressing Solvionyx Aurora ISO..."
+        if ls *.iso 1> /dev/null 2>&1; then
+          xz -T0 -9e Solvionyx-Aurora-*.iso
+          echo "✅ Compression complete."
+          ls -lh Solvionyx-Aurora-*.iso.xz
+          SIZE=$(stat -c%s Solvionyx-Aurora-*.iso.xz)
+          if [ "$SIZE" -gt 2100000000 ]; then
+            echo "⚠️ Warning: File still above 2 GB. Consider splitting next time."
+          fi
+        else
+          echo "❌ No ISO found to compress."
+          exit 1
+        fi
 
-    - name: 🌐 Upload to Solviony.com
-      env:
-        SFTP_USER: ${{ secrets.SOLVIONYX_SFTP_USER }}
-        SFTP_PASS: ${{ secrets.SOLVIONYX_SFTP_PASS }}
+    - name: 🔐 Generate checksums
       run: |
         cd solvionyx_build
-        echo "🌍 Uploading Solvionyx Aurora to solviony.com..."
-        lftp -u "$SFTP_USER","$SFTP_PASS" sftp://solviony.com <<EOF
-        cd httpdocs/os/
-        put Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
-        put SHA256SUMS.txt
-        bye
-        EOF
-        echo "✅ Upload complete: https://solviony.com/os/"
+        sha256sum *.xz > SHA256SUMS.txt
+        chmod 644 SHA256SUMS.txt
 
-    - name: 🚀 Publish GitHub Release (metadata only)
+    - name: 📦 Upload compressed ISO artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Solvionyx-Aurora-v${{ github.run_number }}
+        path: |
+          solvionyx_build/Solvionyx-Aurora-*.iso.xz
+          solvionyx_build/SHA256SUMS.txt
+
+    - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: Aurora-v${{ github.run_number }}
@@ -64,23 +68,14 @@ jobs:
           **Solvionyx OS Aurora (GNOME Edition)**
           Tagline: *The engine behind the vision.*
 
-          ✅ GNOME desktop
-          ✅ Calamares installer
-          ✅ Solvionyx branding
-🟩 Live boot support
+          ✅ Includes:
+          - GNOME desktop environment
+          - Calamares installer
+          - Solvionyx branding
+          - Live boot support (casper)
 
-🌐 **Direct Download:**
-https://solviony.com/os/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
-
-🧾 SHA256SUMS:
-https://solviony.com/os/SHA256SUMS.txt
-
-
-
-
-          🌐 **Direct Download:**  
+          🌐 **Direct Download:**
           https://solviony.com/os/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
 
-          🧾 SHA256SUMS:  
+          🧾 **SHA256SUMS:**
           https://solviony.com/os/SHA256SUMS.txt
-          303fdb5 (Enable Solviony.com ISO hosting)
