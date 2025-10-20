@@ -67,14 +67,15 @@ jobs:
           ✅ GNOME desktop
           ✅ Calamares installer
           ✅ Solvionyx branding
-          ✅ Live boot support
-       HEAD
+🟩 Live boot support
 
-          🌐 **Direct Download:**  
-          https://solviony.com/os/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
+🌐 **Direct Download:**
+https://solviony.com/os/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
 
-          🧾 SHA256SUMS:  
-          https://solviony.com/os/SHA256SUMS.txt
+🧾 SHA256SUMS:
+https://solviony.com/os/SHA256SUMS.txt
+
+
 
 
           🌐 **Direct Download:**  
