@@ -28,7 +28,6 @@ jobs:
       run: |
         chmod +x build_iso_debian.sh
         sudo bash build_iso_debian.sh
-        # Ensure ISO was generated to solvionyx_build
         sudo find solvionyx_build -type f -name "*.iso" || echo "⚠️ No ISO yet."
 
     - name: 🗜️ Compress ISO (maximum compression)
@@ -52,23 +51,37 @@ jobs:
         chmod 644 SHA256SUMS.txt
         cat SHA256SUMS.txt
 
-    - name: 📤 Upload to Solviony.com via FTP
+    - name: 📤 Upload to Solviony.com via FTP (Versioned)
       env:
         FTP_HOST: ${{ secrets.FTP_HOST }}
         FTP_USER: ${{ secrets.FTP_USER }}
         FTP_PASS: ${{ secrets.FTP_PASS }}
       run: |
-        echo "🌐 Uploading ISO and checksum to solviony.com/os ..."
+        echo "🌐 Uploading versioned build to solviony.com..."
         cd solvionyx_build
-        lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF
-        set ssl:verify-certificate no
-        lcd .
-        cd /httpdocs/os
-        put -O . *.iso.xz
-        put -O . SHA256SUMS.txt
-        bye
-EOF
-        echo "✅ Upload to Solviony.com completed."
+
+        # Extract version from ISO filename (e.g., v4.8.0)
+        VERSION=$(ls Solvionyx-Aurora-*.iso.xz | sed -E 's/.*(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+        echo "Detected version: $VERSION"
+
+        # Create versioned and latest directories
+        lftp -e "
+          set ssl:verify-certificate no;
+          mkdir -p /httpdocs/os/$VERSION;
+          mkdir -p /httpdocs/os/latest;
+          lcd .;
+          cd /httpdocs/os/$VERSION;
+          put -O . *.iso.xz;
+          put -O . SHA256SUMS.txt;
+          cd /httpdocs/os/latest;
+          put -O . *.iso.xz;
+          put -O . SHA256SUMS.txt;
+          bye
+        " -u \"$FTP_USER\",\"$FTP_PASS\" \"$FTP_HOST\"
+
+        echo "✅ Upload completed to:"
+        echo "   → https://solviony.com/os/$VERSION/"
+        echo "   → https://solviony.com/os/latest/"
 
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
@@ -86,7 +99,7 @@ EOF
           - Live boot support (casper)
 
           🌐 **Direct Download:**
-          https://solviony.com/os/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
+          https://solviony.com/os/latest/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
 
           🧾 **SHA256SUMS:**
-          https://solviony.com/os/SHA256SUMS.txt
+          https://solviony.com/os/latest/SHA256SUMS.txt
