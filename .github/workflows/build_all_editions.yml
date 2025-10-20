@@ -1,4 +1,4 @@
-name: Build & Upload Solvionyx OS Aurora (GNOME)
+name: Build, Upload, and Update Solvionyx OS Aurora (GNOME)
 
 on:
   push:
@@ -28,7 +28,13 @@ jobs:
       run: |
         chmod +x build_iso_debian.sh
         sudo bash build_iso_debian.sh
-        sudo find solvionyx_build -type f -name "*.iso" || echo "⚠️ No ISO yet."
+        echo "✅ ISO build step completed."
+        sudo find . -type f -name "*.iso" || echo "⚠️ No ISO file found!"
+
+        # Move ISO into solvionyx_build if it was built in parent dir
+        sudo mkdir -p solvionyx_build
+        sudo mv $(find . -type f -name "Solvionyx-Aurora-*.iso" | head -n 1) solvionyx_build/ 2>/dev/null || true
+        ls -lh solvionyx_build/
 
     - name: 🗜️ Compress ISO (maximum compression)
       run: |
@@ -64,7 +70,7 @@ jobs:
         VERSION=$(ls Solvionyx-Aurora-*.iso.xz | sed -E 's/.*(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
         echo "Detected version: $VERSION"
 
-        # Create versioned and latest directories
+        # Upload versioned and latest builds
         lftp -e "
           set ssl:verify-certificate no;
           mkdir -p /httpdocs/os/$VERSION;
@@ -82,6 +88,56 @@ jobs:
         echo "✅ Upload completed to:"
         echo "   → https://solviony.com/os/$VERSION/"
         echo "   → https://solviony.com/os/latest/"
+
+    - name: 🌍 Update OS Download Page (auto-refresh)
+      env:
+        FTP_HOST: ${{ secrets.FTP_HOST }}
+        FTP_USER: ${{ secrets.FTP_USER }}
+        FTP_PASS: ${{ secrets.FTP_PASS }}
+      run: |
+        echo "🌍 Updating https://solviony.com/page/os ..."
+        cd solvionyx_build
+
+        VERSION=$(ls Solvionyx-Aurora-*.iso.xz | sed -E 's/.*(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+        SHA=$(cut -d' ' -f1 SHA256SUMS.txt)
+        ISO_FILE=$(ls Solvionyx-Aurora-*.iso.xz | head -n 1)
+
+        cat <<HTML > os.html
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Solvionyx OS — Aurora (GNOME)</title>
+          <style>
+            body { font-family: Inter, sans-serif; background: #0b0c10; color: #e0e0e0; text-align: center; padding: 2em; }
+            h1 { color: #4fe0b0; }
+            .btn { background: #4fe0b0; color: #0b0c10; padding: 1em 2em; border-radius: 8px; text-decoration: none; font-weight: 700; }
+            .info { margin-top: 2em; font-size: 1rem; }
+          </style>
+        </head>
+        <body>
+          <h1>Solvionyx OS Aurora (GNOME)</h1>
+          <p><strong>Version:</strong> $VERSION</p>
+          <a href="https://solviony.com/os/latest/$ISO_FILE" class="btn">⬇️ Download Now</a>
+          <div class="info">
+            <p>Tagline: <em>The engine behind the vision.</em></p>
+            <p>SHA256: <code>$SHA</code></p>
+            <p>Built automatically via Solvionyx CI/CD</p>
+          </div>
+        </body>
+        </html>
+        HTML
+
+        lftp -e "
+          set ssl:verify-certificate no;
+          lcd .;
+          cd /httpdocs/page;
+          put -O . os.html;
+          bye
+        " -u \"$FTP_USER\",\"$FTP_PASS\" \"$FTP_HOST\"
+
+        echo "✅ Webpage updated successfully at: https://solviony.com/page/os"
 
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
