@@ -9,7 +9,7 @@ jobs:
   build:
     name: Aurora (GNOME)
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
     - name: 🧩 Checkout repository
@@ -21,43 +21,54 @@ jobs:
         sudo apt-get install -y \
           debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-          rsync systemd-container genisoimage dosfstools xz-utils plymouth-theme-spinner
+          rsync systemd-container genisoimage dosfstools xz-utils \
+          plymouth-theme-spinner lftp
 
     - name: 🧠 Run Solvionyx Aurora ISO Builder
       run: |
         chmod +x build_iso_debian.sh
         sudo bash build_iso_debian.sh
+        # Ensure ISO was generated to solvionyx_build
+        sudo find solvionyx_build -type f -name "*.iso" || echo "⚠️ No ISO yet."
 
     - name: 🗜️ Compress ISO (maximum compression)
       run: |
         cd solvionyx_build
         echo "🗜️ Compressing Solvionyx Aurora ISO..."
-        if ls *.iso 1> /dev/null 2>&1; then
-          xz -T0 -9e Solvionyx-Aurora-*.iso
-          echo "✅ Compression complete."
-          ls -lh Solvionyx-Aurora-*.iso.xz
-          SIZE=$(stat -c%s Solvionyx-Aurora-*.iso.xz)
-          if [ "$SIZE" -gt 2100000000 ]; then
-            echo "⚠️ Warning: File still above 2 GB. Consider splitting next time."
-          fi
-        else
-          echo "❌ No ISO found to compress."
+        ISO_FILE=$(ls *.iso 2>/dev/null | head -n 1)
+        if [ -z "$ISO_FILE" ]; then
+          echo "❌ No ISO found to compress. Build step may have failed."
           exit 1
         fi
+        xz -T0 -9e "$ISO_FILE"
+        echo "✅ Compression complete."
+        ls -lh *.xz
 
     - name: 🔐 Generate checksums
       run: |
         cd solvionyx_build
+        echo "🔐 Generating SHA256 checksums..."
         sha256sum *.xz > SHA256SUMS.txt
         chmod 644 SHA256SUMS.txt
+        cat SHA256SUMS.txt
 
-    - name: 📦 Upload compressed ISO artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: Solvionyx-Aurora-v${{ github.run_number }}
-        path: |
-          solvionyx_build/Solvionyx-Aurora-*.iso.xz
-          solvionyx_build/SHA256SUMS.txt
+    - name: 📤 Upload to Solviony.com via FTP
+      env:
+        FTP_HOST: ${{ secrets.FTP_HOST }}
+        FTP_USER: ${{ secrets.FTP_USER }}
+        FTP_PASS: ${{ secrets.FTP_PASS }}
+      run: |
+        echo "🌐 Uploading ISO and checksum to solviony.com/os ..."
+        cd solvionyx_build
+        lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF
+        set ssl:verify-certificate no
+        lcd .
+        cd /httpdocs/os
+        put -O . *.iso.xz
+        put -O . SHA256SUMS.txt
+        bye
+EOF
+        echo "✅ Upload to Solviony.com completed."
 
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
