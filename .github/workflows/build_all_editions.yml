@@ -28,48 +28,44 @@ jobs:
         chmod +x build_iso_debian.sh
         sudo bash build_iso_debian.sh
 
-    - name: 🔍 Verify ISO existence
+    - name: 🔍 Verify ISO existence (supports .iso or .iso.xz)
       run: |
-        echo "🔍 Checking for ISO in solvionyx_build..."
-        sudo find solvionyx_build -type f -name "*.iso" -exec ls -lh {} \;
-        ISO_PATH=$(sudo find solvionyx_build -type f -name "*.iso" | head -n1 || true)
+        echo "🔍 Checking for built ISO in solvionyx_build..."
+        sudo find solvionyx_build -type f \( -name "*.iso" -o -name "*.iso.xz" \) -exec ls -lh {} \;
+        ISO_PATH=$(sudo find solvionyx_build -type f \( -name "*.iso" -o -name "*.iso.xz" \) | head -n1 || true)
         if [ -z "$ISO_PATH" ]; then
-          echo "❌ No ISO file found after build!"
+          echo "❌ No ISO or compressed ISO found after build!"
           exit 1
         else
-          echo "✅ ISO file detected at: $ISO_PATH"
+          echo "✅ Found ISO: $ISO_PATH"
         fi
         echo "$ISO_PATH" > iso_path.txt
 
     - name: 🧹 Normalize permissions
       run: |
-        echo "🔧 Fixing permissions and ownership..."
+        echo "🔧 Fixing file permissions..."
         ISO_PATH=$(cat iso_path.txt)
         sudo chmod -R 777 "$(dirname "$ISO_PATH")"
         sudo chown -R $USER:$USER "$(dirname "$ISO_PATH")"
-        ls -lh "$(dirname "$ISO_PATH")"
 
-    - name: 🗜️ Compress ISO (max compression)
+    - name: 🗜️ Skip redundant compression if already compressed
       run: |
-        echo "🗜️ Compressing ISO..."
         ISO_PATH=$(cat iso_path.txt)
-        cd "$(dirname "$ISO_PATH")"
-        FILE=$(basename "$ISO_PATH")
-        echo "🔹 Found ISO: $FILE"
-
-        if [ ! -f "$FILE" ]; then
-          echo "⚠️ File not accessible under user — retrying with sudo..."
-          sudo xz -T0 -9e "$FILE"
+        if [[ "$ISO_PATH" == *.xz ]]; then
+          echo "🗜️ ISO is already compressed. Skipping compression."
         else
+          echo "🗜️ Compressing ISO..."
+          cd "$(dirname "$ISO_PATH")"
+          FILE=$(basename "$ISO_PATH")
           xz -T0 -9e "$FILE"
+          ISO_PATH="$FILE.xz"
+          echo "$ISO_PATH" > iso_path.txt
         fi
-
-        echo "✅ Compression complete."
-        ls -lh *.xz || sudo ls -lh *.xz
+        echo "✅ Compression verified or complete."
 
     - name: 🔐 Generate checksums
       run: |
-        echo "🔐 Generating SHA256 checksum..."
+        echo "🔐 Generating SHA256 checksums..."
         ISO_DIR=$(dirname "$(cat iso_path.txt)")
         cd "$ISO_DIR"
         sudo sha256sum *.xz > SHA256SUMS.txt
@@ -94,7 +90,7 @@ jobs:
         aws s3 cp "$ISO_DIR"/*.iso.xz s3://$S3_BUCKET/aurora/$VERSION/ --acl public-read
         aws s3 cp "$ISO_DIR"/SHA256SUMS.txt s3://$S3_BUCKET/aurora/$VERSION/ --acl public-read
 
-        # Update latest alias
+        # Update "latest" alias
         aws s3 cp "$ISO_DIR"/*.iso.xz s3://$S3_BUCKET/aurora/latest/ --acl public-read
         aws s3 cp "$ISO_DIR"/SHA256SUMS.txt s3://$S3_BUCKET/aurora/latest/ --acl public-read
 
@@ -118,12 +114,12 @@ jobs:
           ✅ Live boot support  
 
           🌍 **Downloads (AWS S3):**
-          • [Versioned](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz)  
-          • [Latest](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/Solvionyx-Aurora-latest.iso.xz)  
+          • [Versioned ISO](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz)  
+          • [Latest ISO](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/Solvionyx-Aurora-latest.iso.xz)  
 
           📜 **Checksums:**
-          • [Versioned](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt)  
-          • [Latest](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/SHA256SUMS.txt)
+          • [Versioned SHA256SUMS](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt)  
+          • [Latest SHA256SUMS](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/SHA256SUMS.txt)
 
     - name: 🧾 Post Build Summary
       if: always()
