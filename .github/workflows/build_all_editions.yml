@@ -1,4 +1,4 @@
-name: Build, Upload, and Update Solvionyx OS Aurora (GNOME)
+name: Build & Release Solvionyx OS Aurora (GNOME)
 
 on:
   push:
@@ -17,130 +17,56 @@ jobs:
 
     - name: ⚙️ Install dependencies
       run: |
-        sudo apt-get update
+        sudo apt-get update -y
         sudo apt-get install -y \
           debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-          rsync systemd-container genisoimage dosfstools xz-utils \
-          plymouth-theme-spinner lftp
+          rsync systemd-container genisoimage dosfstools xz-utils curl
 
     - name: 🧠 Run Solvionyx Aurora ISO Builder
       run: |
         chmod +x build_iso_debian.sh
-        sudo bash build_iso_debian.sh || echo "⚠️ Build finished with warnings"
-        echo "🔍 Searching for ISO..."
-        ISO_PATH=$(sudo find . -type f -name "Solvionyx-Aurora-*.iso" | head -n 1)
-        if [ -z "$ISO_PATH" ]; then
-          echo "❌ No ISO file found after build!"
-          exit 1
-        fi
-        echo "✅ Found ISO at: $ISO_PATH"
-        sudo mkdir -p solvionyx_build
-        sudo mv "$ISO_PATH" solvionyx_build/
-        ls -lh solvionyx_build/
+        sudo bash build_iso_debian.sh
+        echo "✅ Build process finished."
 
-    - name: 🗜️ Compress ISO (maximum compression)
+    - name: 🔍 Verify ISO existence
       run: |
-        cd solvionyx_build
-        echo "🗜️ Compressing Solvionyx Aurora ISO..."
-        ISO_FILE=$(ls *.iso 2>/dev/null | head -n 1)
+        echo "Checking for ISO output..."
+        ls -lh /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build || true
+        find /home/runner/work/Solvionyx-OS/Solvionyx-OS -name "*.iso*" || echo "❌ No ISO file found!"
+
+    - name: 🗜️ Compress ISO (max compression)
+      working-directory: /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build
+      run: |
+        echo "🗜️ Compressing ISO..."
+        ISO_FILE=$(find . -maxdepth 1 -name "*.iso" | head -n1)
         if [ -z "$ISO_FILE" ]; then
           echo "❌ No ISO found to compress. Build step may have failed."
           exit 1
         fi
         xz -T0 -9e "$ISO_FILE"
         echo "✅ Compression complete."
-        ls -lh *.xz
+        ls -lh
 
     - name: 🔐 Generate checksums
+      working-directory: /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build
       run: |
-        cd solvionyx_build
-        echo "🔐 Generating SHA256 checksums..."
         sha256sum *.xz > SHA256SUMS.txt
         chmod 644 SHA256SUMS.txt
+        echo "✅ Checksums generated:"
         cat SHA256SUMS.txt
 
-    - name: 📤 Upload to Solviony.com via FTP (Versioned)
+    - name: 🌐 Upload to Solviony.com via FTP
       env:
         FTP_HOST: ${{ secrets.FTP_HOST }}
         FTP_USER: ${{ secrets.FTP_USER }}
         FTP_PASS: ${{ secrets.FTP_PASS }}
+      working-directory: /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build
       run: |
-        echo "🌐 Uploading versioned build to solviony.com..."
-        cd solvionyx_build
-
-        VERSION=$(ls Solvionyx-Aurora-*.iso.xz | sed -E 's/.*(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-        echo "Detected version: $VERSION"
-
-        lftp -e "
-          set ssl:verify-certificate no;
-          mkdir -p /httpdocs/os/$VERSION;
-          mkdir -p /httpdocs/os/latest;
-          lcd .;
-          cd /httpdocs/os/$VERSION;
-          put -O . *.iso.xz;
-          put -O . SHA256SUMS.txt;
-          cd /httpdocs/os/latest;
-          put -O . *.iso.xz;
-          put -O . SHA256SUMS.txt;
-          bye
-        " -u \"$FTP_USER\",\"$FTP_PASS\" \"$FTP_HOST\"
-
-        echo "✅ Upload completed successfully."
-
-    - name: 🌍 Update OS Download Page (auto-refresh)
-      env:
-        FTP_HOST: ${{ secrets.FTP_HOST }}
-        FTP_USER: ${{ secrets.FTP_USER }}
-        FTP_PASS: ${{ secrets.FTP_PASS }}
-      run: |
-        echo "🌍 Updating https://solviony.com/page/os ..."
-        cd solvionyx_build
-
-        VERSION=$(ls Solvionyx-Aurora-*.iso.xz | sed -E 's/.*(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-        SHA=$(cut -d' ' -f1 SHA256SUMS.txt)
-        ISO_FILE=$(ls Solvionyx-Aurora-*.iso.xz | head -n 1)
-
-        cat <<HTML > os.html
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Solvionyx OS — Aurora (GNOME)</title>
-          <style>
-            body { font-family: 'Inter', sans-serif; background: #0b0c10; color: #e0e0e0; margin: 0; text-align: center; padding: 2em; }
-            header { background: linear-gradient(90deg, #0b0c10, #111122); padding: 1em 0; }
-            h1 { color: #4fe0b0; margin: 0; }
-            a.btn { background: #4fe0b0; color: #0b0c10; padding: 1em 2em; border-radius: 8px; text-decoration: none; font-weight: 700; display: inline-block; margin-top: 1.5em; }
-            a.btn:hover { opacity: 0.9; }
-            .info { margin-top: 2em; font-size: 1rem; }
-          </style>
-        </head>
-        <body>
-          <header><h1>Solvionyx OS Aurora (GNOME)</h1></header>
-          <main>
-            <p><strong>Version:</strong> $VERSION</p>
-            <a href="https://solviony.com/os/latest/$ISO_FILE" class="btn">⬇️ Download Solvionyx OS</a>
-            <div class="info">
-              <p>Tagline: <em>The engine behind the vision.</em></p>
-              <p>SHA256: <code>$SHA</code></p>
-              <p>Build updated automatically by Solvionyx CI/CD</p>
-            </div>
-          </main>
-        </body>
-        </html>
-        HTML
-
-        lftp -e "
-          set ssl:verify-certificate no;
-          lcd .;
-          cd /httpdocs/page;
-          put -O . os.html;
-          bye
-        " -u \"$FTP_USER\",\"$FTP_PASS\" \"$FTP_HOST\"
-
-        echo "✅ Webpage updated successfully at: https://solviony.com/page/os"
+        echo "🌍 Uploading to solviony.com/os ..."
+        curl -T "*.xz" -u "$FTP_USER:$FTP_PASS" "ftp://$FTP_HOST/httpdocs/os/"
+        curl -T "SHA256SUMS.txt" -u "$FTP_USER:$FTP_PASS" "ftp://$FTP_HOST/httpdocs/os/"
+        echo "✅ Upload complete."
 
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
@@ -151,14 +77,16 @@ jobs:
           **Solvionyx OS Aurora (GNOME Edition)**
           Tagline: *The engine behind the vision.*
 
-          ✅ Includes:
-          - GNOME desktop environment
-          - Calamares installer
-          - Solvionyx branding
-          - Live boot support (casper)
+          ✅ GNOME Desktop
+          ✅ Calamares Installer
+          ✅ Solvionyx Branding
+          ✅ Live Boot Support
 
-          🌐 **Direct Download:**
-          https://solviony.com/os/latest/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
+          🌍 **Direct Download:**
+          https://solviony.com/os/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
 
-          🧾 **SHA256SUMS:**
-          https://solviony.com/os/latest/SHA256SUMS.txt
+          🧾 **Checksums:**
+          https://solviony.com/os/SHA256SUMS.txt
+        files: |
+          /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build/*.xz
+          /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build/SHA256SUMS.txt
