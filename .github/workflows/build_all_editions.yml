@@ -1,4 +1,4 @@
-name: Build & Release Solvionyx OS Aurora (GNOME)
+name: Build & Release Solvionyx OS Aurora (GNOME Edition)
 
 on:
   push:
@@ -7,93 +7,121 @@ on:
 
 jobs:
   build:
-    name: Aurora (GNOME)
+    name: 🧠 Solvionyx OS — Aurora (GNOME)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     steps:
+    # ---------------------------------------------------
+    # 1. Checkout
+    # ---------------------------------------------------
     - name: 🧩 Checkout repository
       uses: actions/checkout@v4
 
-    - name: ⚙️ Install dependencies
+    # ---------------------------------------------------
+    # 2. Dependencies
+    # ---------------------------------------------------
+    - name: ⚙️ Install build dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
           debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-          rsync systemd-container genisoimage dosfstools xz-utils \
-          plymouth-theme-spinner python3-pip jq
-        # Install AWS CLI via pip (Ubuntu 24.04 fix)
+          rsync systemd-container genisoimage dosfstools xz-utils jq \
+          plymouth-theme-spinner python3-pip
+        # AWS CLI via pip (Ubuntu 24.04 compatible)
         sudo pip install awscli --break-system-packages
 
-    - name: 🧠 Run Solvionyx Aurora ISO Builder
+    # ---------------------------------------------------
+    # 3. Build ISO
+    # ---------------------------------------------------
+    - name: 💿 Run Solvionyx Aurora ISO Builder
       run: |
+        echo "🧠 Starting Solvionyx OS build..."
         chmod +x build_iso_debian.sh
         sudo bash build_iso_debian.sh
+        echo "✅ Solvionyx Aurora ISO build finished."
 
-    - name: 🔍 Verify ISO existence
+    # ---------------------------------------------------
+    # 4. Verify ISO File
+    # ---------------------------------------------------
+    - name: 🔍 Verify Solvionyx ISO existence
       run: |
-        echo "🔍 Checking for ISO in solvionyx_build..."
-        find solvionyx_build -type f \( -name "*.iso" -o -name "*.iso.xz" \)
-        if ! find solvionyx_build -type f \( -name "*.iso" -o -name "*.iso.xz" \) | grep -q .; then
-          echo "❌ No ISO file found after build!"
+        echo "🔍 Checking for ISO..."
+        sudo chmod -R 755 solvionyx_build || true
+        ISO_PATH=$(sudo find solvionyx_build -type f -name "*.iso*" 2>/dev/null | head -n 1)
+        if [ -z "$ISO_PATH" ]; then
+          echo "❌ ISO not found in solvionyx_build."
+          sudo ls -l solvionyx_build || true
           exit 1
+        else
+          echo "✅ ISO found at: $ISO_PATH"
         fi
-        echo "✅ ISO file located successfully."
 
-    - name: 🧹 Normalize permissions
-      run: sudo chmod -R 755 solvionyx_build || true
-
-    - name: 🗜️ Compress ISO (skip if already compressed)
+    # ---------------------------------------------------
+    # 5. Compress ISO
+    # ---------------------------------------------------
+    - name: 🗜️ Compress Solvionyx ISO (if not already compressed)
       run: |
-        echo "🗜️ Checking compression..."
-        if ls solvionyx_build/*.iso.xz 1> /dev/null 2>&1; then
-          echo "✅ ISO already compressed. Skipping compression."
+        cd solvionyx_build
+        if ls *.iso.xz 1> /dev/null 2>&1; then
+          echo "✅ ISO already compressed."
         else
           echo "🗜️ Compressing ISO..."
-          xz -T0 -9e solvionyx_build/*.iso
+          xz -T0 -9e *.iso
         fi
 
-    - name: 🔐 Generate checksums
+    # ---------------------------------------------------
+    # 6. Generate Checksums
+    # ---------------------------------------------------
+    - name: 🔐 Generate SHA256 checksums
       run: |
-        echo "🔐 Generating SHA256 checksums..."
         cd solvionyx_build
         sha256sum *.iso.xz > SHA256SUMS.txt
         cat SHA256SUMS.txt
 
-    - name: ☁️ Configure AWS Credentials
+    # ---------------------------------------------------
+    # 7. Configure AWS Credentials
+    # ---------------------------------------------------
+    - name: ☁️ Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-    - name: ☁️ Upload to AWS S3 (Versioned + Latest + JSON)
+    # ---------------------------------------------------
+    # 8. Upload to AWS S3
+    # ---------------------------------------------------
+    - name: ☁️ Upload to AWS S3 (Versioned, Latest, and JSON)
       env:
         S3_BUCKET: solvionyx-releases
       run: |
-        echo "☁️ Uploading ISO and checksums to S3..."
+        echo "☁️ Uploading Solvionyx Aurora ISO to S3..."
         VERSION="v${{ github.run_number }}"
         ISO_DIR="solvionyx_build"
         REGION="${{ secrets.AWS_DEFAULT_REGION }}"
         BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
 
-        aws s3 cp "$ISO_DIR"/*.iso.xz "s3://$S3_BUCKET/aurora/$VERSION/"
-        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/$VERSION/"
-        aws s3 cp "$ISO_DIR"/*.iso.xz "s3://$S3_BUCKET/aurora/latest/"
-        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/latest/"
+        ISO_FILE=$(ls $ISO_DIR/*.iso.xz | head -n 1)
+        [ -f "$ISO_FILE" ] || { echo "❌ No ISO file found!"; exit 1; }
 
-        echo "✅ ISO upload complete."
+        aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/aurora/$VERSION/" --no-acl
+        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/$VERSION/" --no-acl
+        aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/aurora/latest/" --no-acl
+        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/latest/" --no-acl
 
-        # Generate JSON for web auto-sync
-        ISO_NAME=$(basename $(ls $ISO_DIR/*.iso.xz))
-        SHA256_HASH=$(sha256sum $ISO_DIR/$ISO_NAME | awk '{print $1}')
+        echo "✅ Upload complete."
+
+        # Create latest.json for solviony.com auto-sync
+        ISO_NAME=$(basename "$ISO_FILE")
+        SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
         DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
         cat > latest.json <<EOF
         {
           "version": "${VERSION}",
-          "release_name": "Solvionyx Aurora OS (GNOME)",
+          "release_name": "Solvionyx OS Aurora (GNOME)",
           "tagline": "The engine behind the vision.",
           "build_date": "${DATE}",
           "iso_name": "${ISO_NAME}",
@@ -104,39 +132,42 @@ jobs:
         EOF
 
         cat latest.json
-        aws s3 cp latest.json "s3://$S3_BUCKET/aurora/latest/latest.json"
+        aws s3 cp latest.json "s3://$S3_BUCKET/aurora/latest/latest.json" --no-acl
+        echo "✅ latest.json uploaded successfully."
 
-        echo "✅ Uploaded latest.json successfully."
-
+    # ---------------------------------------------------
+    # 9. GitHub Release
+    # ---------------------------------------------------
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: Aurora-v${{ github.run_number }}
         name: "Solvionyx Aurora OS (GNOME) v${{ github.run_number }}"
         body: |
-          **Solvionyx OS Aurora (GNOME Edition)**  
-          Tagline: *The engine behind the vision.*
+          ## 🧠 Solvionyx OS Aurora (GNOME Edition)
+          **Tagline:** The engine behind the vision.  
+          **Brand:** Solvionyx — AI-powered Linux for creators, engineers, and innovators.
 
           ✅ Includes:
           - GNOME desktop environment  
           - Calamares installer  
           - Solvionyx branding  
-          - Live boot support (casper)
+          - Live boot support (casper)  
 
-          🌐 **Direct Download (AWS S3):**  
+          🌐 **Download (AWS S3):**  
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
 
           🧾 **Checksums:**  
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt
 
-          📦 **Latest JSON (for Web Auto-Sync):**  
+          📦 **Web JSON Sync:**  
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/latest.json
 
+    # ---------------------------------------------------
+    # 10. Build Summary
+    # ---------------------------------------------------
     - name: 📋 Post Build Summary
       run: |
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "✅ ISO built and uploaded successfully" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 Public Download URL:" >> $GITHUB_STEP_SUMMARY
-        echo "https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/Solvionyx-Aurora-latest.iso.xz" >> $GITHUB_STEP_SUMMARY
-        echo "📦 latest.json URL:" >> $GITHUB_STEP_SUMMARY
-        echo "https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/latest.json" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Solvionyx Aurora OS build completed successfully." >> $GITHUB_STEP_SUMMARY
+        echo "🌍 S3 URL: https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
