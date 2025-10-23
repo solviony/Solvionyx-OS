@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write  # ✅ Needed for GitHub Releases
+
 jobs:
   build:
     name: 🧠 Solvionyx OS — Aurora (GNOME)
@@ -29,7 +32,7 @@ jobs:
         echo "✅ Workspace cleaned successfully."
 
     # ---------------------------------------------------
-    # 3. Install Dependencies (with safe AWS CLI update)
+    # 3. Install Dependencies
     # ---------------------------------------------------
     - name: ⚙️ Install build dependencies
       run: |
@@ -96,7 +99,7 @@ jobs:
         fi
 
     # ---------------------------------------------------
-    # 7. Generate Checksums (Fixed Permissions)
+    # 7. Generate Checksums
     # ---------------------------------------------------
     - name: 🔐 Generate SHA256 checksums (with sudo)
       run: |
@@ -160,9 +163,19 @@ jobs:
         }
         EOF
 
-        cat latest.json
         aws s3 cp latest.json "s3://$S3_BUCKET/aurora/latest/latest.json"
         echo "✅ latest.json uploaded successfully."
+
+        # 🔥 Auto-clean old S3 versions (keep only latest 5)
+        echo "🧹 Cleaning old Aurora versions on S3..."
+        ALL_VERSIONS=$(aws s3 ls "s3://$S3_BUCKET/aurora/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
+        KEEP=$(echo "$ALL_VERSIONS" | tail -n 5)
+        REMOVE=$(echo "$ALL_VERSIONS" | grep -vxFf <(echo "$KEEP") || true)
+        for DIR in $REMOVE; do
+          echo "🗑️ Removing old version: $DIR"
+          aws s3 rm "s3://$S3_BUCKET/aurora/$DIR" --recursive || true
+        done
+        echo "✅ S3 cleanup complete."
 
     # ---------------------------------------------------
     # 10. Publish GitHub Release
@@ -176,20 +189,13 @@ jobs:
           ## 🧠 Solvionyx OS Aurora (GNOME Edition)
           *The Engine Behind the Vision.*
 
-          ✅ Includes:
-          - GNOME desktop environment  
-          - Calamares installer  
-          - Solvionyx branding  
-          - Live boot (casper)  
+          ✅ GNOME desktop  
+          ✅ Calamares installer  
+          ✅ Solvionyx branding  
+          ✅ Live boot (casper)  
 
-          🌐 **AWS S3 Download:**  
-          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/
-
-          🧾 **Checksums:**  
-          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt
-
-          💡 **Web Sync JSON:**  
-          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/latest.json
+          🌐 **AWS S3:**  
+          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/
 
     # ---------------------------------------------------
     # 11. Build Summary
@@ -197,5 +203,5 @@ jobs:
     - name: 📋 Post Build Summary
       run: |
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Solvionyx Aurora OS build completed successfully." >> $GITHUB_STEP_SUMMARY
+        echo "✅ Solvionyx Aurora OS build and upload completed successfully." >> $GITHUB_STEP_SUMMARY
         echo "🌍 AWS S3: https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
