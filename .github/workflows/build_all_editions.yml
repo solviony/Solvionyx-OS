@@ -72,12 +72,16 @@ jobs:
         fi
 
     # ---------------------------------------------------
-    # 6. Generate Checksums
+    # 6. Generate Checksums (fixed permissions)
     # ---------------------------------------------------
-    - name: 🔐 Generate SHA256 checksums
+    - name: 🔐 Generate SHA256 checksums (with sudo)
       run: |
+        echo "🔐 Generating SHA256 checksums..."
+        sudo chmod -R 777 solvionyx_build
         cd solvionyx_build
-        sha256sum *.iso.xz > SHA256SUMS.txt
+        sudo bash -c 'sha256sum *.iso.xz > SHA256SUMS.txt'
+        sudo chmod 644 SHA256SUMS.txt
+        echo "✅ SHA256SUMS.txt created successfully:"
         cat SHA256SUMS.txt
 
     # ---------------------------------------------------
