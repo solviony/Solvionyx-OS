@@ -29,11 +29,17 @@ jobs:
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
           rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
           plymouth-theme-spinner python3-pip
-        # Install AWS CLI v2
-        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-        unzip awscliv2.zip
-        sudo ./aws/install
-        aws --version
+          # Install or update AWS CLI v2 safely
+          if command -v aws &> /dev/null; then
+            echo "🧩 AWS CLI already installed — updating..."
+            sudo ./aws/install --update || true
+          else
+            echo "🧩 Installing AWS CLI v2..."
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -qq awscliv2.zip
+            sudo ./aws/install
+          fi
+          aws --version          
 
     # ---------------------------------------------------
     # 3. Build Solvionyx Aurora ISO
