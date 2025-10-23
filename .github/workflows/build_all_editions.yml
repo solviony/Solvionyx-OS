@@ -21,7 +21,8 @@ jobs:
         sudo apt-get install -y \
           debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-          rsync systemd-container genisoimage dosfstools xz-utils plymouth-theme-spinner awscli
+          rsync systemd-container genisoimage dosfstools xz-utils \
+          plymouth-theme-spinner awscli
 
     - name: 🧠 Run Solvionyx Aurora ISO Builder
       run: |
@@ -41,11 +42,11 @@ jobs:
     - name: 🧹 Normalize permissions
       run: sudo chmod -R 755 solvionyx_build || true
 
-    - name: 🗜️ Skip redundant compression if already compressed
+    - name: 🗜️ Compress ISO (skip if already compressed)
       run: |
         echo "🗜️ Checking compression..."
         if ls solvionyx_build/*.iso.xz 1> /dev/null 2>&1; then
-          echo "✅ ISO is already compressed. Skipping compression."
+          echo "✅ ISO already compressed. Skipping compression."
         else
           echo "🗜️ Compressing ISO..."
           xz -T0 -9e solvionyx_build/*.iso
@@ -67,7 +68,7 @@ jobs:
 
     - name: ☁️ Upload to AWS S3 (Versioned and Latest)
       env:
-        S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        S3_BUCKET: solvionyx-releases
       run: |
         echo "☁️ Uploading ISO and checksums to S3..."
         VERSION="v${{ github.run_number }}"
@@ -76,7 +77,7 @@ jobs:
         aws s3 cp "$ISO_DIR"/*.iso.xz "s3://$S3_BUCKET/aurora/$VERSION/"
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/$VERSION/"
 
-        # Maintain "latest" folder for convenience
+        # Maintain 'latest' folder
         aws s3 cp "$ISO_DIR"/*.iso.xz "s3://$S3_BUCKET/aurora/latest/"
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/latest/"
 
@@ -92,19 +93,20 @@ jobs:
           Tagline: *The engine behind the vision.*
 
           ✅ Includes:
-          - GNOME desktop environment
-          - Calamares installer
-          - Solvionyx branding
+          - GNOME desktop environment  
+          - Calamares installer  
+          - Solvionyx branding  
           - Live boot support (casper)
 
-          🌐 **Direct Download (AWS S3):**
-          https://<YOUR_BUCKET_NAME>.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
+          🌐 **Direct Download (AWS S3):**  
+          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
 
-          🧾 **Checksums:**
-          https://<YOUR_BUCKET_NAME>.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt
+          🧾 **Checksums:**  
+          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt
 
     - name: 📋 Post Build Summary
       run: |
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "✅ ISO built and uploaded successfully" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 S3 Path: https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/" >> $GITHUB_STEP_SUMMARY
+        echo "🌍 Public Download URL:" >> $GITHUB_STEP_SUMMARY
+        echo "https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/Solvionyx-Aurora-latest.iso.xz" >> $GITHUB_STEP_SUMMARY
