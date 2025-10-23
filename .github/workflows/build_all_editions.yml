@@ -22,7 +22,9 @@ jobs:
           debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
           rsync systemd-container genisoimage dosfstools xz-utils \
-          plymouth-theme-spinner awscli
+          plymouth-theme-spinner python3-pip jq
+        # Install AWS CLI via pip (Ubuntu 24.04 fix)
+        sudo pip install awscli --break-system-packages
 
     - name: 🧠 Run Solvionyx Aurora ISO Builder
       run: |
@@ -66,22 +68,45 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-    - name: ☁️ Upload to AWS S3 (Versioned and Latest)
+    - name: ☁️ Upload to AWS S3 (Versioned + Latest + JSON)
       env:
         S3_BUCKET: solvionyx-releases
       run: |
         echo "☁️ Uploading ISO and checksums to S3..."
         VERSION="v${{ github.run_number }}"
         ISO_DIR="solvionyx_build"
+        REGION="${{ secrets.AWS_DEFAULT_REGION }}"
+        BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
 
         aws s3 cp "$ISO_DIR"/*.iso.xz "s3://$S3_BUCKET/aurora/$VERSION/"
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/$VERSION/"
-
-        # Maintain 'latest' folder
         aws s3 cp "$ISO_DIR"/*.iso.xz "s3://$S3_BUCKET/aurora/latest/"
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/latest/"
 
-        echo "✅ Upload completed successfully."
+        echo "✅ ISO upload complete."
+
+        # Generate JSON for web auto-sync
+        ISO_NAME=$(basename $(ls $ISO_DIR/*.iso.xz))
+        SHA256_HASH=$(sha256sum $ISO_DIR/$ISO_NAME | awk '{print $1}')
+        DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        cat > latest.json <<EOF
+        {
+          "version": "${VERSION}",
+          "release_name": "Solvionyx Aurora OS (GNOME)",
+          "tagline": "The engine behind the vision.",
+          "build_date": "${DATE}",
+          "iso_name": "${ISO_NAME}",
+          "sha256": "${SHA256_HASH}",
+          "download_url": "${BUCKET_URL}/aurora/latest/${ISO_NAME}",
+          "checksum_url": "${BUCKET_URL}/aurora/latest/SHA256SUMS.txt"
+        }
+        EOF
+
+        cat latest.json
+        aws s3 cp latest.json "s3://$S3_BUCKET/aurora/latest/latest.json"
+
+        echo "✅ Uploaded latest.json successfully."
 
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
@@ -104,9 +129,14 @@ jobs:
           🧾 **Checksums:**  
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt
 
+          📦 **Latest JSON (for Web Auto-Sync):**  
+          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/latest.json
+
     - name: 📋 Post Build Summary
       run: |
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "✅ ISO built and uploaded successfully" >> $GITHUB_STEP_SUMMARY
         echo "🌍 Public Download URL:" >> $GITHUB_STEP_SUMMARY
         echo "https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/Solvionyx-Aurora-latest.iso.xz" >> $GITHUB_STEP_SUMMARY
+        echo "📦 latest.json URL:" >> $GITHUB_STEP_SUMMARY
+        echo "https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/latest.json" >> $GITHUB_STEP_SUMMARY
