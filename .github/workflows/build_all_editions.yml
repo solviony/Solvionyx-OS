@@ -19,7 +19,17 @@ jobs:
       uses: actions/checkout@v4
 
     # ---------------------------------------------------
-    # 2. Install Dependencies
+    # 2. Clean Workspace
+    # ---------------------------------------------------
+    - name: 🧹 Clean workspace before build
+      run: |
+        echo "🧹 Cleaning previous build files..."
+        sudo rm -rf solvionyx_build || true
+        sudo rm -rf /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build || true
+        echo "✅ Workspace cleaned successfully."
+
+    # ---------------------------------------------------
+    # 3. Install Dependencies (with safe AWS CLI update)
     # ---------------------------------------------------
     - name: ⚙️ Install build dependencies
       run: |
@@ -29,20 +39,24 @@ jobs:
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
           rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
           plymouth-theme-spinner python3-pip
-          # Install or update AWS CLI v2 safely
-          if command -v aws &> /dev/null; then
-            echo "🧩 AWS CLI already installed — updating..."
-            sudo ./aws/install --update || true
-          else
-            echo "🧩 Installing AWS CLI v2..."
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip -qq awscliv2.zip
-            sudo ./aws/install
-          fi
-          aws --version          
+
+        echo "☁️ Checking AWS CLI installation..."
+        if command -v aws &> /dev/null; then
+          echo "🧩 AWS CLI already installed — updating..."
+          curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -qq awscliv2.zip
+          sudo ./aws/install --update || true
+        else
+          echo "🧩 Installing AWS CLI v2..."
+          curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -qq awscliv2.zip
+          sudo ./aws/install
+        fi
+        aws --version
+        echo "✅ Dependencies and AWS CLI ready."
 
     # ---------------------------------------------------
-    # 3. Build Solvionyx Aurora ISO
+    # 4. Build Solvionyx Aurora ISO
     # ---------------------------------------------------
     - name: 💿 Run Solvionyx Aurora ISO Builder
       run: |
@@ -52,7 +66,7 @@ jobs:
         echo "✅ Build completed successfully."
 
     # ---------------------------------------------------
-    # 4. Verify ISO File
+    # 5. Verify ISO File
     # ---------------------------------------------------
     - name: 🔍 Verify Solvionyx ISO existence
       run: |
@@ -68,7 +82,7 @@ jobs:
         fi
 
     # ---------------------------------------------------
-    # 5. Compress ISO (if not already)
+    # 6. Compress ISO (if not already)
     # ---------------------------------------------------
     - name: 🗜️ Compress Solvionyx ISO (if not already compressed)
       run: |
@@ -82,7 +96,7 @@ jobs:
         fi
 
     # ---------------------------------------------------
-    # 6. Generate Checksums (Fixed Permissions)
+    # 7. Generate Checksums (Fixed Permissions)
     # ---------------------------------------------------
     - name: 🔐 Generate SHA256 checksums (with sudo)
       run: |
@@ -95,7 +109,7 @@ jobs:
         cat SHA256SUMS.txt
 
     # ---------------------------------------------------
-    # 7. Configure AWS Credentials
+    # 8. Configure AWS Credentials
     # ---------------------------------------------------
     - name: ☁️ Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -105,7 +119,7 @@ jobs:
         aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
     # ---------------------------------------------------
-    # 8. Upload to AWS S3
+    # 9. Upload to AWS S3
     # ---------------------------------------------------
     - name: ☁️ Upload to AWS S3 (Versioned, Latest, and JSON)
       env:
@@ -125,7 +139,6 @@ jobs:
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/$VERSION/"
         aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/aurora/latest/"
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/latest/"
-
         echo "✅ Upload complete."
 
         # Create latest.json for solviony.com auto-sync
@@ -152,7 +165,7 @@ jobs:
         echo "✅ latest.json uploaded successfully."
 
     # ---------------------------------------------------
-    # 9. Publish GitHub Release
+    # 10. Publish GitHub Release
     # ---------------------------------------------------
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
@@ -179,7 +192,7 @@ jobs:
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/latest.json
 
     # ---------------------------------------------------
-    # 10. Build Summary
+    # 11. Build Summary
     # ---------------------------------------------------
     - name: 📋 Post Build Summary
       run: |
