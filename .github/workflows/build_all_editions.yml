@@ -9,7 +9,7 @@ jobs:
   build:
     name: Aurora (GNOME)
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 90
 
     steps:
     - name: 🧩 Checkout repository
@@ -21,55 +21,41 @@ jobs:
         sudo apt-get install -y \
           debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-          rsync systemd-container genisoimage dosfstools xz-utils plymouth-theme-spinner
+          rsync systemd-container genisoimage dosfstools xz-utils plymouth-theme-spinner awscli
 
     - name: 🧠 Run Solvionyx Aurora ISO Builder
       run: |
         chmod +x build_iso_debian.sh
         sudo bash build_iso_debian.sh
 
-    - name: 🔍 Verify ISO existence (supports .iso or .iso.xz)
+    - name: 🔍 Verify ISO existence
       run: |
-        echo "🔍 Checking for built ISO in solvionyx_build..."
-        sudo find solvionyx_build -type f \( -name "*.iso" -o -name "*.iso.xz" \) -exec ls -lh {} \;
-        ISO_PATH=$(sudo find solvionyx_build -type f \( -name "*.iso" -o -name "*.iso.xz" \) | head -n1 || true)
-        if [ -z "$ISO_PATH" ]; then
-          echo "❌ No ISO or compressed ISO found after build!"
+        echo "🔍 Checking for ISO in solvionyx_build..."
+        find solvionyx_build -type f \( -name "*.iso" -o -name "*.iso.xz" \)
+        if ! find solvionyx_build -type f \( -name "*.iso" -o -name "*.iso.xz" \) | grep -q .; then
+          echo "❌ No ISO file found after build!"
           exit 1
-        else
-          echo "✅ Found ISO: $ISO_PATH"
         fi
-        echo "$ISO_PATH" > iso_path.txt
+        echo "✅ ISO file located successfully."
 
     - name: 🧹 Normalize permissions
-      run: |
-        echo "🔧 Fixing file permissions..."
-        ISO_PATH=$(cat iso_path.txt)
-        sudo chmod -R 777 "$(dirname "$ISO_PATH")"
-        sudo chown -R $USER:$USER "$(dirname "$ISO_PATH")"
+      run: sudo chmod -R 755 solvionyx_build || true
 
     - name: 🗜️ Skip redundant compression if already compressed
       run: |
-        ISO_PATH=$(cat iso_path.txt)
-        if [[ "$ISO_PATH" == *.xz ]]; then
-          echo "🗜️ ISO is already compressed. Skipping compression."
+        echo "🗜️ Checking compression..."
+        if ls solvionyx_build/*.iso.xz 1> /dev/null 2>&1; then
+          echo "✅ ISO is already compressed. Skipping compression."
         else
           echo "🗜️ Compressing ISO..."
-          cd "$(dirname "$ISO_PATH")"
-          FILE=$(basename "$ISO_PATH")
-          xz -T0 -9e "$FILE"
-          ISO_PATH="$FILE.xz"
-          echo "$ISO_PATH" > iso_path.txt
+          xz -T0 -9e solvionyx_build/*.iso
         fi
-        echo "✅ Compression verified or complete."
 
     - name: 🔐 Generate checksums
       run: |
         echo "🔐 Generating SHA256 checksums..."
-        ISO_DIR=$(dirname "$(cat iso_path.txt)")
-        cd "$ISO_DIR"
-        sudo sha256sum *.xz > SHA256SUMS.txt
-        sudo chmod 644 SHA256SUMS.txt
+        cd solvionyx_build
+        sha256sum *.iso.xz > SHA256SUMS.txt
         cat SHA256SUMS.txt
 
     - name: ☁️ Configure AWS Credentials
@@ -80,24 +66,21 @@ jobs:
         aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
     - name: ☁️ Upload to AWS S3 (Versioned and Latest)
+      env:
+        S3_BUCKET: ${{ secrets.S3_BUCKET }}
       run: |
-        echo "🌍 Uploading ISO and checksums to S3..."
+        echo "☁️ Uploading ISO and checksums to S3..."
         VERSION="v${{ github.run_number }}"
-        S3_BUCKET=${{ secrets.S3_BUCKET }}
-        REGION=${{ secrets.AWS_DEFAULT_REGION }}
-        ISO_DIR=$(dirname "$(cat iso_path.txt)")
+        ISO_DIR="solvionyx_build"
 
-        aws s3 cp "$ISO_DIR"/*.iso.xz s3://$S3_BUCKET/aurora/$VERSION/ --acl public-read
-        aws s3 cp "$ISO_DIR"/SHA256SUMS.txt s3://$S3_BUCKET/aurora/$VERSION/ --acl public-read
+        aws s3 cp "$ISO_DIR"/*.iso.xz "s3://$S3_BUCKET/aurora/$VERSION/"
+        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/$VERSION/"
 
-        # Update "latest" alias
-        aws s3 cp "$ISO_DIR"/*.iso.xz s3://$S3_BUCKET/aurora/latest/ --acl public-read
-        aws s3 cp "$ISO_DIR"/SHA256SUMS.txt s3://$S3_BUCKET/aurora/latest/ --acl public-read
+        # Maintain "latest" folder for convenience
+        aws s3 cp "$ISO_DIR"/*.iso.xz "s3://$S3_BUCKET/aurora/latest/"
+        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/latest/"
 
         echo "✅ Upload completed successfully."
-        echo "VERSION=$VERSION" >> build_info.txt
-        echo "S3_BUCKET=$S3_BUCKET" >> build_info.txt
-        echo "REGION=$REGION" >> build_info.txt
 
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
@@ -106,35 +89,22 @@ jobs:
         name: "Solvionyx Aurora OS (GNOME) v${{ github.run_number }}"
         body: |
           **Solvionyx OS Aurora (GNOME Edition)**  
-          Tagline: *"The engine behind the vision."*
+          Tagline: *The engine behind the vision.*
 
-          ✅ GNOME desktop  
-          ✅ Calamares installer  
-          ✅ Solvionyx branding  
-          ✅ Live boot support  
+          ✅ Includes:
+          - GNOME desktop environment
+          - Calamares installer
+          - Solvionyx branding
+          - Live boot support (casper)
 
-          🌍 **Downloads (AWS S3):**
-          • [Versioned ISO](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz)  
-          • [Latest ISO](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/Solvionyx-Aurora-latest.iso.xz)  
+          🌐 **Direct Download (AWS S3):**
+          https://<YOUR_BUCKET_NAME>.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/Solvionyx-Aurora-v${{ github.run_number }}.iso.xz
 
-          📜 **Checksums:**
-          • [Versioned SHA256SUMS](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt)  
-          • [Latest SHA256SUMS](https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/SHA256SUMS.txt)
+          🧾 **Checksums:**
+          https://<YOUR_BUCKET_NAME>.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/SHA256SUMS.txt
 
-    - name: 🧾 Post Build Summary
-      if: always()
+    - name: 📋 Post Build Summary
       run: |
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
-        VERSION=$(cat build_info.txt | grep VERSION | cut -d'=' -f2)
-        S3_BUCKET=$(cat build_info.txt | grep S3_BUCKET | cut -d'=' -f2)
-        REGION=$(cat build_info.txt | grep REGION | cut -d'=' -f2)
-
-        echo "✅ **Solvionyx OS Aurora Build Completed**" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 **Versioned Download:**" >> $GITHUB_STEP_SUMMARY
-        echo "https://$S3_BUCKET.s3.$REGION.amazonaws.com/aurora/$VERSION/" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 **Latest Download:**" >> $GITHUB_STEP_SUMMARY
-        echo "https://$S3_BUCKET.s3.$REGION.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "🧩 Job completed successfully ✅" >> $GITHUB_STEP_SUMMARY
+        echo "✅ ISO built and uploaded successfully" >> $GITHUB_STEP_SUMMARY
+        echo "🌍 S3 Path: https://${{ secrets.S3_BUCKET }}.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/v${{ github.run_number }}/" >> $GITHUB_STEP_SUMMARY
