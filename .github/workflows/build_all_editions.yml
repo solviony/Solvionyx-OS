@@ -64,7 +64,8 @@ jobs:
     # ---------------------------------------------------
     - name: 💿 Run Solvionyx ISO Builder (${{ matrix.edition }})
       run: |
-        echo "🚀 Building Solvionyx OS Aurora — ${{ matrix.edition | upper }} Edition..."
+        EDITION_NAME=$(echo "${{ matrix.edition }}" | tr '[:lower:]' '[:upper:]')
+        echo "🚀 Building Solvionyx OS Aurora — ${EDITION_NAME} Edition..."
         chmod +x build_iso_debian.sh
         sudo bash build_iso_debian.sh ${{ matrix.edition }}
         echo "✅ Build completed successfully."
@@ -127,9 +128,8 @@ jobs:
       env:
         S3_BUCKET: solvionyx-releases
       run: |
-        echo "☁️ Uploading Solvionyx Aurora ISO to S3..."
-        VERSION="v${{ github.run_number }}"
         EDITION="${{ matrix.edition }}"
+        VERSION="v${{ github.run_number }}"
         ISO_DIR="solvionyx_build"
         REGION="${{ secrets.AWS_DEFAULT_REGION }}"
         BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
@@ -137,14 +137,13 @@ jobs:
         ISO_FILE=$(ls $ISO_DIR/*.iso.xz | head -n 1)
         [ -f "$ISO_FILE" ] || { echo "❌ No ISO file found!"; exit 1; }
 
-        # Upload to versioned + latest directories
+        echo "☁️ Uploading Solvionyx ${EDITION} ISO to S3..."
         aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/${EDITION}/$VERSION/"
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/${EDITION}/$VERSION/"
         aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/${EDITION}/latest/"
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/${EDITION}/latest/"
         echo "✅ Upload complete."
 
-        # Generate metadata JSON
         ISO_NAME=$(basename "$ISO_FILE")
         SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
         DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -153,7 +152,7 @@ jobs:
         {
           "version": "${VERSION}",
           "edition": "${EDITION}",
-          "release_name": "Solvionyx OS Aurora (${EDITION^^} Edition)",
+          "release_name": "Solvionyx OS Aurora (${EDITION} Edition)",
           "tagline": "The engine behind the vision.",
           "brand": "Solvionyx OS",
           "build_date": "${DATE}",
@@ -167,7 +166,6 @@ jobs:
         aws s3 cp latest.json "s3://$S3_BUCKET/${EDITION}/latest/latest.json"
         echo "✅ latest.json uploaded."
 
-        # 🧹 Auto-clean old S3 versions (keep latest 5)
         echo "🧹 Cleaning old S3 versions..."
         ALL_VERSIONS=$(aws s3 ls "s3://$S3_BUCKET/${EDITION}/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
         KEEP=$(echo "$ALL_VERSIONS" | tail -n 5)
@@ -185,12 +183,12 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: Aurora-${{ matrix.edition }}-v${{ github.run_number }}
-        name: "Solvionyx OS Aurora — ${{ matrix.edition | upper }} Edition v${{ github.run_number }}"
+        name: "Solvionyx OS Aurora — ${{ matrix.edition }} Edition v${{ github.run_number }}"
         body: |
-          ## 🧠 Solvionyx OS Aurora (${{ matrix.edition | upper }} Edition)
+          ## 🧠 Solvionyx OS Aurora (${{ matrix.edition }} Edition)
           *The Engine Behind the Vision.*
 
-          ✅ Edition: ${{ matrix.edition | upper }}
+          ✅ Desktop Environment: ${{ matrix.edition }}
           ✅ Solvionyx branding  
           ✅ Live boot (casper)  
           ✅ Calamares installer  
@@ -203,5 +201,5 @@ jobs:
     # ---------------------------------------------------
     - name: 📋 Build Summary
       run: |
-        echo "🧾 Solvionyx OS Aurora (${{ matrix.edition | upper }}) built successfully." >> $GITHUB_STEP_SUMMARY
+        echo "🧾 Solvionyx OS Aurora (${{ matrix.edition }}) built successfully." >> $GITHUB_STEP_SUMMARY
         echo "🌍 Download: https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/${{ matrix.edition }}/latest/" >> $GITHUB_STEP_SUMMARY
