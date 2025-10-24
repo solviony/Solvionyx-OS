@@ -1,4 +1,4 @@
-name: Build & Release Solvionyx OS Aurora (GNOME, XFCE, KDE)
+name: Build & Release Solvionyx OS — Aurora Editions (GNOME, XFCE, KDE)
 
 on:
   push:
@@ -6,32 +6,17 @@ on:
   workflow_dispatch:
 
 permissions:
-<<<<<<< HEAD
-  contents: write
+  contents: write  # ✅ Needed for GitHub Releases
 
 jobs:
   build:
-    name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition }} Edition)
-=======
-  contents: write  # Needed for GitHub releases
-
-jobs:
-  build:
-    name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition }})
->>>>>>> ba3a62b (Add unified AWS upload workflow)
+    name: 🧠 Build Solvionyx OS — Aurora (${{ matrix.edition }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
 
     strategy:
-<<<<<<< HEAD
-      fail-fast: false
       matrix:
         edition: [gnome, xfce, kde]
-=======
-      matrix:
-        edition: [gnome, xfce, kde]
-      fail-fast: false
->>>>>>> ba3a62b (Add unified AWS upload workflow)
 
     steps:
     # ---------------------------------------------------
@@ -40,29 +25,20 @@ jobs:
     - name: 🧩 Checkout repository
       uses: actions/checkout@v4
 
-<<<<<<< HEAD
-    - name: 🧹 Clean workspace before build
-      run: |
-        sudo rm -rf solvionyx_build || true
-        sudo rm -rf /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build || true
-
-    - name: ⚙️ Install dependencies
-=======
     # ---------------------------------------------------
-    # 2. Clean workspace
+    # 2. Clean Workspace
     # ---------------------------------------------------
     - name: 🧹 Clean workspace before build
       run: |
-        echo "🧹 Cleaning old build directories..."
+        echo "🧹 Cleaning previous build files..."
         sudo rm -rf solvionyx_build || true
         sudo rm -rf /home/runner/work/Solvionyx-OS/Solvionyx-OS/solvionyx_build || true
-        echo "✅ Workspace ready."
+        echo "✅ Workspace cleaned successfully."
 
     # ---------------------------------------------------
-    # 3. Install Dependencies (with AWS CLI)
+    # 3. Install Dependencies (includes AWS CLI)
     # ---------------------------------------------------
     - name: ⚙️ Install build dependencies
->>>>>>> ba3a62b (Add unified AWS upload workflow)
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -70,79 +46,73 @@ jobs:
           syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
           rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
           plymouth-theme-spinner python3-pip
-<<<<<<< HEAD
+
+        echo "☁️ Checking AWS CLI..."
         if ! command -v aws &> /dev/null; then
-          curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip -qq awscliv2.zip
-          sudo ./aws/install
-        fi
-        aws --version
-
-=======
-
-        if ! command -v aws &>/dev/null; then
-          echo "☁️ Installing AWS CLI..."
+          echo "🧩 Installing AWS CLI v2..."
           curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip -qq awscliv2.zip
           sudo ./aws/install
         else
-          echo "☁️ Updating existing AWS CLI..."
-          curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip -qq awscliv2.zip
-          sudo ./aws/install --update
+          echo "✅ AWS CLI already available."
         fi
-
         aws --version
+        echo "✅ Dependencies installed."
 
     # ---------------------------------------------------
-    # 4. Run Builder Script (per edition)
+    # 4. Build Solvionyx ISO
     # ---------------------------------------------------
->>>>>>> ba3a62b (Add unified AWS upload workflow)
-    - name: 💿 Build Solvionyx ISO (${{ matrix.edition }})
+    - name: 💿 Run Solvionyx ISO Builder (${{ matrix.edition }})
       run: |
-        echo "🚀 Building Solvionyx OS — Aurora (${{ matrix.edition }})..."
+        echo "🚀 Building Solvionyx OS Aurora — ${{ matrix.edition | upper }} Edition..."
         chmod +x build_iso_debian.sh
-<<<<<<< HEAD
         sudo bash build_iso_debian.sh ${{ matrix.edition }}
+        echo "✅ Build completed successfully."
 
+    # ---------------------------------------------------
+    # 5. Verify ISO Output
+    # ---------------------------------------------------
     - name: 🔍 Verify ISO existence
       run: |
+        echo "🔍 Checking for Solvionyx ISO..."
         sudo chmod -R 755 solvionyx_build || true
         ISO_PATH=$(sudo find solvionyx_build -type f -name "*.iso*" 2>/dev/null | head -n 1)
         if [ -z "$ISO_PATH" ]; then
-          echo "❌ ISO not found"
-=======
-        sudo ./build_iso_debian.sh ${{ matrix.edition }}
-
-    # ---------------------------------------------------
-    # 5. Verify & Compress ISO
-    # ---------------------------------------------------
-    - name: 🧩 Verify and compress ISO
-      run: |
-        ISO_PATH=$(find solvionyx_build -type f -name "*.iso" | head -n 1)
-        if [ -z "$ISO_PATH" ]; then
-          echo "❌ ISO not found!"
->>>>>>> ba3a62b (Add unified AWS upload workflow)
+          echo "❌ ISO not found in solvionyx_build."
+          sudo ls -l solvionyx_build || true
           exit 1
         else
           echo "✅ ISO found at: $ISO_PATH"
         fi
-<<<<<<< HEAD
 
-    - name: 🗜️ Compress ISO
+    # ---------------------------------------------------
+    # 6. Compress ISO (if not already)
+    # ---------------------------------------------------
+    - name: 🗜️ Compress Solvionyx ISO (if not already compressed)
       run: |
         cd solvionyx_build
-        if ! ls *.iso.xz >/dev/null 2>&1; then
+        if ls *.iso.xz 1> /dev/null 2>&1; then
+          echo "✅ ISO already compressed."
+        else
+          echo "🗜️ Compressing Solvionyx ISO..."
           xz -T0 -9e *.iso
+          echo "✅ Compression complete."
         fi
 
+    # ---------------------------------------------------
+    # 7. Generate Checksums
+    # ---------------------------------------------------
     - name: 🔐 Generate SHA256 checksums
       run: |
-        sudo chmod -R 777 solvionyx_build
+        echo "🔐 Generating SHA256 checksums..."
         cd solvionyx_build
         sha256sum *.iso.xz > SHA256SUMS.txt
         cat SHA256SUMS.txt
+        echo "✅ Checksums generated."
 
+    # ---------------------------------------------------
+    # 8. Configure AWS Credentials
+    # ---------------------------------------------------
     - name: ☁️ Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -150,120 +120,41 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-    - name: ☁️ Upload to AWS S3 (Versioned + Latest)
+    # ---------------------------------------------------
+    # 9. Upload to AWS S3
+    # ---------------------------------------------------
+    - name: ☁️ Upload to AWS S3 (Versioned + Latest + JSON)
       env:
         S3_BUCKET: solvionyx-releases
       run: |
-        EDITION=${{ matrix.edition }}
+        echo "☁️ Uploading Solvionyx Aurora ISO to S3..."
         VERSION="v${{ github.run_number }}"
+        EDITION="${{ matrix.edition }}"
         ISO_DIR="solvionyx_build"
         REGION="${{ secrets.AWS_DEFAULT_REGION }}"
         BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
-        ISO_FILE=$(ls $ISO_DIR/*.iso.xz | head -n 1)
-        [ -f "$ISO_FILE" ] || exit 1
-        aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/aurora/${EDITION}/$VERSION/"
-        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/${EDITION}/$VERSION/"
-        aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/aurora/${EDITION}/latest/"
-        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/${EDITION}/latest/"
-        echo "✅ Uploaded to S3"
 
-    - name: 🔧 Generate latest.json
-      run: |
-        EDITION=${{ matrix.edition }}
-        VERSION="v${{ github.run_number }}"
-        REGION="${{ secrets.AWS_DEFAULT_REGION }}"
-        BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
-        ISO_FILE=$(ls solvionyx_build/*.iso.xz | head -n 1)
+        ISO_FILE=$(ls $ISO_DIR/*.iso.xz | head -n 1)
+        [ -f "$ISO_FILE" ] || { echo "❌ No ISO file found!"; exit 1; }
+
+        # Upload to versioned + latest directories
+        aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/${EDITION}/$VERSION/"
+        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/${EDITION}/$VERSION/"
+        aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/${EDITION}/latest/"
+        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/${EDITION}/latest/"
+        echo "✅ Upload complete."
+
+        # Generate metadata JSON
+        ISO_NAME=$(basename "$ISO_FILE")
         SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
         DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
         cat > latest.json <<EOF
         {
           "version": "${VERSION}",
           "edition": "${EDITION}",
-          "release_name": "Solvionyx OS Aurora (${EDITION} Edition)",
-          "brand": "Solvionyx OS",
+          "release_name": "Solvionyx OS Aurora (${EDITION^^} Edition)",
           "tagline": "The engine behind the vision.",
-          "build_date": "${DATE}",
-          "iso_name": "$(basename "$ISO_FILE")",
-          "sha256": "${SHA256_HASH}",
-          "download_url": "${BUCKET_URL}/aurora/${EDITION}/latest/$(basename "$ISO_FILE")",
-          "checksum_url": "${BUCKET_URL}/aurora/${EDITION}/latest/SHA256SUMS.txt"
-        }
-        EOF
-        aws s3 cp latest.json "s3://$S3_BUCKET/aurora/${EDITION}/latest/latest.json"
-        echo "✅ Uploaded latest.json"
-
-  update-index:
-    name: 🌐 Update Unified Aurora Series Index
-    runs-on: ubuntu-24.04
-    needs: build
-    steps:
-      - name: ☁️ Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
-
-      - name: 🧩 Build and upload series_index.json
-        run: |
-          S3_BUCKET=solvionyx-releases
-          REGION=${{ secrets.AWS_DEFAULT_REGION }}
-          BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
-          mkdir -p meta
-          for edition in gnome xfce kde; do
-            aws s3 cp "s3://$S3_BUCKET/aurora/${edition}/latest/latest.json" "meta/${edition}.json" || true
-          done
-          jq -s '{series: "Solvionyx Aurora", editions: .}' meta/*.json > series_index.json
-          aws s3 cp series_index.json "s3://$S3_BUCKET/aurora/latest/series_index.json"
-          echo "✅ series_index.json uploaded"
-=======
-        echo "✅ Found ISO at $ISO_PATH"
-        xz -T0 -9e "$ISO_PATH"
-        echo "✅ Compressed to ${ISO_PATH}.xz"
-        sha256sum ${ISO_PATH}.xz | tee solvionyx_build/SHA256SUMS.txt
-
-    # ---------------------------------------------------
-    # 6. Configure AWS Credentials
-    # ---------------------------------------------------
-    - name: ☁️ Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
-
-    # ---------------------------------------------------
-    # 7. Upload ISO + Metadata to S3
-    # ---------------------------------------------------
-    - name: ☁️ Upload ISO & metadata to S3
-      env:
-        S3_BUCKET: solvionyx-releases
-      run: |
-        VERSION="v${{ github.run_number }}"
-        EDITION="${{ matrix.edition }}"
-        ISO_FILE=$(find solvionyx_build -type f -name "*.iso.xz" | head -n 1)
-        SHA_FILE="solvionyx_build/SHA256SUMS.txt"
-        REGION="${{ secrets.AWS_DEFAULT_REGION }}"
-        BUCKET_URL="https://$S3_BUCKET.s3.${REGION}.amazonaws.com"
-
-        [ -f "$ISO_FILE" ] || { echo "❌ ISO not found!"; exit 1; }
-        echo "☁️ Uploading $ISO_FILE for edition $EDITION..."
-
-        aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/$EDITION/$VERSION/"
-        aws s3 cp "$SHA_FILE" "s3://$S3_BUCKET/$EDITION/$VERSION/"
-        aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/$EDITION/latest/"
-        aws s3 cp "$SHA_FILE" "s3://$S3_BUCKET/$EDITION/latest/"
-
-        ISO_NAME=$(basename "$ISO_FILE")
-        SHA256_HASH=$(awk '{print $1}' "$SHA_FILE")
-        DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-        cat > latest.json <<EOF
-        {
-          "version": "${VERSION}",
-          "release_name": "Solvionyx OS Aurora (${EDITION} Edition)",
-          "tagline": "The Engine Behind the Vision.",
           "brand": "Solvionyx OS",
           "build_date": "${DATE}",
           "iso_name": "${ISO_NAME}",
@@ -273,45 +164,44 @@ jobs:
         }
         EOF
 
-        aws s3 cp latest.json "s3://$S3_BUCKET/$EDITION/latest/latest.json"
-        echo "✅ Uploaded latest.json for $EDITION"
+        aws s3 cp latest.json "s3://$S3_BUCKET/${EDITION}/latest/latest.json"
+        echo "✅ latest.json uploaded."
 
-        # Cleanup old S3 versions (keep latest 5)
-        echo "🧹 Cleaning old versions..."
-        ALL_VERSIONS=$(aws s3 ls "s3://$S3_BUCKET/$EDITION/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
+        # 🧹 Auto-clean old S3 versions (keep latest 5)
+        echo "🧹 Cleaning old S3 versions..."
+        ALL_VERSIONS=$(aws s3 ls "s3://$S3_BUCKET/${EDITION}/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
         KEEP=$(echo "$ALL_VERSIONS" | tail -n 5)
         REMOVE=$(echo "$ALL_VERSIONS" | grep -vxFf <(echo "$KEEP") || true)
         for DIR in $REMOVE; do
           echo "🗑️ Removing old version: $DIR"
-          aws s3 rm "s3://$S3_BUCKET/$EDITION/$DIR" --recursive || true
+          aws s3 rm "s3://$S3_BUCKET/${EDITION}/$DIR" --recursive || true
         done
         echo "✅ Cleanup complete."
 
     # ---------------------------------------------------
-    # 8. Publish GitHub Release
+    # 10. Publish GitHub Release
     # ---------------------------------------------------
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: Aurora-v${{ github.run_number }}
-        name: "Solvionyx Aurora OS (${{ matrix.edition }}) v${{ github.run_number }}"
+        tag_name: Aurora-${{ matrix.edition }}-v${{ github.run_number }}
+        name: "Solvionyx OS Aurora — ${{ matrix.edition | upper }} Edition v${{ github.run_number }}"
         body: |
-          ## 🧠 Solvionyx OS Aurora (${{ matrix.edition }} Edition)
+          ## 🧠 Solvionyx OS Aurora (${{ matrix.edition | upper }} Edition)
           *The Engine Behind the Vision.*
 
-          ✅ Official Aurora branding  
-          ✅ Calamares installer  
+          ✅ Edition: ${{ matrix.edition | upper }}
+          ✅ Solvionyx branding  
           ✅ Live boot (casper)  
-          ✅ AI-ready environment  
+          ✅ Calamares installer  
 
-          🌐 **AWS S3 (Latest)**  
-          https://$S3_BUCKET.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/${{ matrix.edition }}/latest/
+          🌐 **AWS S3:**  
+          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/${{ matrix.edition }}/latest/
 
     # ---------------------------------------------------
-    # 9. Build Summary
+    # 11. Build Summary
     # ---------------------------------------------------
     - name: 📋 Build Summary
       run: |
-        echo "🧾 Solvionyx Aurora (${{ matrix.edition }}) Build Completed" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 S3: https://$S3_BUCKET.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/${{ matrix.edition }}/latest/" >> $GITHUB_STEP_SUMMARY
->>>>>>> ba3a62b (Add unified AWS upload workflow)
+        echo "🧾 Solvionyx OS Aurora (${{ matrix.edition | upper }}) built successfully." >> $GITHUB_STEP_SUMMARY
+        echo "🌍 Download: https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/${{ matrix.edition }}/latest/" >> $GITHUB_STEP_SUMMARY
