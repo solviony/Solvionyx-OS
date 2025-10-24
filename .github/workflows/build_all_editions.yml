@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: 🧠 Solvionyx OS — Aurora Series (${{ matrix.edition }})
+    name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition | upper }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
 
@@ -37,7 +37,7 @@ jobs:
         echo "✅ Workspace cleaned successfully."
 
     # ---------------------------------------------------
-    # 3. Install Dependencies (Safe AWS CLI Handling)
+    # 3. Install Dependencies
     # ---------------------------------------------------
     - name: ⚙️ Install build dependencies
       run: |
@@ -59,16 +59,17 @@ jobs:
           aws --version
         fi
 
-        echo "✅ Dependencies ready."
+        echo "✅ Dependencies and AWS CLI ready."
 
     # ---------------------------------------------------
-    # 4. Build Solvionyx ISO
+    # 4. Build Solvionyx Aurora ISO
     # ---------------------------------------------------
-    - name: 💿 Build Solvionyx ISO (${{ matrix.edition }})
+    - name: 💿 Run Solvionyx Aurora ISO Builder
       run: |
-        echo "🚀 Building Solvionyx OS Aurora — ${{ matrix.edition^ }} Edition..."
+        EDITION=${{ matrix.edition }}
+        echo "🚀 Building Solvionyx OS Aurora ($EDITION Edition)..."
         chmod +x build_iso_debian.sh
-        sudo bash build_iso_debian.sh ${{ matrix.edition }}
+        sudo bash build_iso_debian.sh "$EDITION"
         echo "✅ Build completed successfully."
 
     # ---------------------------------------------------
@@ -104,13 +105,13 @@ jobs:
     # ---------------------------------------------------
     # 7. Generate Checksums
     # ---------------------------------------------------
-    - name: 🔐 Generate SHA256 checksums (with sudo)
+    - name: 🔐 Generate SHA256 checksums
       run: |
         echo "🔐 Generating SHA256 checksums..."
         sudo chmod -R 777 solvionyx_build
         cd solvionyx_build
-        sudo bash -c 'sha256sum *.iso.xz > SHA256SUMS.txt'
-        sudo chmod 644 SHA256SUMS.txt
+        sha256sum *.iso.xz > SHA256SUMS.txt
+        chmod 644 SHA256SUMS.txt
         echo "✅ SHA256SUMS.txt created successfully:"
         cat SHA256SUMS.txt
 
@@ -132,7 +133,7 @@ jobs:
         S3_BUCKET: solvionyx-releases
       run: |
         EDITION=${{ matrix.edition }}
-        echo "☁️ Uploading Solvionyx Aurora ISO (${EDITION}) to S3..."
+        echo "☁️ Uploading Solvionyx Aurora ($EDITION) to S3..."
         VERSION="v${{ github.run_number }}"
         ISO_DIR="solvionyx_build"
         REGION="${{ secrets.AWS_DEFAULT_REGION }}"
@@ -146,9 +147,8 @@ jobs:
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/${EDITION}/$VERSION/"
         aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/aurora/${EDITION}/latest/"
         aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/aurora/${EDITION}/latest/"
-        echo "✅ Upload complete."
 
-        # Create edition-specific latest.json
+        # Create edition metadata JSON
         ISO_NAME=$(basename "$ISO_FILE")
         SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
         DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -156,10 +156,10 @@ jobs:
         cat > latest.json <<EOF
         {
           "version": "${VERSION}",
+          "edition": "${EDITION}",
           "release_name": "Solvionyx OS Aurora (${EDITION^} Edition)",
           "tagline": "The engine behind the vision.",
           "brand": "Solvionyx OS",
-          "edition": "${EDITION}",
           "build_date": "${DATE}",
           "iso_name": "${ISO_NAME}",
           "sha256": "${SHA256_HASH}",
@@ -169,10 +169,11 @@ jobs:
         EOF
 
         aws s3 cp latest.json "s3://$S3_BUCKET/aurora/${EDITION}/latest/latest.json"
-        echo "✅ latest.json uploaded successfully."
 
-        # 🔥 Auto-clean old S3 versions (keep only latest 5)
-        echo "🧹 Cleaning old Aurora versions on S3 for ${EDITION}..."
+        echo "✅ Upload complete."
+
+        # Clean up older versions
+        echo "🧹 Cleaning old versions..."
         ALL_VERSIONS=$(aws s3 ls "s3://$S3_BUCKET/aurora/${EDITION}/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
         KEEP=$(echo "$ALL_VERSIONS" | tail -n 5)
         REMOVE=$(echo "$ALL_VERSIONS" | grep -vxFf <(echo "$KEEP") || true)
@@ -182,29 +183,9 @@ jobs:
         done
         echo "✅ S3 cleanup complete."
 
-    # ---------------------------------------------------
-    # 10. Publish GitHub Release
-    # ---------------------------------------------------
-    - name: 🚀 Publish GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: Aurora-${{ matrix.edition }}-v${{ github.run_number }}
-        name: "Solvionyx Aurora OS (${{ matrix.edition^ }}) v${{ github.run_number }}"
-        body: |
-          ## 🧠 Solvionyx OS Aurora (${{ matrix.edition^ }} Edition)
-          *The Engine Behind the Vision.*
-
-          ✅ ${{ matrix.edition^ }} desktop  
-          ✅ Calamares installer  
-          ✅ Solvionyx branding  
-          ✅ Live boot (casper)  
-
-          🌐 **AWS S3:**  
-          https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/${{ matrix.edition }}/latest/
-
-    # ---------------------------------------------------
-    # 11. Upload Unified Series Index (only runs once after builds)
-    # ---------------------------------------------------
+  # ---------------------------------------------------
+  # 10. Generate Unified Series Index (after all builds)
+  # ---------------------------------------------------
   update-index:
     name: 🌐 Update Unified Aurora Series Index
     runs-on: ubuntu-24.04
@@ -217,22 +198,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-      - name: 🧩 Generate series_index.json
+      - name: 🧠 Build unified series_index.json
         run: |
           S3_BUCKET=solvionyx-releases
           REGION=${{ secrets.AWS_DEFAULT_REGION }}
           BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
 
-          echo "🌐 Fetching latest edition metadata..."
           mkdir -p aurora_meta
           for edition in gnome xfce kde; do
             aws s3 cp "s3://$S3_BUCKET/aurora/${edition}/latest/latest.json" "aurora_meta/${edition}.json" || true
           done
 
-          echo "🧠 Building unified series index..."
-          jq -s '{series: "Solvionyx Aurora", editions: .}' aurora_meta/*.json > series_index.json
+          jq -s '{series:"Solvionyx Aurora",editions:.}' aurora_meta/*.json > series_index.json
           cat series_index.json
 
-          echo "☁️ Uploading to S3..."
           aws s3 cp series_index.json "s3://$S3_BUCKET/aurora/latest/series_index.json"
-          echo "✅ series_index.json uploaded successfully."
+          echo "✅ Uploaded series_index.json successfully."
