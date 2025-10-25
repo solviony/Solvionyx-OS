@@ -21,6 +21,25 @@ jobs:
 
     steps:
     # ---------------------------------------------------
+    # 0. Validate AWS Secrets Early
+    # ---------------------------------------------------
+    - name: 🔐 Validate AWS Secrets (Early Check)
+      run: |
+        echo "🔍 Validating AWS secrets..."
+        if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || \
+           [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] || \
+           [ -z "${{ secrets.AWS_DEFAULT_REGION }}" ]; then
+          echo "❌ Missing AWS secrets! Please add them under:"
+          echo "   Settings → Secrets and variables → Actions → Repository secrets"
+          echo "   Required keys:"
+          echo "   - AWS_ACCESS_KEY_ID"
+          echo "   - AWS_SECRET_ACCESS_KEY"
+          echo "   - AWS_DEFAULT_REGION"
+          exit 1
+        fi
+        echo "✅ AWS secrets detected."
+
+    # ---------------------------------------------------
     # 1. Checkout Repository
     # ---------------------------------------------------
     - name: 🧩 Checkout repository
@@ -147,7 +166,11 @@ jobs:
     - name: 🔍 Verify AWS CLI Authentication
       run: |
         echo "🔍 Checking AWS authentication..."
+<<<<<<< HEAD
         aws sts get-caller-identity || { echo "❌ AWS credentials not valid"; exit 1; }
+=======
+        aws sts get-caller-identity || { echo "❌ AWS credentials invalid or not authorized"; exit 1; }
+>>>>>>> f7eed43 (Add early AWS secret validation + auth check)
         echo "✅ AWS authentication confirmed."
 
     # ---------------------------------------------------
