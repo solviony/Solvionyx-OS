@@ -150,8 +150,8 @@ jobs:
         echo "✅ ISO contains valid EFI + kernel boot structure."
         sudo umount mnt
 
-    # ---------------------------------------------------
-    # 9. Configure AWS Credentials
+        # ---------------------------------------------------
+    # 9. Configure AWS Credentials and Verify Access
     # ---------------------------------------------------
     - name: ☁️ Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -159,6 +159,15 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+    - name: 🔍 Validate AWS Setup
+      run: |
+        echo "🔍 Checking AWS authentication..."
+        aws sts get-caller-identity || { echo "❌ AWS credentials invalid or unauthorized"; exit 1; }
+        echo "✅ AWS authentication confirmed."
+        echo "🌎 Checking access to S3 bucket..."
+        aws s3 ls s3://solvionyx-releases || { echo "❌ Unable to access S3 bucket solvionyx-releases"; exit 1; }
+        echo "✅ S3 bucket reachable and ready."
 
     # ---------------------------------------------------
     # 10. Verify AWS Authentication
