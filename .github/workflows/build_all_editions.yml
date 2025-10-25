@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition | upper }})
+    name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
 
@@ -33,7 +33,7 @@ jobs:
       run: |
         echo "🧹 Cleaning previous build..."
         sudo rm -rf solvionyx_build || true
-        echo "✅ Clean workspace ready."
+        echo "✅ Workspace ready."
 
     # ---------------------------------------------------
     # 3. Install Dependencies
@@ -53,7 +53,7 @@ jobs:
           unzip -qq awscliv2.zip
           sudo ./aws/install
         fi
-        echo "✅ Dependencies installed."
+        echo "✅ Dependencies installed and ready."
 
     # ---------------------------------------------------
     # 4. Run Solvionyx ISO Builder
@@ -87,7 +87,7 @@ jobs:
         cd solvionyx_build
         ISO_FILE=$(find . -type f -name "*.iso" | head -n 1)
         if [ -f "$ISO_FILE" ]; then
-          echo "Compressing with moderate memory usage..."
+          echo "Compressing with limited threads..."
           xz -T2 -5 "$ISO_FILE"
           echo "✅ Compression complete."
         else
@@ -175,7 +175,7 @@ jobs:
         cat > latest.json <<EOF
         {
           "version": "${VERSION}",
-          "release_name": "Solvionyx OS Aurora (${EDITION^} Edition)",
+          "release_name": "Solvionyx OS Aurora (${EDITION} Edition)",
           "tagline": "The Engine Behind the Vision.",
           "brand": "Solvionyx OS",
           "edition": "${EDITION}",
@@ -208,17 +208,17 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         tag_name: Aurora-v${{ github.run_number }}
-        name: "Solvionyx OS Aurora (${{ matrix.edition | upper }}) v${{ github.run_number }}"
+        name: "Solvionyx OS Aurora (${{ matrix.edition }}) v${{ github.run_number }}"
         body: |
-          ## 🧠 Solvionyx OS Aurora (AI-Powered)
+          ## 🧠 Solvionyx OS Aurora
           *The Engine Behind the Vision.*
 
-          ✅ ${{ matrix.edition | upper }} desktop  
+          ✅ ${{ matrix.edition }} desktop  
           ✅ Calamares installer  
           ✅ Solvionyx branding  
           ✅ Bootable & Live-ready  
 
-          🌐 **S3 (Unified Bucket):**  
+          🌐 **AWS S3 (Unified Bucket):**  
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/
 
     # ---------------------------------------------------
