@@ -21,25 +21,6 @@ jobs:
 
     steps:
     # ---------------------------------------------------
-    # 0. Validate AWS Secrets Early
-    # ---------------------------------------------------
-    - name: 🔐 Validate AWS Secrets (Early Check)
-      run: |
-        echo "🔍 Validating AWS secrets..."
-        if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] || \
-           [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] || \
-           [ -z "${{ secrets.AWS_DEFAULT_REGION }}" ]; then
-          echo "❌ Missing AWS secrets! Please add them under:"
-          echo "   Settings → Secrets and variables → Actions → Repository secrets"
-          echo "   Required keys:"
-          echo "   - AWS_ACCESS_KEY_ID"
-          echo "   - AWS_SECRET_ACCESS_KEY"
-          echo "   - AWS_DEFAULT_REGION"
-          exit 1
-        fi
-        echo "✅ AWS secrets detected."
-
-    # ---------------------------------------------------
     # 1. Checkout Repository
     # ---------------------------------------------------
     - name: 🧩 Checkout repository
@@ -98,7 +79,7 @@ jobs:
         fi
 
     # ---------------------------------------------------
-    # 6. Compress ISO (Auto-memory optimized)
+    # 6. Compress ISO
     # ---------------------------------------------------
     - name: 🗜️ Compress Solvionyx ISO
       run: |
@@ -124,7 +105,7 @@ jobs:
         cat SHA256SUMS.txt
 
     # ---------------------------------------------------
-    # 8. Bootability Verification (EFI + Kernel)
+    # 8. Verify Bootable ISO Structure
     # ---------------------------------------------------
     - name: 🧩 Verify Bootable ISO Structure
       run: |
@@ -150,8 +131,8 @@ jobs:
         echo "✅ ISO contains valid EFI + kernel boot structure."
         sudo umount mnt
 
-        # ---------------------------------------------------
-    # 9. Configure AWS Credentials and Verify Access
+    # ---------------------------------------------------
+    # 9. Configure AWS Credentials
     # ---------------------------------------------------
     - name: ☁️ Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -160,46 +141,54 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
-    - name: 🔍 Validate AWS Setup
-      run: |
-        echo "🔍 Checking AWS authentication..."
-        aws sts get-caller-identity || { echo "❌ AWS credentials invalid or unauthorized"; exit 1; }
-        echo "✅ AWS authentication confirmed."
-        echo "🌎 Checking access to S3 bucket..."
-        aws s3 ls s3://solvionyx-releases || { echo "❌ Unable to access S3 bucket solvionyx-releases"; exit 1; }
-        echo "✅ S3 bucket reachable and ready."
-
     # ---------------------------------------------------
-    # 10. Verify AWS Authentication
+    # 10. Debug AWS Environment
     # ---------------------------------------------------
-    - name: 🔍 Verify AWS CLI Authentication
+    - name: 🧠 Debug AWS Environment Variables
       run: |
-        echo "🔍 Checking AWS authentication..."
-        aws sts get-caller-identity || { echo "❌ AWS credentials invalid or not authorized"; exit 1; }
-        echo "✅ AWS authentication confirmed."
+        echo "🔍 Checking AWS Environment Variables..."
+        env | grep AWS || echo "⚠️ No AWS variables found!"
+        aws sts get-caller-identity || echo "⚠️ Failed to authenticate AWS identity."
 
     # ---------------------------------------------------
     # 11. Upload to AWS S3 (Unified Aurora structure)
     # ---------------------------------------------------
     - name: ☁️ Upload to AWS S3 (Aurora unified structure)
       env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         S3_BUCKET: solvionyx-releases
       run: |
+        echo "🔍 Validating AWS authentication..."
+        aws sts get-caller-identity || { echo "❌ AWS credentials invalid or missing."; exit 1; }
+
+        echo "🌎 Checking access to S3 bucket..."
+        aws s3 ls s3://$S3_BUCKET || { echo "❌ Unable to access S3 bucket $S3_BUCKET."; exit 1; }
+
+        echo "☁️ Uploading ISO to Solvionyx Releases..."
         VERSION="v${{ github.run_number }}"
         ISO_DIR="solvionyx_build"
         REGION="${{ secrets.AWS_DEFAULT_REGION }}"
         BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
         EDITION="${{ matrix.edition }}"
-        RELEASE_PATH="aurora/${VERSION}"
-        LATEST_PATH="aurora/latest"
+        RELEASE_PATH="aurora/${VERSION}/${EDITION}"
+        LATEST_PATH="aurora/latest/${EDITION}"
 
-        echo "☁️ Uploading Solvionyx ${EDITION} ISO to AWS S3..."
-        aws s3 cp "${ISO_DIR}/" "s3://${S3_BUCKET}/${RELEASE_PATH}/${EDITION}/" --recursive --exclude "*" --include "*.iso.xz" --include "SHA256SUMS.txt"
-        aws s3 cp "${ISO_DIR}/" "s3://${S3_BUCKET}/${LATEST_PATH}/${EDITION}/" --recursive --exclude "*" --include "*.iso.xz" --include "SHA256SUMS.txt"
-        echo "✅ Upload completed for ${EDITION} edition."
-
-        # Generate latest.json
         ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
+        SHA256_FILE="${ISO_DIR}/SHA256SUMS.txt"
+
+        echo "Uploading ISO and checksum..."
+        aws s3 cp "$ISO_FILE" "s3://${S3_BUCKET}/${RELEASE_PATH}/"
+        aws s3 cp "$SHA256_FILE" "s3://${S3_BUCKET}/${RELEASE_PATH}/"
+
+        echo "Updating 'latest'..."
+        aws s3 cp "$ISO_FILE" "s3://${S3_BUCKET}/${LATEST_PATH}/" --acl public-read
+        aws s3 cp "$SHA256_FILE" "s3://${S3_BUCKET}/${LATEST_PATH}/" --acl public-read
+
+        echo "✅ Upload complete for ${EDITION} edition."
+
+        # Generate metadata JSON
         ISO_NAME=$(basename "$ISO_FILE")
         SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
         DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -219,19 +208,9 @@ jobs:
         }
         EOF
 
-        aws s3 cp latest.json "s3://${S3_BUCKET}/${LATEST_PATH}/${EDITION}/latest.json"
-        echo "✅ latest.json uploaded successfully."
-
-        # 🧹 Auto-clean old versions (keep only 5 per edition)
-        echo "🧹 Cleaning old versions for ${EDITION}..."
-        ALL_VERSIONS=$(aws s3 ls "s3://${S3_BUCKET}/aurora/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
-        KEEP=$(echo "$ALL_VERSIONS" | tail -n 5)
-        REMOVE=$(echo "$ALL_VERSIONS" | grep -vxFf <(echo "$KEEP") || true)
-        for DIR in $REMOVE; do
-          echo "🗑️ Removing old version: $DIR"
-          aws s3 rm "s3://${S3_BUCKET}/aurora/$DIR/${EDITION}" --recursive || true
-        done
-        echo "✅ Cleanup complete for ${EDITION}."
+        echo "🧾 Uploading metadata..."
+        aws s3 cp latest.json "s3://${S3_BUCKET}/${LATEST_PATH}/latest.json" --acl public-read
+        echo "✅ Metadata uploaded successfully."
 
     # ---------------------------------------------------
     # 12. Publish GitHub Release
@@ -261,5 +240,6 @@ jobs:
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "✅ Edition: ${{ matrix.edition }}" >> $GITHUB_STEP_SUMMARY
         echo "✅ Verified bootable (EFI + Kernel)" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Uploaded to solvionyx-releases bucket" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Uploaded to S3 bucket: solvionyx-releases" >> $GITHUB_STEP_SUMMARY
+        echo "🌍 Region: ${{ secrets.AWS_DEFAULT_REGION }}" >> $GITHUB_STEP_SUMMARY
+        echo "🌐 Public URL: https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
