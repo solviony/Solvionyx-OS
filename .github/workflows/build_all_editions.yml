@@ -19,6 +19,12 @@ jobs:
         edition: [gnome, xfce, kde]
       fail-fast: false
 
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      S3_BUCKET: solvionyx-releases
+
     steps:
     # ---------------------------------------------------
     # 1. Checkout Repository
@@ -132,54 +138,26 @@ jobs:
         sudo umount mnt
 
     # ---------------------------------------------------
-    # 9. Configure AWS Credentials (Global Export)
+    # 9. Validate AWS Credentials Early
     # ---------------------------------------------------
-    - name: ☁️ Configure AWS credentials (global export)
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-
-    # ---------------------------------------------------
-    # 10. Debug AWS Environment Variables
-    # ---------------------------------------------------
-    - name: 🧠 Debug AWS Environment Variables
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+    - name: 🔍 Validate AWS setup
       run: |
-        echo "🔍 Checking AWS environment..."
-        echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:0:4}********"
-        echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:0:4}********"
-        echo "AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION"
-        aws sts get-caller-identity || { echo "❌ AWS authentication failed"; exit 1; }
-        echo "🧾 Verifying configured credentials..."
-        aws configure list
+        echo "🔍 Validating AWS credentials..."
+        aws sts get-caller-identity || { echo "❌ AWS credentials invalid or missing!"; exit 1; }
+        echo "✅ AWS credentials confirmed."
+        echo "🌍 Checking S3 bucket access..."
+        aws s3 ls s3://$S3_BUCKET || { echo "❌ Cannot access S3 bucket $S3_BUCKET"; exit 1; }
+        echo "✅ S3 access verified."
 
     # ---------------------------------------------------
-    # 11. Upload to AWS S3 (Unified Aurora structure)
+    # 10. Upload to AWS S3 (Unified Aurora structure)
     # ---------------------------------------------------
     - name: ☁️ Upload to AWS S3 (Aurora unified structure)
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-        S3_BUCKET: solvionyx-releases
       run: |
-        echo "🌍 Verifying access to S3 bucket..."
-        aws s3 ls "s3://$S3_BUCKET" || { echo "❌ Unable to access bucket $S3_BUCKET"; exit 1; }
-
-        echo "☁️ Uploading ISO to Solvionyx Releases..."
         VERSION="v${{ github.run_number }}"
         ISO_DIR="solvionyx_build"
         REGION="$AWS_DEFAULT_REGION"
-        BUCKET_URL="https://solvionyx-releases.s3.${REGION}.amazonaws.com"
+        BUCKET_URL="https://$S3_BUCKET.s3.${REGION}.amazonaws.com"
         EDITION="${{ matrix.edition }}"
         RELEASE_PATH="aurora/${VERSION}/${EDITION}"
         LATEST_PATH="aurora/latest/${EDITION}"
@@ -187,14 +165,17 @@ jobs:
         ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
         SHA256_FILE="${ISO_DIR}/SHA256SUMS.txt"
 
+        echo "☁️ Uploading Solvionyx ${EDITION} ISO..."
         aws s3 cp "$ISO_FILE" "s3://${S3_BUCKET}/${RELEASE_PATH}/" --acl public-read
         aws s3 cp "$SHA256_FILE" "s3://${S3_BUCKET}/${RELEASE_PATH}/" --acl public-read
+
+        echo "☁️ Updating latest..."
         aws s3 cp "$ISO_FILE" "s3://${S3_BUCKET}/${LATEST_PATH}/" --acl public-read
         aws s3 cp "$SHA256_FILE" "s3://${S3_BUCKET}/${LATEST_PATH}/" --acl public-read
 
         echo "✅ Upload complete for ${EDITION} edition."
 
-        # Generate metadata JSON
+        # Create metadata file
         ISO_NAME=$(basename "$ISO_FILE")
         SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
         DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -214,12 +195,11 @@ jobs:
         }
         EOF
 
-        echo "🧾 Uploading metadata..."
         aws s3 cp latest.json "s3://${S3_BUCKET}/${LATEST_PATH}/latest.json" --acl public-read
         echo "✅ Metadata uploaded successfully."
 
     # ---------------------------------------------------
-    # 12. Publish GitHub Release
+    # 11. Publish GitHub Release
     # ---------------------------------------------------
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
@@ -239,13 +219,13 @@ jobs:
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/
 
     # ---------------------------------------------------
-    # 13. Build Summary
+    # 12. Build Summary
     # ---------------------------------------------------
     - name: 📋 Post Build Summary
       run: |
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "✅ Edition: ${{ matrix.edition }}" >> $GITHUB_STEP_SUMMARY
         echo "✅ Verified bootable (EFI + Kernel)" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Uploaded to S3 bucket: solvionyx-releases" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 Region: ${{ secrets.AWS_DEFAULT_REGION }}" >> $GITHUB_STEP_SUMMARY
-        echo "🌐 Public URL: https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Uploaded to S3 bucket: $S3_BUCKET" >> $GITHUB_STEP_SUMMARY
+        echo "🌍 Region: $AWS_DEFAULT_REGION" >> $GITHUB_STEP_SUMMARY
+        echo "🌐 Public URL: https://$S3_BUCKET.s3.${AWS_DEFAULT_REGION}.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
