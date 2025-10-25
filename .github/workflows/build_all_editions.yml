@@ -166,11 +166,7 @@ jobs:
     - name: 🔍 Verify AWS CLI Authentication
       run: |
         echo "🔍 Checking AWS authentication..."
-<<<<<<< HEAD
-        aws sts get-caller-identity || { echo "❌ AWS credentials not valid"; exit 1; }
-=======
         aws sts get-caller-identity || { echo "❌ AWS credentials invalid or not authorized"; exit 1; }
->>>>>>> f7eed43 (Add early AWS secret validation + auth check)
         echo "✅ AWS authentication confirmed."
 
     # ---------------------------------------------------
