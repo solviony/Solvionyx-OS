@@ -142,7 +142,16 @@ jobs:
         aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
     # ---------------------------------------------------
-    # 10. Upload to AWS S3 (Unified Aurora Structure)
+    # 10. Verify AWS Authentication
+    # ---------------------------------------------------
+    - name: 🔍 Verify AWS CLI Authentication
+      run: |
+        echo "🔍 Checking AWS authentication..."
+        aws sts get-caller-identity || { echo "❌ AWS credentials not valid"; exit 1; }
+        echo "✅ AWS authentication confirmed."
+
+    # ---------------------------------------------------
+    # 11. Upload to AWS S3 (Unified Aurora structure)
     # ---------------------------------------------------
     - name: ☁️ Upload to AWS S3 (Aurora unified structure)
       env:
@@ -156,53 +165,48 @@ jobs:
         RELEASE_PATH="aurora/${VERSION}"
         LATEST_PATH="aurora/latest"
 
-        ISO_FILE=$(ls $ISO_DIR/*.iso.xz | head -n 1)
-        [ -f "$ISO_FILE" ] || { echo "❌ ISO file not found!"; exit 1; }
+        echo "☁️ Uploading Solvionyx ${EDITION} ISO to AWS S3..."
+        aws s3 cp "${ISO_DIR}/" "s3://${S3_BUCKET}/${RELEASE_PATH}/${EDITION}/" --recursive --exclude "*" --include "*.iso.xz" --include "SHA256SUMS.txt"
+        aws s3 cp "${ISO_DIR}/" "s3://${S3_BUCKET}/${LATEST_PATH}/${EDITION}/" --recursive --exclude "*" --include "*.iso.xz" --include "SHA256SUMS.txt"
+        echo "✅ Upload completed for ${EDITION} edition."
 
-        ISO_NAME="Solvionyx-Aurora-${EDITION}-${VERSION}.iso.xz"
-        mv "$ISO_FILE" "$ISO_DIR/$ISO_NAME"
-
-        echo "📤 Uploading $ISO_NAME to S3..."
-        aws s3 cp "$ISO_DIR/$ISO_NAME" "s3://$S3_BUCKET/$RELEASE_PATH/"
-        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/$RELEASE_PATH/"
-        aws s3 cp "$ISO_DIR/$ISO_NAME" "s3://$S3_BUCKET/$LATEST_PATH/"
-        aws s3 cp "$ISO_DIR/SHA256SUMS.txt" "s3://$S3_BUCKET/$LATEST_PATH/"
-        echo "✅ Upload complete."
-
-        SHA256_HASH=$(sha256sum "$ISO_DIR/$ISO_NAME" | awk '{print $1}')
+        # Generate latest.json
+        ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
+        ISO_NAME=$(basename "$ISO_FILE")
+        SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
         DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
         cat > latest.json <<EOF
         {
           "version": "${VERSION}",
-          "release_name": "Solvionyx OS Aurora (${EDITION} Edition)",
-          "tagline": "The Engine Behind the Vision.",
-          "brand": "Solvionyx OS",
           "edition": "${EDITION}",
+          "release_name": "Solvionyx OS Aurora (${EDITION} Edition)",
+          "tagline": "The engine behind the vision.",
+          "brand": "Solvionyx OS",
           "build_date": "${DATE}",
           "iso_name": "${ISO_NAME}",
           "sha256": "${SHA256_HASH}",
-          "download_url": "${BUCKET_URL}/${LATEST_PATH}/${ISO_NAME}",
-          "checksum_url": "${BUCKET_URL}/${LATEST_PATH}/SHA256SUMS.txt"
+          "download_url": "${BUCKET_URL}/aurora/latest/${EDITION}/${ISO_NAME}",
+          "checksum_url": "${BUCKET_URL}/aurora/latest/${EDITION}/SHA256SUMS.txt"
         }
         EOF
 
-        aws s3 cp latest.json "s3://$S3_BUCKET/$LATEST_PATH/latest.json"
-        echo "✅ latest.json uploaded."
+        aws s3 cp latest.json "s3://${S3_BUCKET}/${LATEST_PATH}/${EDITION}/latest.json"
+        echo "✅ latest.json uploaded successfully."
 
-        # Auto-cleanup old versions (keep latest 5)
-        echo "🧹 Cleaning old versions..."
-        ALL_VERSIONS=$(aws s3 ls "s3://$S3_BUCKET/aurora/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
+        # 🧹 Auto-clean old versions (keep only 5 per edition)
+        echo "🧹 Cleaning old versions for ${EDITION}..."
+        ALL_VERSIONS=$(aws s3 ls "s3://${S3_BUCKET}/aurora/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
         KEEP=$(echo "$ALL_VERSIONS" | tail -n 5)
         REMOVE=$(echo "$ALL_VERSIONS" | grep -vxFf <(echo "$KEEP") || true)
         for DIR in $REMOVE; do
-          echo "🗑️ Removing $DIR"
-          aws s3 rm "s3://$S3_BUCKET/aurora/$DIR" --recursive || true
+          echo "🗑️ Removing old version: $DIR"
+          aws s3 rm "s3://${S3_BUCKET}/aurora/$DIR/${EDITION}" --recursive || true
         done
-        echo "✅ S3 cleanup complete."
+        echo "✅ Cleanup complete for ${EDITION}."
 
     # ---------------------------------------------------
-    # 11. Publish GitHub Release
+    # 12. Publish GitHub Release
     # ---------------------------------------------------
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
@@ -222,7 +226,7 @@ jobs:
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/
 
     # ---------------------------------------------------
-    # 12. Build Summary
+    # 13. Build Summary
     # ---------------------------------------------------
     - name: 📋 Post Build Summary
       run: |
