@@ -2,11 +2,11 @@
 set -e
 
 # ==========================================================
-# 🌌 Solvionyx OS — Aurora Series Builder + S3 Cleanup
+# 🌌 Solvionyx OS — Aurora Series Builder + GCS Uploader
 # ==========================================================
 # Builds GNOME / XFCE / KDE editions of Solvionyx OS Aurora
-# with full UEFI+BIOS boot, uploads to AWS S3, and removes
-# older versions (keeping the last 5).
+# with full UEFI+BIOS boot, uploads to Google Cloud Storage,
+# and keeps branding consistent across editions.
 # ==========================================================
 
 # -------- CONFIGURATION -----------------------------------
@@ -17,8 +17,7 @@ ISO_DIR="$BUILD_DIR/iso"
 OUTPUT_DIR="$BUILD_DIR"
 VERSION="v$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${VERSION}.iso"
-S3_BUCKET="solvionyx-releases"
-AWS_REGION="us-east-1"  # Change if needed
+GCS_BUCKET="solvionyx-os"
 KEEP_LATEST=5
 BRAND="Solvionyx OS"
 TAGLINE="The Engine Behind the Vision."
@@ -51,8 +50,8 @@ echo "🧠 Installing desktop environment ($EDITION)..."
 sudo chroot "$CHROOT_DIR" /bin/bash -c "
   case '$EDITION' in
     gnome) apt-get install -y task-gnome-desktop gdm3 gnome-terminal ;;
-    xfce) apt-get install -y task-xfce-desktop lightdm xfce4-terminal ;;
-    kde) apt-get install -y task-kde-desktop sddm konsole ;;
+    xfce)  apt-get install -y task-xfce-desktop lightdm xfce4-terminal ;;
+    kde)   apt-get install -y task-kde-desktop sddm konsole ;;
     *) echo '❌ Unknown edition'; exit 1 ;;
   esac
 "
@@ -131,19 +130,25 @@ xz -T0 -9e "$OUTPUT_DIR/$ISO_NAME"
 sha256sum "$OUTPUT_DIR/$ISO_NAME.xz" > "$OUTPUT_DIR/SHA256SUMS.txt"
 echo "✅ ISO build and checksum complete."
 
-# -------- AWS UPLOAD ---------------------------------------
-if command -v aws &> /dev/null; then
-  echo "☁️ Uploading to AWS..."
+# -------- GCS UPLOAD ---------------------------------------
+if command -v gsutil &> /dev/null; then
+  echo "☁️ Uploading to Google Cloud Storage..."
   ISO_FILE="$OUTPUT_DIR/$ISO_NAME.xz"
   SHA_FILE="$OUTPUT_DIR/SHA256SUMS.txt"
   DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   VERSION_TAG="v$(date +%Y%m%d%H%M)"
+  EDITION_PATH="aurora/${EDITION}/${VERSION_TAG}"
+  LATEST_PATH="aurora/${EDITION}/latest"
 
-  aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/${EDITION}/${VERSION_TAG}/"
-  aws s3 cp "$SHA_FILE" "s3://$S3_BUCKET/${EDITION}/${VERSION_TAG}/"
-  aws s3 cp "$ISO_FILE" "s3://$S3_BUCKET/${EDITION}/latest/"
-  aws s3 cp "$SHA_FILE" "s3://$S3_BUCKET/${EDITION}/latest/"
+  # Upload main ISO + checksum
+  gsutil -m cp "$ISO_FILE" "gs://${GCS_BUCKET}/${EDITION_PATH}/"
+  gsutil -m cp "$SHA_FILE" "gs://${GCS_BUCKET}/${EDITION_PATH}/"
 
+  # Update latest
+  gsutil -m cp "$ISO_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+  gsutil -m cp "$SHA_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+
+  # Generate metadata JSON
   cat > "$OUTPUT_DIR/latest.json" <<EOF
   {
     "version": "${VERSION_TAG}",
@@ -154,35 +159,20 @@ if command -v aws &> /dev/null; then
     "build_date": "${DATE}",
     "iso_name": "$(basename "$ISO_FILE")",
     "sha256": "$(sha256sum "$ISO_FILE" | awk '{print $1}')",
-    "download_url": "https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/${EDITION}/latest/$(basename "$ISO_FILE")",
-    "checksum_url": "https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com/${EDITION}/latest/SHA256SUMS.txt"
+    "download_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/$(basename "$ISO_FILE")",
+    "checksum_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt"
   }
 EOF
 
-  aws s3 cp "$OUTPUT_DIR/latest.json" "s3://$S3_BUCKET/${EDITION}/latest/latest.json"
-  echo "✅ Upload complete."
+  gsutil -m cp "$OUTPUT_DIR/latest.json" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+  echo "✅ Upload complete to GCS."
 else
-  echo "⚠️ AWS CLI not installed — skipping upload."
-fi
-
-# -------- CLEANUP ------------------------------------------
-echo "🧹 Running S3 cleanup for old versions..."
-if command -v aws &> /dev/null; then
-  versions=$(aws s3 ls "s3://$S3_BUCKET/$EDITION/" | awk '{print $2}' | sed 's#/##' | grep '^v[0-9]' | sort -V)
-  keep=$(echo "$versions" | tail -n $KEEP_LATEST)
-  remove=$(echo "$versions" | grep -vxFf <(echo "$keep") || true)
-  for dir in $remove; do
-    echo "🗑️ Removing old build: $dir"
-    aws s3 rm "s3://$S3_BUCKET/$EDITION/$dir" --recursive || true
-  done
-  echo "✅ Cleanup complete. Kept latest $KEEP_LATEST versions."
-else
-  echo "⚠️ AWS CLI missing — skipping cleanup."
+  echo "⚠️ gsutil not found — skipping upload."
 fi
 
 # -------- FINISH -------------------------------------------
 echo "==========================================================="
 echo "🎉 Build complete: $BRAND — Aurora ($EDITION Edition)"
 echo "📦 ISO Path: $OUTPUT_DIR/$ISO_NAME.xz"
-echo "☁️ S3 Bucket: s3://$S3_BUCKET/$EDITION/latest/"
+echo "☁️ GCS Bucket: gs://${GCS_BUCKET}/aurora/${EDITION}/latest/"
 echo "==========================================================="
