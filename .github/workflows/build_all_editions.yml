@@ -248,4 +248,3 @@ jobs:
         echo "✅ Edition: ${{ matrix.edition }}" >> $GITHUB_STEP_SUMMARY
         echo "✅ Bootable and branded ISO confirmed" >> $GITHUB_STEP_SUMMARY
         echo "🌍 Public URL: https://storage.googleapis.com/solvionyx-os/aurora/latest/${{ matrix.edition }}/" >> $GITHUB_STEP_SUMMARY
-
