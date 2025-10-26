@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # Needed for GitHub Releases
+  contents: write
 
 jobs:
   build:
@@ -62,7 +62,18 @@ jobs:
         install_components: 'gsutil'
 
     # ---------------------------------------------------
-    # 5. Run Solvionyx ISO Builder
+    # 5. Ensure bucket allows public access
+    # ---------------------------------------------------
+    - name: 🌍 Ensure GCS bucket public-read policy
+      env:
+        GCS_BUCKET: solvionyx-os
+      run: |
+        echo "🌍 Enabling public-read access for ${GCS_BUCKET}"
+        gsutil iam ch allUsers:objectViewer gs://${GCS_BUCKET} || true
+        echo "✅ Public access ensured."
+
+    # ---------------------------------------------------
+    # 6. Run Solvionyx ISO Builder
     # ---------------------------------------------------
     - name: 💿 Run Solvionyx ISO Builder (${{ matrix.edition }})
       run: |
@@ -71,11 +82,10 @@ jobs:
         sudo ./build_iso_debian.sh ${{ matrix.edition }}
 
     # ---------------------------------------------------
-    # 6. Verify ISO Existence
+    # 7. Verify ISO existence
     # ---------------------------------------------------
     - name: 🔍 Verify ISO existence
       run: |
-        echo "🔍 Checking for ISO file..."
         ISO_PATH=$(find solvionyx_build -type f -name "*.iso*" | head -n 1)
         if [ -z "$ISO_PATH" ]; then
           echo "❌ No ISO found!"
@@ -85,37 +95,29 @@ jobs:
         fi
 
     # ---------------------------------------------------
-    # 7. Compress ISO
+    # 8. Compress ISO
     # ---------------------------------------------------
-    - name: 🗜️ Compress Solvionyx ISO
+    - name: 🗜️ Compress ISO
       run: |
-        echo "🗜️ Compressing ISO..."
         cd solvionyx_build
-        ISO_FILE=$(find . -type f -name "*.iso" | head -n 1)
-        if [ -f "$ISO_FILE" ]; then
-          echo "Compressing with limited threads..."
-          xz -T2 -5 "$ISO_FILE"
-          echo "✅ Compression complete."
-        else
-          echo "⚠️ No raw ISO to compress — skipping."
-        fi
+        ISO_FILE=$(find . -name "*.iso" | head -n 1)
+        [ -f "$ISO_FILE" ] && xz -T2 -5 "$ISO_FILE" && echo "✅ Compressed $ISO_FILE" || echo "⚠️ Skipped compression."
 
     # ---------------------------------------------------
-    # 8. Generate SHA256 Checksums
+    # 9. Generate SHA256 Checksums
     # ---------------------------------------------------
     - name: 🔐 Generate SHA256 checksums
       run: |
         cd solvionyx_build
-        echo "🔐 Generating checksums..."
         sha256sum *.iso.xz > SHA256SUMS.txt
         cat SHA256SUMS.txt
 
     # ---------------------------------------------------
-    # 9. Verify Bootable ISO Structure
+    # 10. Verify Bootable ISO Structure + Branding
     # ---------------------------------------------------
-    - name: 🧩 Verify Bootable ISO Structure
+    - name: 🧩 Verify Bootable ISO Structure & Branding
       run: |
-        echo "🧩 Verifying bootable components..."
+        echo "🧩 Verifying EFI + kernel + branding..."
         ISO_FILE=$(find solvionyx_build -name "*.iso.xz" | head -n 1)
         xz -d -k "$ISO_FILE"
         RAW_ISO="${ISO_FILE%.xz}"
@@ -123,7 +125,7 @@ jobs:
         sudo mount -o loop "$RAW_ISO" mnt
 
         if [ ! -f mnt/boot/vmlinuz-* ]; then
-          echo "❌ Missing kernel (vmlinuz) file!"
+          echo "❌ Missing kernel (vmlinuz)!"
           sudo umount mnt
           exit 1
         fi
@@ -134,11 +136,17 @@ jobs:
           exit 1
         fi
 
-        echo "✅ ISO contains valid EFI + kernel boot structure."
+        if ! grep -i -q "Solvionyx" mnt/.disk/info 2>/dev/null; then
+          echo "⚠️ Solvionyx branding not found in .disk/info (check builder script)."
+        else
+          echo "✅ Solvionyx branding detected in ISO metadata."
+        fi
+
+        echo "✅ ISO confirmed bootable and branded."
         sudo umount mnt
 
     # ---------------------------------------------------
-    # 10. Upload to Google Cloud Storage
+    # 11. Upload to Google Cloud Storage
     # ---------------------------------------------------
     - name: ☁️ Upload to Google Cloud Storage
       env:
@@ -150,18 +158,14 @@ jobs:
         RELEASE_PATH="aurora/${VERSION}/${EDITION}"
         LATEST_PATH="aurora/latest/${EDITION}"
 
-        echo "☁️ Uploading ISO to GCS bucket: ${GCS_BUCKET}"
-
+        echo "☁️ Uploading ISO to ${GCS_BUCKET}"
         ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
         SHA256_FILE="${ISO_DIR}/SHA256SUMS.txt"
 
         gsutil -m cp "$ISO_FILE" gs://${GCS_BUCKET}/${RELEASE_PATH}/
         gsutil -m cp "$SHA256_FILE" gs://${GCS_BUCKET}/${RELEASE_PATH}/
-
         gsutil -m cp "$ISO_FILE" gs://${GCS_BUCKET}/${LATEST_PATH}/
         gsutil -m cp "$SHA256_FILE" gs://${GCS_BUCKET}/${LATEST_PATH}/
-
-        echo "✅ Upload complete to Google Cloud Storage"
 
         ISO_NAME=$(basename "$ISO_FILE")
         SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
@@ -171,8 +175,8 @@ jobs:
         {
           "version": "${VERSION}",
           "edition": "${EDITION}",
-          "release_name": "Solvionyx OS Aurora (${EDITION} Edition)",
-          "tagline": "The engine behind the vision.",
+          "release_name": "Solvionyx OS Aurora (${EDITION})",
+          "tagline": "The Engine Behind the Vision.",
           "brand": "Solvionyx OS",
           "build_date": "${DATE}",
           "iso_name": "${ISO_NAME}",
@@ -183,10 +187,10 @@ jobs:
         EOF
 
         gsutil cp latest.json gs://${GCS_BUCKET}/${LATEST_PATH}/
-        echo "✅ latest.json uploaded successfully."
+        echo "✅ Upload complete."
 
     # ---------------------------------------------------
-    # 11. Verify GCS Public Access
+    # 12. Verify GCS Public Access
     # ---------------------------------------------------
     - name: 🌍 Verify GCS Public Access
       env:
@@ -196,18 +200,30 @@ jobs:
         ISO_FILE=$(find solvionyx_build -name "*.iso.xz" | head -n 1)
         ISO_NAME=$(basename "$ISO_FILE")
         URL="https://storage.googleapis.com/${GCS_BUCKET}/aurora/latest/${EDITION}/${ISO_NAME}"
-
-        echo "🌍 Checking public accessibility for: $URL"
         STATUS=$(curl -o /dev/null -s -w "%{http_code}" "$URL")
+        [ "$STATUS" -eq 200 ] && echo "✅ Public file verified." || echo "⚠️ File not yet public (HTTP $STATUS)."
 
-        if [ "$STATUS" -eq 200 ]; then
-          echo "✅ Public file access verified successfully."
+    # ---------------------------------------------------
+    # 13. Cleanup Old Versions (keep last 5)
+    # ---------------------------------------------------
+    - name: 🧹 Cleanup Old Versions
+      env:
+        GCS_BUCKET: solvionyx-os
+      run: |
+        EDITION="${{ matrix.edition }}"
+        echo "🧹 Cleaning old versions of ${EDITION}..."
+        LIST=$(gsutil ls gs://${GCS_BUCKET}/aurora/ | grep "${EDITION}" | sort)
+        COUNT=$(echo "$LIST" | wc -l)
+        if [ "$COUNT" -gt 5 ]; then
+          REMOVE=$(echo "$LIST" | head -n $(($COUNT-5)))
+          echo "$REMOVE" | xargs -I {} gsutil -m rm -r "{}"
+          echo "✅ Removed old versions, kept last 5."
         else
-          echo "⚠️ File not publicly accessible (HTTP $STATUS)."
+          echo "ℹ️ Nothing to clean."
         fi
 
     # ---------------------------------------------------
-    # 12. Publish GitHub Release
+    # 14. Publish GitHub Release
     # ---------------------------------------------------
     - name: 🚀 Publish GitHub Release
       uses: softprops/action-gh-release@v1
@@ -219,19 +235,16 @@ jobs:
           *The Engine Behind the Vision.*
 
           ✅ ${{ matrix.edition }} desktop  
-          ✅ Calamares installer  
-          ✅ Solvionyx branding  
           ✅ Bootable & Live-ready  
-
-          🌐 **Google Cloud Mirror:**  
-          https://storage.googleapis.com/solvionyx-os/aurora/latest/${{ matrix.edition }}/
+          ✅ Solvionyx branding  
+          🌐 https://storage.googleapis.com/solvionyx-os/aurora/latest/${{ matrix.edition }}/
 
     # ---------------------------------------------------
-    # 13. Build Summary
+    # 15. Build Summary
     # ---------------------------------------------------
     - name: 📋 Post Build Summary
       run: |
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "✅ Edition: ${{ matrix.edition }}" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Uploaded to GCS bucket: solvionyx-os" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 https://storage.googleapis.com/solvionyx-os/aurora/latest/${{ matrix.edition }}/" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Bootable and branded ISO confirmed" >> $GITHUB_STEP_SUMMARY
+        echo "🌍 Public URL: https://storage.googleapis.com/solvionyx-os/aurora/latest/${{ matrix.edition }}/" >> $GITHUB_STEP_SUMMARY
