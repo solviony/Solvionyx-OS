@@ -59,10 +59,10 @@ jobs:
           unzip -qq awscliv2.zip
           sudo ./aws/install
         fi
-        echo "✅ Dependencies installed and ready."
+        echo "✅ Dependencies installed successfully."
 
     # ---------------------------------------------------
-    # 4. Run Solvionyx ISO Builder
+    # 4. Run ISO Builder
     # ---------------------------------------------------
     - name: 💿 Run Solvionyx ISO Builder (${{ matrix.edition }})
       run: |
@@ -75,33 +75,28 @@ jobs:
     # ---------------------------------------------------
     - name: 🔍 Verify ISO existence
       run: |
-        echo "🔍 Checking for ISO file..."
         ISO_PATH=$(find solvionyx_build -type f -name "*.iso*" | head -n 1)
         if [ -z "$ISO_PATH" ]; then
           echo "❌ No ISO found!"
           exit 1
-        else
-          echo "✅ Found ISO: $ISO_PATH"
         fi
+        echo "✅ Found ISO: $ISO_PATH"
 
     # ---------------------------------------------------
     # 6. Compress ISO
     # ---------------------------------------------------
     - name: 🗜️ Compress Solvionyx ISO
       run: |
-        echo "🗜️ Compressing ISO..."
         cd solvionyx_build
         ISO_FILE=$(find . -type f -name "*.iso" | head -n 1)
         if [ -f "$ISO_FILE" ]; then
-          echo "Compressing with limited threads..."
+          echo "🗜️ Compressing..."
           xz -T2 -5 "$ISO_FILE"
           echo "✅ Compression complete."
-        else
-          echo "⚠️ No raw ISO to compress — skipping."
         fi
 
     # ---------------------------------------------------
-    # 7. Generate SHA256 Checksums
+    # 7. Generate Checksums
     # ---------------------------------------------------
     - name: 🔐 Generate SHA256 checksums
       run: |
@@ -115,7 +110,7 @@ jobs:
     # ---------------------------------------------------
     - name: 🧩 Verify Bootable ISO Structure
       run: |
-        echo "🧩 Verifying bootable components..."
+        echo "🧩 Verifying EFI + kernel..."
         ISO_FILE=$(find solvionyx_build -name "*.iso.xz" | head -n 1)
         xz -d -k "$ISO_FILE"
         RAW_ISO="${ISO_FILE%.xz}"
@@ -123,41 +118,53 @@ jobs:
         sudo mount -o loop "$RAW_ISO" mnt
 
         if [ ! -f mnt/boot/vmlinuz-* ]; then
-          echo "❌ Missing kernel (vmlinuz) file!"
+          echo "❌ Missing kernel (vmlinuz)!"
           sudo umount mnt
           exit 1
         fi
-
         if [ ! -f mnt/EFI/BOOT/BOOTX64.EFI ]; then
           echo "❌ Missing EFI bootloader!"
           sudo umount mnt
           exit 1
         fi
-
-        echo "✅ ISO contains valid EFI + kernel boot structure."
+        echo "✅ ISO boot structure verified."
         sudo umount mnt
 
     # ---------------------------------------------------
-    # 9. Validate AWS Credentials Early
+    # 9. Verify AWS Credentials (with Masked Debug)
     # ---------------------------------------------------
-    - name: 🔍 Validate AWS setup
+    - name: 🔍 Validate AWS credentials
       run: |
-        echo "🔍 Validating AWS credentials..."
-        aws sts get-caller-identity || { echo "❌ AWS credentials invalid or missing!"; exit 1; }
-        echo "✅ AWS credentials confirmed."
-        echo "🌍 Checking S3 bucket access..."
-        aws s3 ls s3://$S3_BUCKET || { echo "❌ Cannot access S3 bucket $S3_BUCKET"; exit 1; }
-        echo "✅ S3 access verified."
+        echo "🔍 Checking AWS environment..."
+        if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+          echo "❌ AWS credentials missing from environment!"
+          exit 1
+        fi
+
+        # Masked prefix visibility for debugging
+        echo "🔑 AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:0:4}********${AWS_ACCESS_KEY_ID: -4}"
+        echo "🔒 AWS_SECRET_ACCESS_KEY: ********${AWS_SECRET_ACCESS_KEY: -4}"
+        echo "🌍 AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}"
+
+        echo "🔐 Testing AWS CLI authentication..."
+        aws sts get-caller-identity || { echo "❌ AWS credentials invalid!"; exit 1; }
+        echo "✅ AWS authentication OK."
+        aws s3 ls "s3://${S3_BUCKET}" || { echo "❌ Cannot access bucket ${S3_BUCKET}!"; exit 1; }
+        echo "✅ S3 bucket access confirmed."
 
     # ---------------------------------------------------
-    # 10. Upload to AWS S3 (Unified Aurora structure)
+    # 10. Upload to AWS S3 (Unified Aurora Structure)
     # ---------------------------------------------------
-    - name: ☁️ Upload to AWS S3 (Aurora unified structure)
+    - name: ☁️ Upload to AWS S3
       run: |
+        export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+        export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+        export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION}"
+
         VERSION="v${{ github.run_number }}"
         ISO_DIR="solvionyx_build"
         REGION="$AWS_DEFAULT_REGION"
-        BUCKET_URL="https://$S3_BUCKET.s3.${REGION}.amazonaws.com"
+        BUCKET_URL="https://${S3_BUCKET}.s3.${REGION}.amazonaws.com"
         EDITION="${{ matrix.edition }}"
         RELEASE_PATH="aurora/${VERSION}/${EDITION}"
         LATEST_PATH="aurora/latest/${EDITION}"
@@ -165,17 +172,17 @@ jobs:
         ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
         SHA256_FILE="${ISO_DIR}/SHA256SUMS.txt"
 
-        echo "☁️ Uploading Solvionyx ${EDITION} ISO..."
+        echo "☁️ Uploading Solvionyx ${EDITION} ISO to AWS..."
         aws s3 cp "$ISO_FILE" "s3://${S3_BUCKET}/${RELEASE_PATH}/" --acl public-read
         aws s3 cp "$SHA256_FILE" "s3://${S3_BUCKET}/${RELEASE_PATH}/" --acl public-read
 
-        echo "☁️ Updating latest..."
+        echo "☁️ Updating latest release..."
         aws s3 cp "$ISO_FILE" "s3://${S3_BUCKET}/${LATEST_PATH}/" --acl public-read
         aws s3 cp "$SHA256_FILE" "s3://${S3_BUCKET}/${LATEST_PATH}/" --acl public-read
 
         echo "✅ Upload complete for ${EDITION} edition."
 
-        # Create metadata file
+        # Generate JSON metadata
         ISO_NAME=$(basename "$ISO_FILE")
         SHA256_HASH=$(sha256sum "$ISO_FILE" | awk '{print $1}')
         DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -215,7 +222,7 @@ jobs:
           ✅ Solvionyx branding  
           ✅ Bootable & Live-ready  
 
-          🌐 **AWS S3 (Unified Bucket):**  
+          🌐 **AWS S3 (Public Release):**  
           https://solvionyx-releases.s3.${{ secrets.AWS_DEFAULT_REGION }}.amazonaws.com/aurora/latest/
 
     # ---------------------------------------------------
@@ -225,7 +232,7 @@ jobs:
       run: |
         echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "✅ Edition: ${{ matrix.edition }}" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Verified bootable (EFI + Kernel)" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Uploaded to S3 bucket: $S3_BUCKET" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Bootable ISO verified" >> $GITHUB_STEP_SUMMARY
+        echo "✅ Uploaded to S3: $S3_BUCKET" >> $GITHUB_STEP_SUMMARY
         echo "🌍 Region: $AWS_DEFAULT_REGION" >> $GITHUB_STEP_SUMMARY
-        echo "🌐 Public URL: https://$S3_BUCKET.s3.${AWS_DEFAULT_REGION}.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
+        echo "🌐 URL: https://${S3_BUCKET}.s3.${AWS_DEFAULT_REGION}.amazonaws.com/aurora/latest/" >> $GITHUB_STEP_SUMMARY
