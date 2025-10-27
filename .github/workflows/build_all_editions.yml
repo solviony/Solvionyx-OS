@@ -1,4 +1,4 @@
-name: Build & Release Solvionyx OS — Aurora Series (GCS Edition)
+name: Build & Release Solvionyx OS — Aurora (GNOME/XFCE/KDE + GCS + Artifacts)
 
 on:
   push:
@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # Needed for GitHub Releases
+  contents: write  # needed for GitHub Releases
+  actions: read
 
 jobs:
   build:
@@ -19,88 +20,228 @@ jobs:
         edition: [gnome, xfce, kde]
       fail-fast: false
 
+    env:
+      GCS_BUCKET: solvionyx-os
+      GCP_PROJECT: iconic-biplane-476304-u8
+      VERSION: v${{ github.run_number }}
+      ISO_DIR: solvionyx_build
+      BRAND_LOGO: branding/4023.png
+      BRAND_BG: branding/4022.jpg
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp.json
+      CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ runner.temp }}/gcp.json
+
     steps:
-    # ---------------------------------------------------
-    # 1. Checkout Repository
-    # ---------------------------------------------------
-    - name: 🧩 Checkout repository
-      uses: actions/checkout@v4
+      # ---------------------------------------------------
+      # 1. Checkout
+      # ---------------------------------------------------
+      - name: 🧩 Checkout repository
+        uses: actions/checkout@v4
 
-    # ---------------------------------------------------
-    # 2. Install Dependencies
-    # ---------------------------------------------------
-    - name: ⚙️ Install base tools
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
-          syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-          rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
-          plymouth plymouth-themes plymouth-label python3-pip
+      # ---------------------------------------------------
+      # 2. Install dependencies
+      # ---------------------------------------------------
+      - name: ⚙️ Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
+            syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
+            rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
+            plymouth plymouth-themes plymouth-label imagemagick
 
-    # ---------------------------------------------------
-    # 3. Authenticate with Google Cloud
-    # ---------------------------------------------------
-    - name: ☁️ Authenticate to Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCS_CREDENTIALS_JSON }}
+      # ---------------------------------------------------
+      # 3. Setup Google Cloud SDK + Auth
+      # ---------------------------------------------------
+      - name: ☁️ Install gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+          install_components: 'gsutil'
 
-    - name: ⚙️ Setup gcloud and gsutil
-      uses: google-github-actions/setup-gcloud@v2
-      with:
-        project_id: ${{ secrets.GCP_PROJECT_ID }}
-        install_components: gsutil
+      - name: 🔐 Write and Activate Service Account Key
+        run: |
+          echo '${{ secrets.GCS_CREDENTIALS_JSON }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
+          chmod 600 "$GOOGLE_APPLICATION_CREDENTIALS"
+          gcloud auth activate-service-account --key-file "$GOOGLE_APPLICATION_CREDENTIALS"
+          gcloud config set project "${GCP_PROJECT}"
+          gcloud auth list
 
-    - name: 🔍 Verify GCS Access
-      run: |
-        echo "🔍 Checking GCS bucket access..."
-        gsutil ls gs://solvionyx-os || echo "⚠️ Bucket list failed (check permissions)"
-        gcloud auth list
+      - name: 🔎 Verify GCS Access
+        run: |
+          echo "Verifying access to gs://${GCS_BUCKET}..."
+          gsutil ls "gs://${GCS_BUCKET}" || (echo "❌ Cannot access bucket!" && exit 1)
+          echo "✅ GCS bucket is reachable."
 
-    # ---------------------------------------------------
-    # 4. Run Build Script
-    # ---------------------------------------------------
-    - name: 💿 Build Solvionyx OS ISO (${{ matrix.edition }})
-      run: |
-        chmod +x build_iso_debian.sh
-        sudo ./build_iso_debian.sh ${{ matrix.edition }}
+      # ---------------------------------------------------
+      # 4. Branding Check / Fallback
+      # ---------------------------------------------------
+      - name: 🎨 Ensure branding assets
+        run: |
+          mkdir -p branding
+          if [ ! -f "${BRAND_LOGO}" ]; then
+            echo "⚠️ ${BRAND_LOGO} missing — creating fallback logo..."
+            convert -size 512x128 xc:'#0b1220' -gravity center \
+              -fill '#6f3bff' -pointsize 36 -annotate 0 'SOLVIONYX' "${BRAND_LOGO}"
+          fi
+          if [ ! -f "${BRAND_BG}" ]; then
+            echo "ℹ️ ${BRAND_BG} missing — will rely on dark gradient fallback."
+          fi
 
-    # ---------------------------------------------------
-    # 5. Verify Uploads on GCS
-    # ---------------------------------------------------
-    - name: ☁️ Verify uploaded files on GCS
-      run: |
-        echo "🔍 Verifying uploaded edition ${{ matrix.edition }}..."
-        gsutil ls gs://solvionyx-os/aurora/latest/${{ matrix.edition }}/ || echo "⚠️ Upload check failed"
+      # ---------------------------------------------------
+      # 5. Build ISO
+      # ---------------------------------------------------
+      - name: 💿 Build Solvionyx OS ISO (${{ matrix.edition }})
+        run: |
+          chmod +x build_iso_debian.sh
+          export SOLVIONYX_LOGO_PATH="${BRAND_LOGO}"
+          export SOLVIONYX_BG_PATH="${BRAND_BG}"
+          ./build_iso_debian.sh "${{ matrix.edition }}"
 
-    # ---------------------------------------------------
-    # 6. Publish GitHub Release
-    # ---------------------------------------------------
-    - name: 🚀 Publish GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: Aurora-v${{ github.run_number }}
-        name: "Solvionyx OS Aurora (${{ matrix.edition }}) v${{ github.run_number }}"
-        body: |
-          ## 🧠 Solvionyx OS Aurora
-          *The Engine Behind the Vision.*
+      # ---------------------------------------------------
+      # 6. Compress ISO
+      # ---------------------------------------------------
+      - name: 🗜️ Compress ISO
+        run: |
+          cd "${ISO_DIR}"
+          RAW_ISO=$(ls *.iso 2>/dev/null | head -n 1 || true)
+          if [ -n "$RAW_ISO" ] && [ ! -f "${RAW_ISO}.xz" ]; then
+            echo "🗜️ Compressing $RAW_ISO..."
+            xz -T2 -5 "${RAW_ISO}"
+          else
+            echo "ℹ️ ISO already compressed or not found."
+          fi
 
-          ✅ Edition: ${{ matrix.edition }}  
-          ✅ Solvionyx Boot Branding (Logo + Splash)  
-          ✅ Bootable (UEFI + BIOS)  
-          ✅ Uploaded to GCS  
+      # ---------------------------------------------------
+      # 7. Generate Checksums
+      # ---------------------------------------------------
+      - name: 🔐 Generate SHA256 Checksums
+        run: |
+          cd "${ISO_DIR}"
+          sha256sum *.iso.xz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-          🌐 **GCS Download:**  
-          https://storage.googleapis.com/solvionyx-os/aurora/latest/${{ matrix.edition }}/
-          
-    # ---------------------------------------------------
-    # 7. Build Summary
-    # ---------------------------------------------------
-    - name: 📋 Post Build Summary
-      run: |
-        echo "🧾 Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Edition: ${{ matrix.edition }}" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Bootable & Branded" >> $GITHUB_STEP_SUMMARY
-        echo "✅ Uploaded to GCS bucket: solvionyx-os" >> $GITHUB_STEP_SUMMARY
-        echo "🌍 https://storage.googleapis.com/solvionyx-os/aurora/latest/${{ matrix.edition }}/" >> $GITHUB_STEP_SUMMARY
+      # ---------------------------------------------------
+      # 8. Bootable ISO Structure Verification
+      # ---------------------------------------------------
+      - name: 🧩 Verify Bootable ISO Structure
+        run: |
+          ISO_FILE=$(find "${ISO_DIR}" -name "*.iso.xz" | head -n 1)
+          xz -d -k "$ISO_FILE"
+          RAW_ISO="${ISO_FILE%.xz}"
+          mkdir -p mnt
+          sudo mount -o loop "$RAW_ISO" mnt
+          if ! ls mnt/boot/vmlinuz-* >/dev/null 2>&1; then
+            echo "❌ Kernel not found!"
+            sudo umount mnt; exit 1
+          fi
+          if [ ! -f mnt/EFI/BOOT/BOOTX64.EFI ]; then
+            echo "❌ EFI bootloader missing!"
+            sudo umount mnt; exit 1
+          fi
+          sudo umount mnt
+          echo "✅ Bootable ISO verified."
+
+      # ---------------------------------------------------
+      # 9. Upload to Google Cloud Storage
+      # ---------------------------------------------------
+      - name: ☁️ Upload to Google Cloud Storage
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: |
+          ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
+          SHA_FILE="${ISO_DIR}/SHA256SUMS.txt"
+          ISO_NAME=$(basename "$ISO_FILE")
+          VERSION_PATH="aurora/${VERSION}/${EDITION}"
+          LATEST_PATH="aurora/latest/${EDITION}"
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA256=$(sha256sum "$ISO_FILE" | awk '{print $1}')
+
+          echo "🌐 Uploading to gs://${GCS_BUCKET}/${VERSION_PATH}/ ..."
+          gsutil -m cp -a public-read "$ISO_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
+          gsutil -m cp -a public-read "$SHA_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
+
+          echo "🔁 Updating latest..."
+          gsutil -m cp -a public-read "$ISO_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+          gsutil -m cp -a public-read "$SHA_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+
+          echo "🧾 Writing latest.json..."
+          cat > latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "edition": "${EDITION}",
+            "release_name": "Solvionyx OS Aurora (${EDITION})",
+            "tagline": "The Engine Behind the Vision.",
+            "brand": "Solvionyx OS",
+            "build_date": "${DATE}",
+            "iso_name": "${ISO_NAME}",
+            "sha256": "${SHA256}",
+            "download_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/${ISO_NAME}",
+            "checksum_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt"
+          }
+          EOF
+          gsutil -m cp -a public-read latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json"
+
+      # ---------------------------------------------------
+      # 10. Upload as GitHub Artifact
+      # ---------------------------------------------------
+      - name: 📦 Upload ISO Artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvionyx-Aurora-${{ matrix.edition }}-${{ env.VERSION }}
+          path: |
+            solvionyx_build/*.iso.xz
+            solvionyx_build/SHA256SUMS.txt
+
+      # ---------------------------------------------------
+      # 11. Cleanup Old GCS Versions
+      # ---------------------------------------------------
+      - name: 🧹 Cleanup Old Versions (keep 5)
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: |
+          PREFIX="gs://${GCS_BUCKET}/aurora/"
+          versions=$(gsutil ls "${PREFIX}" | grep "/v[0-9]" | sed 's#^.*/v#v#' | sort -V)
+          keep=$(echo "$versions" | tail -n 5)
+          remove=$(echo "$versions" | grep -vxFf <(echo "$keep") || true)
+          for v in $remove; do
+            echo "🗑️ Removing old version: $v"
+            gsutil -m rm -r "${PREFIX}${v}/${EDITION}/" || true
+          done
+          echo "✅ Cleanup complete."
+
+      # ---------------------------------------------------
+      # 12. Publish GitHub Release
+      # ---------------------------------------------------
+      - name: 🚀 Publish GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "Aurora-${{ matrix.edition }}-${{ env.VERSION }}"
+          name: "Solvionyx OS — Aurora (${{ matrix.edition }}) ${{ env.VERSION }}"
+          body: |
+            ## 🌌 Solvionyx OS — Aurora (${{ matrix.edition }})
+            *The Engine Behind the Vision.*
+
+            ✅ Bootable ISO (EFI + Kernel Verified)
+            ✅ Uploaded to Google Cloud Storage
+            ✅ GCS Bucket: solvionyx-os
+            ✅ Also available as GitHub Artifact (see Actions tab)
+
+            **Latest:**
+            https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ---------------------------------------------------
+      # 13. Build Summary
+      # ---------------------------------------------------
+      - name: 🧾 Build Summary
+        if: always()
+        run: |
+          ISO_FILE=$(ls "${ISO_DIR}"/*.iso.xz 2>/dev/null | head -n 1 || true)
+          ISO_NAME=$(basename "$ISO_FILE")
+          echo "### Solvionyx OS — Aurora (${{ matrix.edition }})" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ISO: ${ISO_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- GCS: https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/${ISO_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Artifact: Solvionyx-Aurora-${{ matrix.edition }}-${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
