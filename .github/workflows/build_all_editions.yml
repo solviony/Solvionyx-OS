@@ -44,7 +44,6 @@ jobs:
             plymouth plymouth-themes plymouth-label imagemagick
 
       # ---------------------------------------------------
-      # ✅ Fix 1: Proper authentication before gcloud setup
       - name: 🔐 Authenticate with Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -100,7 +99,6 @@ jobs:
           cat SHA256SUMS.txt
 
       # ---------------------------------------------------
-      # ✅ Fix 2: Kernel verification improved + silent mount
       - name: 🧩 Verify Bootable ISO Structure
         run: |
           ISO_FILE=$(find "${ISO_DIR}" -name "*.iso.xz" | head -n 1)
@@ -111,8 +109,6 @@ jobs:
 
           echo "🔍 Checking for kernel in /boot, /live, and /casper..."
           FOUND_KERNEL=""
-
-          # Check kernel in boot/live/casper
           if sudo test -f mnt/boot/vmlinuz || sudo ls mnt/boot/vmlinuz-* >/dev/null 2>&1; then
             FOUND_KERNEL="boot"
           elif sudo test -f mnt/live/vmlinuz || sudo ls mnt/live/vmlinuz-* >/dev/null 2>&1; then
@@ -123,7 +119,6 @@ jobs:
 
           if [ -z "$FOUND_KERNEL" ]; then
             echo "❌ Kernel not found in /boot, /live, or /casper!"
-            echo "Contents of /live and /casper directories (if exist):"
             ls -R mnt/live mnt/casper 2>/dev/null || true
             sudo umount mnt
             exit 1
@@ -148,8 +143,8 @@ jobs:
           sudo umount mnt
           echo "✅ Bootable ISO structure verified successfully (UEFI or BIOS mode)."
 
-
       # ---------------------------------------------------
+      # ✅ FIX: Upload works with uniform bucket-level access
       - name: ☁️ Upload to Google Cloud Storage
         env:
           EDITION: ${{ matrix.edition }}
@@ -162,13 +157,13 @@ jobs:
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           SHA256=$(sha256sum "$ISO_FILE" | awk '{print $1}')
 
-          echo "🌐 Uploading to gs://${GCS_BUCKET}/${VERSION_PATH}/ ..."
-          gsutil -m cp -a public-read "$ISO_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
-          gsutil -m cp -a public-read "$SHA_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
+          echo "📤 Uploading ISO and checksum (UBLA mode, no ACLs)..."
+          gsutil -m cp -n "$ISO_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
+          gsutil -m cp -n "$SHA_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
 
           echo "🔁 Updating latest..."
-          gsutil -m cp -a public-read "$ISO_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
-          gsutil -m cp -a public-read "$SHA_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+          gsutil -m cp -n "$ISO_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+          gsutil -m cp -n "$SHA_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
 
           echo "🧾 Writing latest.json..."
           cat > latest.json <<EOF
@@ -185,7 +180,15 @@ jobs:
             "checksum_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt"
           }
           EOF
-          gsutil -m cp -a public-read latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json"
+          gsutil -m cp -n latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json"
+
+          echo "🧠 Applying cache headers (1h refresh window)..."
+          gsutil setmeta -h "Cache-Control:public, max-age=3600" \
+            "gs://${GCS_BUCKET}/${LATEST_PATH}/${ISO_NAME}" \
+            "gs://${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt" \
+            "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json" || true
+
+          echo "✅ Upload complete."
 
       # ---------------------------------------------------
       - name: 📦 Upload ISO Artifact to GitHub
