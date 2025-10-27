@@ -110,19 +110,42 @@ jobs:
           sudo mount -o ro,loop "$RAW_ISO" mnt 2>/dev/null
 
           echo "🔍 Checking for kernel in /boot, /live, and /casper..."
-          if ! ls mnt/boot/vmlinuz* mnt/live/vmlinuz* mnt/casper/vmlinuz* >/dev/null 2>&1; then
+          FOUND_KERNEL=""
+
+          # Check boot path
+          if sudo test -f mnt/boot/vmlinuz || sudo ls mnt/boot/vmlinuz-* >/dev/null 2>&1; then
+            FOUND_KERNEL="boot"
+          fi
+
+          # Check live path
+          if [ -z "$FOUND_KERNEL" ] && (sudo test -f mnt/live/vmlinuz || sudo ls mnt/live/vmlinuz-* >/dev/null 2>&1); then
+            FOUND_KERNEL="live"
+          fi
+
+          # Check casper path
+          if [ -z "$FOUND_KERNEL" ] && (sudo test -f mnt/casper/vmlinuz || sudo ls mnt/casper/vmlinuz-* >/dev/null 2>&1); then
+            FOUND_KERNEL="casper"
+          fi
+
+          if [ -z "$FOUND_KERNEL" ]; then
             echo "❌ Kernel not found in /boot, /live, or /casper!"
             echo "Contents of /live and /casper directories (if exist):"
             ls -R mnt/live mnt/casper 2>/dev/null || true
-            sudo umount mnt; exit 1
+            sudo umount mnt
+            exit 1
+          else
+            echo "✅ Kernel found in /$FOUND_KERNEL/"
           fi
 
-          echo "✅ Kernel file located successfully."
-
+          # EFI validation
           if [ ! -f mnt/EFI/BOOT/BOOTX64.EFI ]; then
             echo "❌ EFI bootloader missing!"
             sudo umount mnt; exit 1
           fi
+
+          # Show ISO info
+          echo "💿 ISO Volume Info:"
+          isoinfo -d -i "$RAW_ISO" | grep -E "Volume id|Volume size|Volume set size" || true
 
           sudo umount mnt
           echo "✅ Bootable ISO structure verified successfully."
