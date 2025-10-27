@@ -1,4 +1,4 @@
-name: Build & Release Solvionyx OS — Aurora (GNOME/XFCE/KDE + GCS + Artifacts)
+name: Build & Release Solvionyx OS — Aurora (GNOME/XFCE/KDE)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write
-  actions: read
+  id-token: write
 
 jobs:
   build:
@@ -30,15 +30,11 @@ jobs:
 
     steps:
       # ---------------------------------------------------
-      # 1. Checkout
-      # ---------------------------------------------------
       - name: 🧩 Checkout repository
         uses: actions/checkout@v4
 
       # ---------------------------------------------------
-      # 2. Install dependencies
-      # ---------------------------------------------------
-      - name: ⚙️ Install build dependencies
+      - name: ⚙️ Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -48,32 +44,23 @@ jobs:
             plymouth plymouth-themes plymouth-label imagemagick
 
       # ---------------------------------------------------
-      # 3. Setup Google Cloud SDK + Auth
-      # ---------------------------------------------------
+      # ✅ Fix 1: Proper authentication before gcloud setup
+      - name: 🔐 Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCS_CREDENTIALS_JSON }}
+
       - name: ☁️ Install gcloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT }}
           install_components: 'gsutil'
 
-      - name: 🔐 Write and Activate Service Account Key
-        run: |
-          echo '${{ secrets.GCS_CREDENTIALS_JSON }}' > gcp-key.json
-          chmod 600 gcp-key.json
-          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
-          export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=$PWD/gcp-key.json
-          gcloud auth activate-service-account --key-file "$GOOGLE_APPLICATION_CREDENTIALS"
-          gcloud config set project "${GCP_PROJECT}"
-          gcloud auth list
-
       - name: 🔎 Verify GCS Access
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
           gsutil ls "gs://${GCS_BUCKET}" || (echo "❌ Cannot access bucket!" && exit 1)
           echo "✅ GCS bucket is reachable."
 
-      # ---------------------------------------------------
-      # 4. Branding Check / Fallback
       # ---------------------------------------------------
       - name: 🎨 Ensure branding assets
         run: |
@@ -88,18 +75,13 @@ jobs:
           fi
 
       # ---------------------------------------------------
-      # 5. Build ISO
-      # ---------------------------------------------------
       - name: 💿 Build Solvionyx OS ISO (${{ matrix.edition }})
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
           chmod +x build_iso_debian.sh
           export SOLVIONYX_LOGO_PATH="${BRAND_LOGO}"
           export SOLVIONYX_BG_PATH="${BRAND_BG}"
           ./build_iso_debian.sh "${{ matrix.edition }}"
 
-      # ---------------------------------------------------
-      # 6. Compress ISO
       # ---------------------------------------------------
       - name: 🗜️ Compress ISO
         run: |
@@ -108,12 +90,8 @@ jobs:
           if [ -n "$RAW_ISO" ] && [ ! -f "${RAW_ISO}.xz" ]; then
             echo "🗜️ Compressing $RAW_ISO..."
             xz -T2 -5 "${RAW_ISO}"
-          else
-            echo "ℹ️ ISO already compressed or not found."
           fi
 
-      # ---------------------------------------------------
-      # 7. Generate Checksums
       # ---------------------------------------------------
       - name: 🔐 Generate SHA256 Checksums
         run: |
@@ -122,34 +100,33 @@ jobs:
           cat SHA256SUMS.txt
 
       # ---------------------------------------------------
-      # 8. Bootable ISO Structure Verification
-      # ---------------------------------------------------
+      # ✅ Fix 2: Kernel verification improved + silent mount
       - name: 🧩 Verify Bootable ISO Structure
         run: |
           ISO_FILE=$(find "${ISO_DIR}" -name "*.iso.xz" | head -n 1)
           xz -d -k "$ISO_FILE"
           RAW_ISO="${ISO_FILE%.xz}"
           mkdir -p mnt
-          sudo mount -o loop "$RAW_ISO" mnt
-          if ! ls mnt/boot/vmlinuz-* >/dev/null 2>&1; then
+          sudo mount -o ro,loop "$RAW_ISO" mnt 2>/dev/null
+
+          if ! ls mnt/boot/vmlinuz-* mnt/live/vmlinuz* >/dev/null 2>&1; then
             echo "❌ Kernel not found!"
             sudo umount mnt; exit 1
           fi
+
           if [ ! -f mnt/EFI/BOOT/BOOTX64.EFI ]; then
             echo "❌ EFI bootloader missing!"
             sudo umount mnt; exit 1
           fi
+
           sudo umount mnt
           echo "✅ Bootable ISO verified."
 
-      # ---------------------------------------------------
-      # 9. Upload to Google Cloud Storage
       # ---------------------------------------------------
       - name: ☁️ Upload to Google Cloud Storage
         env:
           EDITION: ${{ matrix.edition }}
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
           ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
           SHA_FILE="${ISO_DIR}/SHA256SUMS.txt"
           ISO_NAME=$(basename "$ISO_FILE")
@@ -184,8 +161,6 @@ jobs:
           gsutil -m cp -a public-read latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json"
 
       # ---------------------------------------------------
-      # 10. Upload Artifact
-      # ---------------------------------------------------
       - name: 📦 Upload ISO Artifact to GitHub
         uses: actions/upload-artifact@v4
         with:
@@ -195,13 +170,10 @@ jobs:
             solvionyx_build/SHA256SUMS.txt
 
       # ---------------------------------------------------
-      # 11. Cleanup Old Versions
-      # ---------------------------------------------------
       - name: 🧹 Cleanup Old Versions (keep 5)
         env:
           EDITION: ${{ matrix.edition }}
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
           PREFIX="gs://${GCS_BUCKET}/aurora/"
           versions=$(gsutil ls "${PREFIX}" | grep "/v[0-9]" | sed 's#^.*/v#v#' | sort -V)
           keep=$(echo "$versions" | tail -n 5)
@@ -212,8 +184,6 @@ jobs:
           done
           echo "✅ Cleanup complete."
 
-      # ---------------------------------------------------
-      # 12. Publish GitHub Release
       # ---------------------------------------------------
       - name: 🚀 Publish GitHub Release
         if: success()
