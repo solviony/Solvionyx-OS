@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # needed for GitHub Releases
+  contents: write
   actions: read
 
 jobs:
@@ -27,8 +27,6 @@ jobs:
       ISO_DIR: solvionyx_build
       BRAND_LOGO: branding/4023.png
       BRAND_BG: branding/4022.jpg
-      GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/gcp.json
-      CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ runner.temp }}/gcp.json
 
     steps:
       # ---------------------------------------------------
@@ -60,15 +58,17 @@ jobs:
 
       - name: 🔐 Write and Activate Service Account Key
         run: |
-          echo '${{ secrets.GCS_CREDENTIALS_JSON }}' > "$GOOGLE_APPLICATION_CREDENTIALS"
-          chmod 600 "$GOOGLE_APPLICATION_CREDENTIALS"
+          echo '${{ secrets.GCS_CREDENTIALS_JSON }}' > gcp-key.json
+          chmod 600 gcp-key.json
+          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
+          export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=$PWD/gcp-key.json
           gcloud auth activate-service-account --key-file "$GOOGLE_APPLICATION_CREDENTIALS"
           gcloud config set project "${GCP_PROJECT}"
           gcloud auth list
 
       - name: 🔎 Verify GCS Access
         run: |
-          echo "Verifying access to gs://${GCS_BUCKET}..."
+          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
           gsutil ls "gs://${GCS_BUCKET}" || (echo "❌ Cannot access bucket!" && exit 1)
           echo "✅ GCS bucket is reachable."
 
@@ -92,6 +92,7 @@ jobs:
       # ---------------------------------------------------
       - name: 💿 Build Solvionyx OS ISO (${{ matrix.edition }})
         run: |
+          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
           chmod +x build_iso_debian.sh
           export SOLVIONYX_LOGO_PATH="${BRAND_LOGO}"
           export SOLVIONYX_BG_PATH="${BRAND_BG}"
@@ -148,6 +149,7 @@ jobs:
         env:
           EDITION: ${{ matrix.edition }}
         run: |
+          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
           ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
           SHA_FILE="${ISO_DIR}/SHA256SUMS.txt"
           ISO_NAME=$(basename "$ISO_FILE")
@@ -182,7 +184,7 @@ jobs:
           gsutil -m cp -a public-read latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json"
 
       # ---------------------------------------------------
-      # 10. Upload as GitHub Artifact
+      # 10. Upload Artifact
       # ---------------------------------------------------
       - name: 📦 Upload ISO Artifact to GitHub
         uses: actions/upload-artifact@v4
@@ -193,12 +195,13 @@ jobs:
             solvionyx_build/SHA256SUMS.txt
 
       # ---------------------------------------------------
-      # 11. Cleanup Old GCS Versions
+      # 11. Cleanup Old Versions
       # ---------------------------------------------------
       - name: 🧹 Cleanup Old Versions (keep 5)
         env:
           EDITION: ${{ matrix.edition }}
         run: |
+          export GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-key.json
           PREFIX="gs://${GCS_BUCKET}/aurora/"
           versions=$(gsutil ls "${PREFIX}" | grep "/v[0-9]" | sed 's#^.*/v#v#' | sort -V)
           keep=$(echo "$versions" | tail -n 5)
@@ -231,17 +234,3 @@ jobs:
             https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # ---------------------------------------------------
-      # 13. Build Summary
-      # ---------------------------------------------------
-      - name: 🧾 Build Summary
-        if: always()
-        run: |
-          ISO_FILE=$(ls "${ISO_DIR}"/*.iso.xz 2>/dev/null | head -n 1 || true)
-          ISO_NAME=$(basename "$ISO_FILE")
-          echo "### Solvionyx OS — Aurora (${{ matrix.edition }})" >> $GITHUB_STEP_SUMMARY
-          echo "- Version: ${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
-          echo "- ISO: ${ISO_NAME}" >> $GITHUB_STEP_SUMMARY
-          echo "- GCS: https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/${ISO_NAME}" >> $GITHUB_STEP_SUMMARY
-          echo "- GitHub Artifact: Solvionyx-Aurora-${{ matrix.edition }}-${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
