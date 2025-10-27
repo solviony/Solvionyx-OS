@@ -110,14 +110,14 @@ jobs:
           sudo mount -o ro,loop "$RAW_ISO" mnt 2>/dev/null
 
           echo "🔍 Checking for kernel in /boot, /live, and /casper..."
-          if ! ls mnt/boot/vmlinuz-* mnt/live/vmlinuz* mnt/casper/vmlinuz* >/dev/null 2>&1; then
-            echo "❌ Kernel not found in ISO structure!"
+          if ! ls mnt/boot/vmlinuz* mnt/live/vmlinuz* mnt/casper/vmlinuz* >/dev/null 2>&1; then
+            echo "❌ Kernel not found in /boot, /live, or /casper!"
             echo "Contents of /live and /casper directories (if exist):"
             ls -R mnt/live mnt/casper 2>/dev/null || true
             sudo umount mnt; exit 1
           fi
 
-          echo "✅ Kernel file located."
+          echo "✅ Kernel file located successfully."
 
           if [ ! -f mnt/EFI/BOOT/BOOTX64.EFI ]; then
             echo "❌ EFI bootloader missing!"
