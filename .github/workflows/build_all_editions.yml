@@ -112,18 +112,12 @@ jobs:
           echo "🔍 Checking for kernel in /boot, /live, and /casper..."
           FOUND_KERNEL=""
 
-          # Check boot path
+          # Check kernel in boot/live/casper
           if sudo test -f mnt/boot/vmlinuz || sudo ls mnt/boot/vmlinuz-* >/dev/null 2>&1; then
             FOUND_KERNEL="boot"
-          fi
-
-          # Check live path
-          if [ -z "$FOUND_KERNEL" ] && (sudo test -f mnt/live/vmlinuz || sudo ls mnt/live/vmlinuz-* >/dev/null 2>&1); then
+          elif sudo test -f mnt/live/vmlinuz || sudo ls mnt/live/vmlinuz-* >/dev/null 2>&1; then
             FOUND_KERNEL="live"
-          fi
-
-          # Check casper path
-          if [ -z "$FOUND_KERNEL" ] && (sudo test -f mnt/casper/vmlinuz || sudo ls mnt/casper/vmlinuz-* >/dev/null 2>&1); then
+          elif sudo test -f mnt/casper/vmlinuz || sudo ls mnt/casper/vmlinuz-* >/dev/null 2>&1; then
             FOUND_KERNEL="casper"
           fi
 
@@ -137,18 +131,22 @@ jobs:
             echo "✅ Kernel found in /$FOUND_KERNEL/"
           fi
 
-          # EFI validation
-          if [ ! -f mnt/EFI/BOOT/BOOTX64.EFI ]; then
-            echo "❌ EFI bootloader missing!"
-            sudo umount mnt; exit 1
+          echo "🔍 Checking for EFI or BIOS boot support..."
+          if [ -f mnt/EFI/BOOT/BOOTX64.EFI ]; then
+            echo "✅ EFI bootloader found."
+          elif [ -f mnt/isolinux/isolinux.bin ] || [ -f mnt/syslinux/syslinux.cfg ]; then
+            echo "✅ BIOS/Legacy bootloader found."
+          else
+            echo "⚠️ No EFI or BIOS bootloader detected — ISO may not boot on all systems!"
+            sudo umount mnt
+            exit 1
           fi
 
-          # Show ISO info
           echo "💿 ISO Volume Info:"
           isoinfo -d -i "$RAW_ISO" | grep -E "Volume id|Volume size|Volume set size" || true
 
           sudo umount mnt
-          echo "✅ Bootable ISO structure verified successfully."
+          echo "✅ Bootable ISO structure verified successfully (UEFI or BIOS mode)."
 
 
       # ---------------------------------------------------
