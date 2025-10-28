@@ -2,10 +2,11 @@
 set -e
 
 # ==========================================================
-# 🌌 Solvionyx OS — Aurora Series Builder (GCS Version)
+# 🌌 Solvionyx OS — Aurora Series Builder (Unified Branding)
 # ==========================================================
-# Builds GNOME / XFCE / KDE editions of Solvionyx OS Aurora
-# with full UEFI+BIOS boot, GCS upload, and Solvionyx branding.
+# Builds GNOME / XFCE / KDE editions with full Solvionyx
+# branding (boot splash, GRUB, login, wallpaper) and
+# automatic upload to Google Cloud Storage (GCS).
 # ==========================================================
 
 # -------- CONFIGURATION -----------------------------------
@@ -35,7 +36,6 @@ echo "🧹 Clean workspace ready."
 
 # -------- BRANDING FAILSAFE --------------------------------
 mkdir -p "$BRANDING_DIR"
-
 if ! command -v convert &>/dev/null; then
   echo "📦 Installing ImageMagick for fallback image generation..."
   sudo apt-get update -qq && sudo apt-get install -y imagemagick -qq
@@ -44,14 +44,12 @@ fi
 # Auto-generate fallback splash & background if missing
 if [ ! -f "$LOGO_FILE" ]; then
   echo "⚠️ Missing branding/4023.png — generating fallback Solvionyx logo splash..."
-  convert -size 1920x1080 gradient:"#000428"-"#004e92" "$LOGO_FILE"
+  convert -size 512x128 gradient:"#0b1220"-"#6f3bff" "$LOGO_FILE"
 fi
-
 if [ ! -f "$BG_FILE" ]; then
   echo "⚠️ Missing branding/4022.jpg — generating fallback dark-blue background..."
   convert -size 1920x1080 gradient:"#000428"-"#004e92" "$BG_FILE"
 fi
-
 echo "✅ Branding verified or fallback created."
 
 # -------- BASE SYSTEM BOOTSTRAP -----------------------------
@@ -63,7 +61,8 @@ echo "🧩 Installing base system & kernel..."
 sudo chroot "$CHROOT_DIR" /bin/bash -c "
   apt-get update &&
   apt-get install -y linux-image-amd64 live-boot grub-pc-bin grub-efi-amd64-bin systemd-sysv \
-  network-manager sudo nano vim xz-utils curl wget rsync plymouth plymouth-themes --no-install-recommends
+  network-manager sudo nano vim xz-utils curl wget rsync plymouth plymouth-themes gnome-backgrounds \
+  lightdm slick-greeter sddm --no-install-recommends
 "
 echo "✅ Base system ready."
 
@@ -72,8 +71,8 @@ echo "🧠 Installing desktop environment ($EDITION)..."
 sudo chroot "$CHROOT_DIR" /bin/bash -c "
   case '$EDITION' in
     gnome) apt-get install -y task-gnome-desktop gdm3 gnome-terminal ;;
-    xfce)  apt-get install -y task-xfce-desktop lightdm xfce4-terminal ;;
-    kde)   apt-get install -y task-kde-desktop sddm konsole ;;
+    xfce)  apt-get install -y task-xfce-desktop xfce4-goodies ;;
+    kde)   apt-get install -y task-kde-desktop kde-standard ;;
     *) echo '❌ Unknown edition'; exit 1 ;;
   esac
 "
@@ -93,7 +92,83 @@ sudo chroot "$CHROOT_DIR" /bin/bash -c "
   echo 'ID=solvionyx' >> /etc/os-release
   echo 'HOME_URL=\"https://solviony.com\"' >> /etc/os-release
 "
-echo "🎨 Branding applied."
+echo "🎨 Basic branding applied."
+
+# -------- ADVANCED BRANDING (PLYMOUTH + GRUB + DM THEMES) ----
+echo "🎨 Applying advanced Solvionyx branding..."
+sudo cp "$LOGO_FILE" "$CHROOT_DIR/usr/share/pixmaps/solvionyx-logo.png"
+sudo cp "$BG_FILE" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-aurora.jpg"
+
+sudo chroot "$CHROOT_DIR" /bin/bash -c "
+set -e
+
+# --- Plymouth Theme ---
+mkdir -p /usr/share/plymouth/themes/solvionyx
+cp /usr/share/pixmaps/solvionyx-logo.png /usr/share/plymouth/themes/solvionyx/logo.png
+cat <<EOF >/usr/share/plymouth/themes/solvionyx/solvionyx.plymouth
+[Plymouth Theme]
+Name=Solvionyx
+Description=Solvionyx Boot Theme
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/solvionyx
+ScriptFile=/usr/share/plymouth/themes/solvionyx/solvionyx.script
+EOF
+cat <<'EOS' >/usr/share/plymouth/themes/solvionyx/solvionyx.script
+wallpaper_image = Image("logo.png");
+sprite = Sprite(wallpaper_image);
+sprite.SetX((Window.GetWidth() - wallpaper_image.GetWidth()) / 2);
+sprite.SetY((Window.GetHeight() - wallpaper_image.GetHeight()) / 2);
+EOS
+update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth 100
+update-initramfs -u
+
+# --- GRUB Theme ---
+mkdir -p /boot/grub/themes/solvionyx
+cp /usr/share/backgrounds/solvionyx-aurora.jpg /boot/grub/themes/solvionyx/background.jpg
+cat <<EOF >/boot/grub/themes/solvionyx/theme.txt
+desktop-color = "#0b1220"
+title-color = "#6f3bff"
+border-color = "#6f3bff"
+message-color = "#ffffff"
+selection-color = "#6f3bff"
+EOF
+sed -i 's|^#GRUB_THEME=.*|GRUB_THEME="/boot/grub/themes/solvionyx/theme.txt"|' /etc/default/grub || echo 'GRUB_THEME="/boot/grub/themes/solvionyx/theme.txt"' >> /etc/default/grub
+update-grub || true
+
+# --- GDM (GNOME) ---
+if [ -d /usr/share/gdm ]; then
+  mkdir -p /usr/share/backgrounds/solvionyx
+  cp /usr/share/backgrounds/solvionyx-aurora.jpg /usr/share/backgrounds/solvionyx/
+  sed -i 's|/usr/share/backgrounds/.*|/usr/share/backgrounds/solvionyx/solvionyx-aurora.jpg|' /usr/share/gdm/greeter-dconf-defaults || true
+fi
+
+# --- LightDM (XFCE) ---
+if [ -f /etc/lightdm/lightdm-gtk-greeter.conf ]; then
+  sed -i 's|^#*background=.*|background=/usr/share/backgrounds/solvionyx-aurora.jpg|' /etc/lightdm/lightdm-gtk-greeter.conf || true
+  sed -i 's|^#*theme-name=.*|theme-name=Adwaita-dark|' /etc/lightdm/lightdm-gtk-greeter.conf || true
+fi
+if [ -d /usr/share/slick-greeter ]; then
+  mkdir -p /etc/lightdm
+  echo '[Greeter]' > /etc/lightdm/slick-greeter.conf
+  echo 'background=/usr/share/backgrounds/solvionyx-aurora.jpg' >> /etc/lightdm/slick-greeter.conf
+  echo 'theme-name=Adwaita-dark' >> /etc/lightdm/slick-greeter.conf
+fi
+
+# --- SDDM (KDE) ---
+if [ -d /usr/share/sddm/themes ]; then
+  mkdir -p /usr/share/sddm/themes/solvionyx
+  cp /usr/share/backgrounds/solvionyx-aurora.jpg /usr/share/sddm/themes/solvionyx/background.jpg
+  cat <<EOF >/usr/share/sddm/themes/solvionyx/theme.conf
+[General]
+type=simple
+background=/usr/share/sddm/themes/solvionyx/background.jpg
+EOF
+  sed -i 's|^Current=.*|Current=solvionyx|' /etc/sddm.conf || echo '[Theme]\nCurrent=solvionyx' >> /etc/sddm.conf
+fi
+"
+echo "✅ Plymouth, GRUB, and all login manager branding applied."
 
 # -------- CLEAN APT CACHE -----------------------------------
 sudo chroot "$CHROOT_DIR" /bin/bash -c "apt-get clean && rm -rf /var/lib/apt/lists/*"
