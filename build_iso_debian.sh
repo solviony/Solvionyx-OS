@@ -1,357 +1,381 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # ==========================================================
-# 🌌 Solvionyx OS — Aurora Unified Builder (GNOME/XFCE/KDE)
-# - Full branding (boot, plymouth, wallpapers, about)
-# - UEFI + BIOS hybrid ISO (isolinux + GRUB EFI)
-# - Live autologin + Calamares installer (auto or manual)
-# - Welcome app on first login after install
-# - GCS upload (solvionyx-os) + latest.json + SHA256SUMS
+# 🌌 Solvionyx OS — Aurora Series Builder (GCS + Branding)
+# ==========================================================
+# Builds GNOME / XFCE / KDE live ISO with:
+# - Full UEFI (GRUB) + BIOS (ISOLINUX) boot
+# - Animated Plymouth (Solvionyx theme)
+# - Branded GDM login (logo + background + banner)
+# - Calamares installer (optional autostart via calamares=1)
+# - Upload to Google Cloud Storage (gsutil must be authenticated)
 # ==========================================================
 
-# -------- CONFIG --------
-EDITION="${1:-gnome}"        # gnome | xfce | kde
+# -------- CONFIG ------------------------------------------
+EDITION="${1:-gnome}"     # gnome | xfce | kde
 BUILD_DIR="solvionyx_build"
 CHROOT_DIR="$BUILD_DIR/chroot"
 ISO_DIR="$BUILD_DIR/iso"
 OUTPUT_DIR="$BUILD_DIR"
 
-AURORA_SERIES="aurora"
 VERSION="v$(date +%Y.%m.%d)"
-VERSION_TAG="v$(date +%Y%m%d%H%M)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${VERSION}.iso"
 
-BRAND_NAME="Solvionyx OS"
-BRAND_FULL="Solvionyx OS — Aurora (${EDITION} Edition)"
+BRAND="Solvionyx OS"
 TAGLINE="The Engine Behind the Vision."
+BUCKET_NAME="solvionyx-os"
 
 BRANDING_DIR="branding"
-LOGO_FILE="$BRANDING_DIR/4023.png"      # splash/logo
-BG_FILE="$BRANDING_DIR/4022.jpg"        # wallpaper & backgrounds
+LOGO_FILE="$BRANDING_DIR/4023.png"         # splash logo
+BG_FILE="$BRANDING_DIR/4022.jpg"           # login background
 
-GCS_BUCKET="solvionyx-os"
+LIVE_HOSTNAME="solvionyx-os"
+LIVE_USERNAME="solvionyx"
+LIVE_PASSWORD="solvionyx"
 
-LIVE_USER="liveuser"
-LIVE_PASS="liveuser"
+# Kernel command line common bits
+COMMON_KCMD="boot=live components quiet splash username=${LIVE_USERNAME} hostname=${LIVE_HOSTNAME}"
 
-# -------- Prep host deps --------
-sudo apt-get update -y
-sudo apt-get install -y \
-  debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
-  syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
-  rsync systemd-container genisoimage dosfstools xz-utils jq curl wget \
-  plymouth plymouth-themes plymouth-label imagemagick \
-  calamares calamares-settings-debian
+# -----------------------------------------------------------
 
-# -------- Workspace --------
+echo "==========================================================="
+echo "🚀 Building $BRAND — Aurora (${EDITION} Edition)"
+echo "==========================================================="
+
+# -------- PREPARE WORKSPACE --------------------------------
 sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT_DIR" "$ISO_DIR/live" "$BRANDING_DIR"
+mkdir -p "$CHROOT_DIR" "$ISO_DIR"/{live,isolinux,boot/grub} "$OUTPUT_DIR"
+mkdir -p "$BRANDING_DIR"
 
-# -------- Branding failsafes --------
+# -------- BRANDING FAILSAFES --------------------------------
+if ! command -v convert >/dev/null 2>&1; then
+  echo "📦 Installing ImageMagick for fallback image generation..."
+  sudo apt-get update -qq && sudo apt-get install -y imagemagick -qq
+fi
+
 if [ ! -f "$LOGO_FILE" ]; then
-  echo "⚠️ $LOGO_FILE missing — generating fallback logo..."
-  convert -size 512x128 xc:none -gravity center -fill "#5bb0ff" -pointsize 64 \
-    -annotate 0 'SOLVIONYX' "$LOGO_FILE"
+  echo "⚠️ Missing ${LOGO_FILE} — generating a fallback (dark gradient with SOLVIONYX text)..."
+  convert -size 800x200 xc:none \
+    -fill white -gravity center -pointsize 96 -font DejaVu-Sans -annotate 0 "SOLVIONYX" \
+    "$LOGO_FILE" || convert -size 800x200 xc:white "$LOGO_FILE"
 fi
+
 if [ ! -f "$BG_FILE" ]; then
-  echo "⚠️ $BG_FILE missing — generating fallback background..."
-  convert -size 3840x2160 gradient:'#000428-#004e92' "$BG_FILE"
+  echo "⚠️ Missing ${BG_FILE} — generating a fallback dark-blue gradient login background..."
+  convert -size 1920x1080 gradient:"#000428"-"#004e92" "$BG_FILE"
 fi
 
-echo "✅ Branding assets present."
+echo "✅ Branding assets ready."
 
-# -------- Bootstrap Debian (bookworm) --------
+# -------- BASE SYSTEM ---------------------------------------
+echo "📦 Bootstrapping Debian (bookworm) base system..."
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
-# -------- Base packages --------
-sudo chroot "$CHROOT_DIR" bash -c "
-  set -e
+# Copy resolv.conf for networking in chroot
+sudo cp /etc/resolv.conf "$CHROOT_DIR/etc/resolv.conf"
+
+# -------- CHROOT: CORE PACKAGES -----------------------------
+cat <<'EOS' | sudo chroot "$CHROOT_DIR" /bin/bash
+set -e
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y \
+  linux-image-amd64 live-boot systemd-sysv network-manager sudo nano vim \
+  xz-utils curl wget rsync plymouth plymouth-themes plymouth-label \
+  gfxpayload-linux systemd-timesyncd ca-certificates \
+  locales tzdata parted e2fsprogs squashfs-tools
+
+# Locale & timezone defaults
+echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
+locale-gen
+ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+EOS
+
+# -------- CHROOT: DESKTOP & INSTALLER -----------------------
+echo "🧠 Installing desktop (${EDITION}) + Calamares..."
+sudo chroot "$CHROOT_DIR" /bin/bash -euxo pipefail -c "
   apt-get update
-  apt-get install -y linux-image-amd64 live-boot systemd-sysv sudo \
-    network-manager nano vim curl wget rsync \
-    plymouth plymouth-themes plymouth-label \
-    locales tzdata xz-utils dbus --no-install-recommends
-  sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
-  locale-gen
+  case '$EDITION' in
+    gnome)
+      apt-get install -y task-gnome-desktop gdm3 gnome-terminal gnome-software;;
+    xfce)
+      apt-get install -y task-xfce-desktop lightdm xfce4-terminal thunar;;
+    kde)
+      apt-get install -y task-kde-desktop sddm konsole plasma-discover;;
+    *) echo 'Unknown edition: $EDITION'; exit 1;;
+  esac
+
+  # Calamares installer (Debian settings)
+  apt-get install -y calamares calamares-settings-debian
+
+  # Some handy tools for live session
+  apt-get install -y gparted gnome-disk-utility unzip jq
 "
 
-# -------- Desktop environments --------
-case "$EDITION" in
-  gnome)
-    sudo chroot "$CHROOT_DIR" bash -c 'apt-get install -y task-gnome-desktop gdm3 gnome-terminal dconf-cli'
-    DM_SERVICE="gdm3"
-    ;;
-  xfce)
-    sudo chroot "$CHROOT_DIR" bash -c 'apt-get install -y task-xfce-desktop lightdm slick-greeter xfce4-terminal'
-    DM_SERVICE="lightdm"
-    ;;
-  kde)
-    sudo chroot "$CHROOT_DIR" bash -c 'apt-get install -y task-kde-desktop sddm konsole'
-    DM_SERVICE="sddm"
-    ;;
-  *)
-    echo "❌ Unknown edition: $EDITION"; exit 1 ;;
-esac
+# -------- CHROOT: LIVE USER & AUTOLOGIN ---------------------
+echo "👤 Creating live user + enabling autologin..."
+if [[ "$EDITION" == "gnome" ]]; then
+  # GDM (GNOME)
+  sudo chroot "$CHROOT_DIR" /bin/bash -euxo pipefail -c "
+    useradd -m -s /bin/bash $LIVE_USERNAME
+    echo '$LIVE_USERNAME:$LIVE_PASSWORD' | chpasswd
+    usermod -aG sudo $LIVE_USERNAME
 
-# -------- Live user + autologin --------
-sudo chroot "$CHROOT_DIR" bash -c "
-  useradd -m -s /bin/bash $LIVE_USER
-  echo '$LIVE_USER:$LIVE_USER' | chpasswd
-  usermod -aG sudo $LIVE_USER
-"
+    sed -i 's/^#\\?  AutomaticLoginEnable.*/AutomaticLoginEnable=true/' /etc/gdm3/daemon.conf || true
+    if grep -q 'AutomaticLogin=' /etc/gdm3/daemon.conf; then
+      sed -i 's/^#\\?AutomaticLogin=.*/AutomaticLogin=$LIVE_USERNAME/' /etc/gdm3/daemon.conf
+    else
+      printf '\\n[daemon]\\nAutomaticLoginEnable=true\\nAutomaticLogin=%s\\n' '$LIVE_USERNAME' >> /etc/gdm3/daemon.conf
+    fi
+  "
+elif [[ "$EDITION" == "xfce" ]]; then
+  # LightDM
+  sudo chroot "$CHROOT_DIR" /bin/bash -euxo pipefail -c "
+    useradd -m -s /bin/bash $LIVE_USERNAME
+    echo '$LIVE_USERNAME:$LIVE_PASSWORD' | chpasswd
+    usermod -aG sudo $LIVE_USERNAME
 
-case "$DM_SERVICE" in
-  gdm3)
-    sudo chroot "$CHROOT_DIR" bash -c "mkdir -p /etc/gdm3 && cat >/etc/gdm3/custom.conf <<CFG
-[daemon]
-AutomaticLoginEnable=true
-AutomaticLogin=$LIVE_USER
-CFG"
-    ;;
-  lightdm)
-    sudo chroot "$CHROOT_DIR" bash -c "mkdir -p /etc/lightdm/lightdm.conf.d && cat >/etc/lightdm/lightdm.conf.d/50-autologin.conf <<CFG
-[Seat:*]
-autologin-user=$LIVE_USER
-greeter-session=slick-greeter
-CFG"
-    ;;
-  sddm)
-    sudo chroot "$CHROOT_DIR" bash -c "mkdir -p /etc/sddm.conf.d && cat >/etc/sddm.conf.d/10-autologin.conf <<CFG
+    sed -i 's/^#autologin-user=.*/autologin-user='$LIVE_USERNAME'/' /etc/lightdm/lightdm.conf || true
+    if ! grep -q '^autologin-user=' /etc/lightdm/lightdm.conf; then
+      printf '\\n[Seat:*]\\nautologin-user=%s\\n' '$LIVE_USERNAME' >> /etc/lightdm/lightdm.conf
+    fi
+  "
+else
+  # SDDM (KDE)
+  sudo chroot "$CHROOT_DIR" /bin/bash -euxo pipefail -c "
+    useradd -m -s /bin/bash $LIVE_USERNAME
+    echo '$LIVE_USERNAME:$LIVE_PASSWORD' | chpasswd
+    usermod -aG sudo $LIVE_USERNAME
+
+    mkdir -p /etc/sddm.conf.d
+    cat >/etc/sddm.conf.d/10-autologin.conf <<SDDM
 [Autologin]
-User=$LIVE_USER
+User=$LIVE_USERNAME
 Session=plasma.desktop
-CFG"
-    ;;
-esac
-
-# -------- System branding (/etc/os-release) --------
-sudo chroot "$CHROOT_DIR" bash -c "
-  cat >/etc/os-release <<OSR
-PRETTY_NAME=\"$BRAND_FULL\"
-NAME=\"Solvionyx OS\"
-ID=solvionyx
-HOME_URL=\"https://solviony.com\"
-OSR
-"
-
-# -------- Wallpapers + defaults --------
-sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
-sudo cp "$BG_FILE" "$CHROOT_DIR/usr/share/backgrounds/solvionyx/aurora.jpg"
-
-if [ "$EDITION" = "gnome" ]; then
-  sudo chroot "$CHROOT_DIR" bash -c "
-    mkdir -p /etc/dconf/db/local.d /etc/dconf/profile
-    echo 'user-db:user
-system-db:local' > /etc/dconf/profile/user
-    cat >/etc/dconf/db/local.d/00-solvionyx <<DCONF
-[org/gnome/desktop/background]
-picture-uri='file:///usr/share/backgrounds/solvionyx/aurora.jpg'
-picture-uri-dark='file:///usr/share/backgrounds/solvionyx/aurora.jpg'
-DCONF
-    dconf update
-    mkdir -p /usr/share/pixmaps /usr/share/gnome-control-center/icons
-  "
-  sudo cp "$LOGO_FILE" "$CHROOT_DIR/usr/share/pixmaps/distributor-logo.png"
-  sudo cp "$LOGO_FILE" "$CHROOT_DIR/usr/share/gnome-control-center/icons/solvionyx.png"
-fi
-
-if [ "$EDITION" = "xfce" ]; then
-  sudo chroot "$CHROOT_DIR" bash -c "
-    mkdir -p /etc/xdg/xfce4/xfconf/xfce-perchannel-xml
-    cat >/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml <<XML
-<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<channel name=\"xfce4-desktop\" version=\"1.0\">
- <property name=\"backdrop\" type=\"empty\">
-  <property name=\"screen0\" type=\"empty\">
-   <property name=\"monitor0\" type=\"empty\">
-    <property name=\"image-path\" type=\"string\" value=\"/usr/share/backgrounds/solvionyx/aurora.jpg\"/>
-   </property>
-  </property>
- </property>
-</channel>
-XML
+SDDM
   "
 fi
 
-if [ "$EDITION" = "kde" ]; then
-  sudo chroot "$CHROOT_DIR" bash -c "
-    mkdir -p /usr/share/sddm/themes/solvionyx /etc/sddm.conf.d
-    cp /usr/share/backgrounds/solvionyx/aurora.jpg /usr/share/sddm/themes/solvionyx/background.jpg
-    echo '[Theme]
-Current=solvionyx' > /etc/sddm.conf.d/10-theme.conf
-  "
-fi
-
-# -------- Plymouth theme (Solvionyx) --------
+# -------- CHROOT: PLYMOUTH THEME ----------------------------
+echo "🎞️ Installing Solvionyx animated Plymouth theme..."
 sudo mkdir -p "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
-sudo tee "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/solvionyx.plymouth" >/dev/null <<'PLY'
+sudo cp "$LOGO_FILE" "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/logo.png"
+
+# theme files
+sudo tee "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/solvionyx.plymouth" >/dev/null <<'EOFPLY'
 [Plymouth Theme]
-Name=Solvionyx
-Description=Solvionyx boot splash
+Name=Solvionyx Aurora
+Description=Solvionyx animated boot theme
 ModuleName=script
 
 [script]
 ImageDir=/usr/share/plymouth/themes/solvionyx
 ScriptFile=/usr/share/plymouth/themes/solvionyx/solvionyx.script
-PLY
-sudo tee "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/solvionyx.script" >/dev/null <<'SCR'
-wallpaper_image = Image("background.jpg");
-wallpaper_sprite = Sprite(wallpaper_image);
-wallpaper_sprite.SetZ(-50);
-SCR
-sudo cp "$BG_FILE" "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/background.jpg"
-sudo chroot "$CHROOT_DIR" bash -c "
+EOFPLY
+
+sudo tee "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/solvionyx.script" >/dev/null <<'EOFSCR'
+# Simple animated spinner + centered logo + text
+wallpaper_color = Color(0.03, 0.07, 0.13); # deep blue
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+Window.SetBackgroundTopColor (wallpaper_color);
+Window.SetBackgroundBottomColor (wallpaper_color);
+
+logo = Image("logo.png");
+scale = Min( (screen_width * 0.25) / Image.GetWidth(logo), (screen_height * 0.25) / Image.GetHeight(logo) );
+logo_w = Image.GetWidth(logo) * scale;
+logo_h = Image.GetHeight(logo) * scale;
+logo_sprite = Sprite();
+Sprite.SetImage(logo_sprite, logo);
+Sprite.SetX(logo_sprite, (screen_width - logo_w)/2);
+Sprite.SetY(logo_sprite, (screen_height - logo_h)/2 - 40);
+Sprite.SetZ(logo_sprite, 10);
+Sprite.SetScale(logo_sprite, scale, scale);
+
+text_sprite = Sprite();
+label = Text("Solvionyx OS — Aurora", 1.0, 1.0, 1.0);
+Sprite.SetText(text_sprite, label);
+Sprite.SetX(text_sprite, (screen_width - Text.GetWidth(label))/2);
+Sprite.SetY(text_sprite, (screen_height + logo_h)/2 - 10);
+Sprite.SetZ(text_sprite, 10);
+
+spinner = Image("spinner.png");
+if (spinner) {
+  sp = Sprite();
+  Sprite.SetImage(sp, spinner);
+  s = 0.12;
+  Sprite.SetScale(sp, s, s);
+  Sprite.SetX(sp, (screen_width - Image.GetWidth(spinner)*s)/2);
+  Sprite.SetY(sp, (screen_height + logo_h)/2 + 20);
+  Sprite.SetZ(sp, 10);
+  fun = Function();
+  Function.SetUpdateFunction(fun, "spin()");
+}
+function spin () {
+  Sprite.SetRotation(sp, (System.GetTime() * 240) % 360);
+}
+EOFSCR
+
+# tiny spinner (drawn procedurally via PNG fallback)
+# generate a spinner if missing
+sudo chroot "$CHROOT_DIR" /bin/bash -c "
+  if [ ! -f /usr/share/plymouth/themes/solvionyx/spinner.png ]; then
+    convert -size 200x200 xc:none -stroke white -strokewidth 16 \
+      -draw 'arc 10,10 190,190 0,300' /usr/share/plymouth/themes/solvionyx/spinner.png || true
+  fi
+
   update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth 100
-  update-alternatives --set default.plymouth /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth || true
-  update-initramfs -u || true
+  update-alternatives --set default.plymouth /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth
+  update-initramfs -u
 "
 
-# -------- Welcome app (first login) --------
-sudo mkdir -p "$CHROOT_DIR/usr/local/share/solvionyx-welcome" "$CHROOT_DIR/etc/skel/.config/autostart"
-sudo tee "$CHROOT_DIR/usr/local/share/solvionyx-welcome/welcome.sh" >/dev/null <<'WEL'
+# -------- CHROOT: GDM BRANDING (GNOME) ---------------------
+if [[ "$EDITION" == "gnome" ]]; then
+  echo "🖼️ Applying GDM branding (logo + background + banner)..."
+  sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
+  sudo mkdir -p "$CHROOT_DIR/usr/share/pixmaps"
+  sudo cp "$BG_FILE"   "$CHROOT_DIR/usr/share/backgrounds/solvionyx/solvionyx-login.jpg"
+  sudo cp "$LOGO_FILE" "$CHROOT_DIR/usr/share/pixmaps/solvionyx-logo.png"
+
+  # dconf system profile for GDM
+  sudo tee "$CHROOT_DIR/etc/dconf/profile/gdm" >/dev/null <<'EOFPROFILE'
+user-db:user
+system-db:gdm
+EOFPROFILE
+
+  sudo mkdir -p "$CHROOT_DIR/etc/dconf/db/gdm.d"
+  sudo tee "$CHROOT_DIR/etc/dconf/db/gdm.d/00-solvionyx" >/dev/null <<'EOFDCONF'
+[org/gnome/login-screen]
+logo='/usr/share/pixmaps/solvionyx-logo.png'
+banner-message-enable=true
+banner-message-text='Solvionyx OS — Aurora'
+
+[org/gnome/desktop/background]
+picture-uri='file:///usr/share/backgrounds/solvionyx/solvionyx-login.jpg'
+picture-uri-dark='file:///usr/share/backgrounds/solvionyx/solvionyx-login.jpg'
+EOFDCONF
+
+  sudo chroot "$CHROOT_DIR" dconf update || true
+fi
+
+# -------- CHROOT: WELCOME APP (simple, first login) --------
+echo "👋 Installing Welcome to Solvionyx OS (autostart)..."
+sudo tee "$CHROOT_DIR/usr/local/bin/solvionyx-welcome" >/dev/null <<'EOWEL'
 #!/usr/bin/env bash
-zenity --info --no-wrap --title="Welcome to Solvionyx OS" --text="Welcome to Solvionyx OS — Aurora.\n\nYour system is ready. Explore, customize, and build your vision.\n\nHave fun! 🚀"
-WEL
-sudo chmod +x "$CHROOT_DIR/usr/local/share/solvionyx-welcome/welcome.sh"
-sudo tee "$CHROOT_DIR/etc/skel/.config/autostart/solvionyx-welcome.desktop" >/dev/null <<'DESK'
+(
+  command -v zenity >/dev/null || apt-get update && apt-get install -y zenity >/dev/null 2>&1
+) >/dev/null 2>&1 || true
+
+zenity --info --width=480 --title="Welcome to Solvionyx OS — Aurora" \
+ --text="Thanks for trying Solvionyx!\n\n• Click **Install Solvionyx OS** to start Calamares.\n• Or explore the live session first." 2>/dev/null
+
+if zenity --question --width=480 --title="Install Now?" --text="Start Calamares installer now?"; then
+  calamares -d || true
+fi
+EOWEL
+sudo chmod +x "$CHROOT_DIR/usr/local/bin/solvionyx-welcome"
+
+# autostart desktop entry (for all DEs)
+sudo mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
+sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvionyx-welcome.desktop" >/dev/null <<'EODESK'
 [Desktop Entry]
 Type=Application
 Name=Welcome to Solvionyx OS
-Exec=/usr/local/share/solvionyx-welcome/welcome.sh
+Exec=/usr/local/bin/solvionyx-welcome
 X-GNOME-Autostart-enabled=true
 X-KDE-autostart-after=panel
-DESK
+OnlyShowIn=GNOME;KDE;XFCE;
+EODESK
 
-# -------- Calamares (installer) + theme + autostart toggle --------
-sudo chroot "$CHROOT_DIR" bash -c "apt-get install -y calamares calamares-settings-debian qml-module-qtquick-controls2 qml-module-qtquick-layouts qml-module-qtgraphicaleffects"
-
-# Branding for Calamares
-sudo mkdir -p "$CHROOT_DIR/usr/share/calamares/branding/solvionyx"
-sudo cp "$LOGO_FILE" "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/logo.png"
-sudo cp "$BG_FILE"   "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/background.jpg"
-sudo tee "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc" >/dev/null <<'BRD'
----
-componentName: solvionyx
-strings:
-  productName: "Solvionyx OS"
-  version: "Aurora"
-welcomeStyleCalamares: false
-sidebar:
-  background: "background.jpg"
-  logo: "logo.png"
-style:
-  sidebarBackground: "#0b1220"
-  sidebarText: "#e6f0ff"
-  highlight: "#6f3bff"
-BRD
-
-# Use our branding
-sudo mkdir -p "$CHROOT_DIR/etc/calamares"
-sudo tee "$CHROOT_DIR/etc/calamares/settings.conf" >/dev/null <<'CAL'
----
-modules-search: [/usr/lib/calamares/modules, /usr/local/lib/calamares/modules]
-sequence:
-  - welcome
-  - locale
-  - keyboard
-  - partition
-  - users
-  - summary
-  - install
-  - finished
-branding: solvionyx
-dont-chroot: false
-CAL
-
-# Desktop launcher
-sudo mkdir -p "$CHROOT_DIR/usr/share/applications" "$CHROOT_DIR/etc/skel/Desktop"
-sudo tee "$CHROOT_DIR/usr/share/applications/solvionyx-installer.desktop" >/dev/null <<'ICN'
-[Desktop Entry]
-Type=Application
-Name=Install Solvionyx OS
-Exec=pkexec calamares
-Icon=system-software-install
-Terminal=false
-Categories=System;
-ICN
-sudo cp "$CHROOT_DIR/usr/share/applications/solvionyx-installer.desktop" "$CHROOT_DIR/etc/skel/Desktop/"
-sudo chmod +x "$CHROOT_DIR/etc/skel/Desktop/solvionyx-installer.desktop"
-
-# Auto-start service (if kernel cmdline has autoinstall=calamares)
-sudo tee "$CHROOT_DIR/etc/systemd/system/solvionyx-autoinstall.service" >/dev/null <<'SRV'
+# -------- CHROOT: CONDITIONAL CALAMARES AUTOSTART ----------
+# Starts Calamares automatically if kernel cmdline contains "calamares=1"
+sudo tee "$CHROOT_DIR/etc/systemd/system/solvionyx-installer.service" >/dev/null <<'EOSVC'
 [Unit]
-Description=Auto-launch Calamares when requested via kernel cmdline
+Description=Start Calamares installer when requested by kernel cmdline
+ConditionKernelCommandLine=calamares=1
 After=graphical.target
 
 [Service]
-Type=oneshot
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/liveuser/.Xauthority
-User=liveuser
-ExecStart=/bin/bash -c 'grep -q "autoinstall=calamares" /proc/cmdline && setsid calamares || true'
+Type=simple
+ExecStart=/usr/bin/calamares -d
+Restart=no
 
 [Install]
 WantedBy=graphical.target
-SRV
-sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-autoinstall.service
+EOSVC
 
-# -------- Clean apt cache (keeps ISO slim) --------
-sudo chroot "$CHROOT_DIR" bash -c "apt-get clean && rm -rf /var/lib/apt/lists/*"
+sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-installer.service
 
-# -------- SquashFS --------
+# -------- CLEAN APT CACHE -----------------------------------
+sudo chroot "$CHROOT_DIR" /bin/bash -c "apt-get clean && rm -rf /var/lib/apt/lists/*"
+
+# -------- SQUASHFS (rootfs) ---------------------------------
+echo "📦 Creating squashfs..."
 sudo mksquashfs "$CHROOT_DIR" "$ISO_DIR/live/filesystem.squashfs" -e boot
 
-# -------- Kernel + initrd to ISO --------
-KERNEL=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
-INITRD=$(find "$CHROOT_DIR/boot" -name "initrd.img-*" | head -n 1)
-sudo cp "$KERNEL" "$ISO_DIR/live/vmlinuz"
-sudo cp "$INITRD" "$ISO_DIR/live/initrd.img"
+# -------- KERNEL + INITRD -----------------------------------
+KERNEL_PATH=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
+INITRD_PATH=$(find "$CHROOT_DIR/boot" -name "initrd.img-*" | head -n 1)
+sudo cp "$KERNEL_PATH" "$ISO_DIR/live/vmlinuz"
+sudo cp "$INITRD_PATH" "$ISO_DIR/live/initrd.img"
 
-# -------- BIOS boot (ISOLINUX) --------
-mkdir -p "$ISO_DIR/isolinux"
-sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
-sudo cp /usr/lib/syslinux/modules/bios/* "$ISO_DIR/isolinux/" || true
-# Background for menu (convert if needed)
-convert "$BG_FILE" -resize 1024x768\! -depth 8 "$ISO_DIR/isolinux/splash.png"
-cat >"$ISO_DIR/isolinux/isolinux.cfg" <<EOF
+# -------- BIOS: ISOLINUX ------------------------------------
+cat > "$ISO_DIR/isolinux/isolinux.cfg" <<EOF
 UI menu.c32
 PROMPT 0
 TIMEOUT 50
-MENU TITLE Solvionyx OS — Aurora
-MENU BACKGROUND splash.png
+DEFAULT live
+
+MENU TITLE Solvionyx OS — Aurora (${EDITION})
 
 LABEL live
   menu label ^Start Solvionyx OS (Live)
   kernel /live/vmlinuz
-  append initrd=/live/initrd.img boot=live quiet splash
+  append initrd=/live/initrd.img ${COMMON_KCMD}
 
 LABEL install
-  menu label ^Install Solvionyx OS (Auto-Start Installer)
+  menu label ^Install Solvionyx OS (Calamares)
   kernel /live/vmlinuz
-  append initrd=/live/initrd.img boot=live quiet splash autoinstall=calamares
+  append initrd=/live/initrd.img ${COMMON_KCMD} calamares=1
 EOF
 
-# -------- UEFI boot (GRUB) --------
-mkdir -p "$ISO_DIR/boot/grub"
-cat >"$ISO_DIR/boot/grub/grub.cfg" <<'GRUBCFG'
-set timeout=5
+sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
+sudo cp /usr/lib/syslinux/modules/bios/* "$ISO_DIR/isolinux/" || true
+
+# -------- UEFI: GRUB (with menu) ----------------------------
+cat > "$ISO_DIR/boot/grub/grub.cfg" <<EOF
 set default=0
+set timeout=5
+
+if loadfont /boot/grub/font.pf2 ; then
+  set gfxmode=auto
+  insmod gfxterm
+  insmod png
+  terminal_output gfxterm
+fi
 
 menuentry "Start Solvionyx OS (Live)" {
-   linux /live/vmlinuz boot=live quiet splash
-   initrd /live/initrd.img
+  linux /live/vmlinuz ${COMMON_KCMD}
+  initrd /live/initrd.img
 }
-menuentry "Install Solvionyx OS (Auto-Start Installer)" {
-   linux /live/vmlinuz boot=live quiet splash autoinstall=calamares
-   initrd /live/initrd.img
+
+menuentry "Install Solvionyx OS (Calamares)" {
+  linux /live/vmlinuz ${COMMON_KCMD} calamares=1
+  initrd /live/initrd.img
 }
-GRUBCFG
+EOF
 
-# Build standalone EFI image
-sudo grub-mkstandalone -O x86_64-efi -o "$ISO_DIR/boot/grub/efi.img" boot/grub/grub.cfg="$ISO_DIR/boot/grub/grub.cfg"
+# Build standalone EFI image with that grub.cfg
+sudo grub-mkstandalone \
+  -O x86_64-efi \
+  -o "$ISO_DIR/boot/grub/efi.img" \
+  --modules="part_gpt part_msdos fat iso9660 all_video efi_gop efi_uga gfxterm" \
+  "boot/grub/grub.cfg=$ISO_DIR/boot/grub/grub.cfg"
 
-# -------- Make ISO (hybrid) --------
+# -------- BUILD ISO -----------------------------------------
+echo "💿 Creating ISO..."
 xorriso -as mkisofs \
   -o "$OUTPUT_DIR/$ISO_NAME" \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
@@ -363,41 +387,47 @@ xorriso -as mkisofs \
   -V "Solvionyx_Aurora_${EDITION}" \
   "$ISO_DIR"
 
+# -------- COMPRESS + CHECKSUM -------------------------------
 xz -T0 -9e "$OUTPUT_DIR/$ISO_NAME"
 sha256sum "$OUTPUT_DIR/$ISO_NAME.xz" > "$OUTPUT_DIR/SHA256SUMS.txt"
 
-# -------- Upload to GCS --------
+echo "✅ ISO build complete: $OUTPUT_DIR/$ISO_NAME.xz"
+
+# -------- UPLOAD TO GCS -------------------------------------
 if command -v gsutil >/dev/null 2>&1; then
-  ISO_XZ="$OUTPUT_DIR/$ISO_NAME.xz"
+  echo "☁️ Uploading to Google Cloud Storage..."
+  ISO_FILE="$OUTPUT_DIR/$ISO_NAME.xz"
   SHA_FILE="$OUTPUT_DIR/SHA256SUMS.txt"
-  DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  SHA256=$(sha256sum "$ISO_XZ" | awk '{print $1}')
+  VERSION_TAG="v$(date +%Y%m%d%H%M)"
+  DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ)"
 
-  # /aurora/vYYYYmmddHHMM/edition/ and /aurora/latest/edition/
-  gsutil cp -a public-read "$ISO_XZ"  "gs://${GCS_BUCKET}/${AURORA_SERIES}/${VERSION_TAG}/${EDITION}/"
-  gsutil cp -a public-read "$SHA_FILE" "gs://${GCS_BUCKET}/${AURORA_SERIES}/${VERSION_TAG}/${EDITION}/"
-  gsutil cp -a public-read "$ISO_XZ"  "gs://${GCS_BUCKET}/${AURORA_SERIES}/latest/${EDITION}/"
-  gsutil cp -a public-read "$SHA_FILE" "gs://${GCS_BUCKET}/${AURORA_SERIES}/latest/${EDITION}/"
+  gsutil cp "$ISO_FILE" "gs://$BUCKET_NAME/${EDITION}/${VERSION_TAG}/"
+  gsutil cp "$SHA_FILE" "gs://$BUCKET_NAME/${EDITION}/${VERSION_TAG}/"
 
-  cat > "$OUTPUT_DIR/latest.json" <<MET
+  cat > "$OUTPUT_DIR/latest.json" <<EOFJ
 {
-  "version": "${VERSION}",
+  "version": "${VERSION_TAG}",
   "edition": "${EDITION}",
-  "release_name": "Solvionyx OS Aurora (${EDITION})",
+  "release_name": "Solvionyx OS Aurora (${EDITION} Edition)",
   "tagline": "${TAGLINE}",
-  "brand": "Solvionyx OS",
+  "brand": "${BRAND}",
   "build_date": "${DATE}",
-  "iso_name": "$(basename "$ISO_XZ")",
-  "sha256": "${SHA256}",
-  "download_url": "https://storage.googleapis.com/${GCS_BUCKET}/${AURORA_SERIES}/latest/${EDITION}/$(basename "$ISO_XZ")",
-  "checksum_url": "https://storage.googleapis.com/${GCS_BUCKET}/${AURORA_SERIES}/latest/${EDITION}/SHA256SUMS.txt"
+  "iso_name": "$(basename "$ISO_FILE")",
+  "sha256": "$(sha256sum "$ISO_FILE" | awk '{print $1}')",
+  "download_url": "https://storage.googleapis.com/${BUCKET_NAME}/${EDITION}/${VERSION_TAG}/$(basename "$ISO_FILE")",
+  "checksum_url": "https://storage.googleapis.com/${BUCKET_NAME}/${EDITION}/${VERSION_TAG}/SHA256SUMS.txt"
 }
-MET
-  gsutil cp -a public-read "$OUTPUT_DIR/latest.json" "gs://${GCS_BUCKET}/${AURORA_SERIES}/latest/${EDITION}/latest.json"
+EOFJ
+
+  gsutil cp "$OUTPUT_DIR/latest.json" "gs://$BUCKET_NAME/${EDITION}/latest/latest.json"
+  echo "✅ Upload to GCS complete."
+else
+  echo "ℹ️ gsutil not found — skipping cloud upload."
 fi
 
 echo "==========================================================="
-echo "🎉 Build complete: ${BRAND_FULL}"
-echo "📦 ISO: $OUTPUT_DIR/$ISO_NAME.xz"
-echo "☁️ GCS latest: gs://${GCS_BUCKET}/${AURORA_SERIES}/latest/${EDITION}/"
+echo "🎉 $BRAND Aurora (${EDITION}) ISO ready!"
+echo "📦 Output: $OUTPUT_DIR/$ISO_NAME.xz"
+echo "💡 Boot menu: Live OR Install (Calamares)"
+echo "🔵 Animated Plymouth + Branded GDM applied"
 echo "==========================================================="
