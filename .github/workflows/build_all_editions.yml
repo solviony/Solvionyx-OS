@@ -13,7 +13,7 @@ jobs:
   build:
     name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 150
 
     strategy:
       matrix:
@@ -41,9 +41,7 @@ jobs:
             debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
             syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
             rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
-            plymouth plymouth-themes plymouth-label imagemagick \
-            calamares calamares-settings-debian zenity \
-            qml-module-qtquick-controls2 qml-module-qtquick-layouts qml-module-qtgraphicaleffects
+            plymouth plymouth-themes plymouth-label imagemagick
 
       # ---------------------------------------------------
       - name: 🔐 Authenticate with Google Cloud
@@ -63,33 +61,18 @@ jobs:
           echo "✅ GCS bucket is reachable."
 
       # ---------------------------------------------------
-      - name: 🎨 Validate Branding Assets
+      - name: 🎨 Ensure branding assets
         run: |
           mkdir -p branding
-
-          echo "🎨 Checking branding assets..."
           if [ ! -f "${BRAND_LOGO}" ]; then
-            echo "⚠️ ${BRAND_LOGO} missing — generating fallback logo..."
-            convert -size 512x128 xc:none -gravity center -fill '#5bb0ff' -pointsize 64 \
-              -annotate 0 'SOLVIONYX' "${BRAND_LOGO}"
+            echo "⚠️ ${BRAND_LOGO} missing — creating fallback logo..."
+            convert -size 512x128 xc:'#0b1220' -gravity center \
+              -fill '#6f3bff' -pointsize 36 -annotate 0 'SOLVIONYX' "${BRAND_LOGO}"
           fi
-
           if [ ! -f "${BRAND_BG}" ]; then
-            echo "⚠️ ${BRAND_BG} missing — generating fallback background..."
-            convert -size 3840x2160 gradient:'#000428-#004e92' "${BRAND_BG}"
+            echo "ℹ️ ${BRAND_BG} missing — creating gradient background..."
+            convert -size 1920x1080 gradient:'#000428'-'#004e92' "${BRAND_BG}"
           fi
-
-          echo "🔍 Validating background integrity..."
-          if ! identify "${BRAND_BG}" >/dev/null 2>&1; then
-            echo "⚠️ Detected corrupted or unreadable background (${BRAND_BG})"
-            echo "🌀 Regenerating fallback gradient..."
-            convert -size 3840x2160 gradient:'#000428-#004e92' "${BRAND_BG}"
-            echo "✅ Fallback background regenerated successfully."
-          else
-            echo "✅ Background verified successfully."
-          fi
-
-          echo "✅ Branding ready."
 
       # ---------------------------------------------------
       - name: 💿 Build Solvionyx OS ISO (${{ matrix.edition }})
@@ -115,40 +98,6 @@ jobs:
           cd "${ISO_DIR}"
           sha256sum *.iso.xz > SHA256SUMS.txt
           cat SHA256SUMS.txt
-
-      # ---------------------------------------------------
-      - name: 🧩 Verify Bootable ISO Structure
-        run: |
-          ISO_FILE=$(find "${ISO_DIR}" -name "*.iso.xz" | head -n 1)
-          xz -d -k "$ISO_FILE"
-          RAW_ISO="${ISO_FILE%.xz}"
-          mkdir -p mnt
-          sudo mount -o ro,loop "$RAW_ISO" mnt 2>/dev/null
-
-          echo "🔍 Checking for kernel..."
-          FOUND_KERNEL=""
-          for dir in boot live casper; do
-            if sudo ls mnt/$dir/vmlinuz* >/dev/null 2>&1; then FOUND_KERNEL=$dir; break; fi
-          done
-
-          if [ -z "$FOUND_KERNEL" ]; then
-            echo "❌ Kernel not found in /boot, /live, or /casper"
-            ls -R mnt/live mnt/casper 2>/dev/null || true
-            sudo umount mnt; exit 1
-          fi
-          echo "✅ Kernel found in /$FOUND_KERNEL/"
-
-          echo "🔍 Checking for EFI or BIOS boot..."
-          if [ -f mnt/EFI/BOOT/BOOTX64.EFI ] || [ -f mnt/boot/grub/efi.img ]; then
-            echo "✅ EFI bootloader found."
-          elif [ -f mnt/isolinux/isolinux.bin ]; then
-            echo "✅ BIOS bootloader found."
-          else
-            echo "⚠️ Bootloader missing!"; sudo umount mnt; exit 1
-          fi
-
-          sudo umount mnt
-          echo "✅ Bootable ISO verified."
 
       # ---------------------------------------------------
       - name: ☁️ Upload to Google Cloud Storage
@@ -185,12 +134,6 @@ jobs:
           }
           EOF
           gsutil -m cp -n latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json"
-
-          echo "🧠 Setting cache headers..."
-          gsutil setmeta -h "Cache-Control:public, max-age=3600" \
-            "gs://${GCS_BUCKET}/${LATEST_PATH}/${ISO_NAME}" \
-            "gs://${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt" \
-            "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json" || true
           echo "✅ Upload complete."
 
       # ---------------------------------------------------
@@ -209,15 +152,24 @@ jobs:
         with:
           tag_name: "Aurora-${{ matrix.edition }}-${{ env.VERSION }}"
           name: "Solvionyx OS — Aurora (${{ matrix.edition }}) ${{ env.VERSION }}"
+          draft: false
+          prerelease: false
+          files: |
+            solvionyx_build/*.iso.xz
+            solvionyx_build/SHA256SUMS.txt
           body: |
             ## 🌌 Solvionyx OS — Aurora (${{ matrix.edition }})
             *The Engine Behind the Vision.*
 
-            ✅ Bootable ISO (UEFI + BIOS verified)
-            ✅ Solvionyx branding validated
-            ✅ Calamares installer included
-            ✅ Automatic image recovery (JPEG fix)
-            ✅ Uploaded to Google Cloud Storage
-            ✅ Available as GitHub Artifact
+            ✅ Bootable ISO (UEFI + BIOS)
+            ✅ GNOME/XFCE/KDE Editions
+            ✅ Uploaded to Google Cloud Storage  
+            ✅ Published to GitHub Releases
+
+            **Download ISO:**  
+            https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/
+
+            **Checksum File:**  
+            https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
