@@ -6,3 +6,4 @@ backup/
 *.log
 *.iso
 custom-disk/
+solvionyx-gcs-key.json
