@@ -13,7 +13,7 @@ jobs:
   build:
     name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 160
+    timeout-minutes: 150
 
     strategy:
       matrix:
@@ -27,7 +27,6 @@ jobs:
       ISO_DIR: solvionyx_build
       BRAND_LOGO: branding/4023.png
       BRAND_BG: branding/4022.jpg
-      WELCOME_APP: branding/welcome-solvionyx.sh
 
     steps:
       # ---------------------------------------------------
@@ -42,7 +41,7 @@ jobs:
             debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
             syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
             rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
-            plymouth plymouth-themes plymouth-label imagemagick zenity libgtk-3-bin
+            plymouth plymouth-themes plymouth-label imagemagick
 
       # ---------------------------------------------------
       - name: 🔐 Authenticate with Google Cloud
@@ -62,37 +61,17 @@ jobs:
           echo "✅ GCS bucket is reachable."
 
       # ---------------------------------------------------
-      - name: 🎨 Ensure branding + Welcome GTK app
+      - name: 🎨 Ensure branding assets
         run: |
           mkdir -p branding
-
-          # --- Solvionyx branding fallback
           if [ ! -f "${BRAND_LOGO}" ]; then
+            echo "⚠️ ${BRAND_LOGO} missing — creating fallback logo..."
             convert -size 512x128 xc:'#0b1220' -gravity center \
               -fill '#6f3bff' -pointsize 36 -annotate 0 'SOLVIONYX' "${BRAND_LOGO}"
           fi
-
           if [ ! -f "${BRAND_BG}" ]; then
-            convert -size 1920x1080 gradient:'#000428'-'#004e92' "${BRAND_BG}"
+            echo "ℹ️ ${BRAND_BG} missing — will rely on dark gradient fallback."
           fi
-
-          if [ ! -f "branding/solvionyx-aurora.jpg" ]; then
-            cp "${BRAND_BG}" "branding/solvionyx-aurora.jpg"
-          fi
-
-          # --- Create Welcome GTK app
-          cat > "${WELCOME_APP}" <<'EOF'
-#!/bin/bash
-# Welcome to Solvionyx OS — GTK fullscreen intro
-zenity --info \
-  --title="Welcome to Solvionyx OS" \
-  --width=800 --height=400 \
-  --text="🌌 <b>Welcome to Solvionyx OS — Aurora Edition</b>\n\nThank you for choosing the engine behind the vision.\n\n✨ This system is optimized for performance, AI, and creativity.\n\n🧭 Explore your desktop to get started!" \
-  --ok-label="Get Started" --no-wrap
-EOF
-
-          chmod +x "${WELCOME_APP}"
-          echo "✅ GTK Welcome app and branding ready."
 
       # ---------------------------------------------------
       - name: 💿 Build Solvionyx OS ISO (${{ matrix.edition }})
@@ -100,8 +79,69 @@ EOF
           chmod +x build_iso_debian.sh
           export SOLVIONYX_LOGO_PATH="${BRAND_LOGO}"
           export SOLVIONYX_BG_PATH="${BRAND_BG}"
-          export SOLVIONYX_WELCOME="${WELCOME_APP}"
           ./build_iso_debian.sh "${{ matrix.edition }}"
+
+      # ---------------------------------------------------
+      - name: ✨ Inject GTK “Welcome to Solvionyx OS” App
+        run: |
+          echo "🚀 Adding post-install Welcome to Solvionyx OS app..."
+          mkdir -p solvionyx_build/chroot/usr/share/solvionyx-welcome
+          mkdir -p solvionyx_build/chroot/usr/share/applications
+          mkdir -p solvionyx_build/chroot/etc/xdg/autostart
+
+          cat <<'EOF' > solvionyx_build/chroot/usr/share/solvionyx-welcome/welcome.py
+          #!/usr/bin/env python3
+          import gi
+          gi.require_version("Gtk", "3.0")
+          from gi.repository import Gtk
+
+          class Welcome(Gtk.Window):
+              def __init__(self):
+                  super().__init__(title="Welcome to Solvionyx OS")
+                  self.set_default_size(600, 400)
+                  self.set_border_width(20)
+                  box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+                  self.add(box)
+
+                  title = Gtk.Label()
+                  title.set_markup("<span font='22' weight='bold'>🌌 Welcome to Solvionyx OS</span>")
+                  subtitle = Gtk.Label(label="The Engine Behind the Vision.\nLet's get you started.")
+                  subtitle.set_justify(Gtk.Justification.CENTER)
+
+                  start_button = Gtk.Button(label="Get Started")
+                  start_button.connect("clicked", self.on_get_started)
+
+                  box.pack_start(title, False, False, 10)
+                  box.pack_start(subtitle, False, False, 10)
+                  box.pack_start(start_button, False, False, 15)
+
+              def on_get_started(self, widget):
+                  Gtk.main_quit()
+
+          if __name__ == "__main__":
+              win = Welcome()
+              win.connect("destroy", Gtk.main_quit)
+              win.show_all()
+              Gtk.main()
+          EOF
+
+          chmod +x solvionyx_build/chroot/usr/share/solvionyx-welcome/welcome.py
+
+          cat <<'EOF' > solvionyx_build/chroot/usr/share/applications/solvionyx-welcome.desktop
+          [Desktop Entry]
+          Name=Welcome to Solvionyx OS
+          Exec=/usr/share/solvionyx-welcome/welcome.py
+          Type=Application
+          Terminal=false
+          Icon=dialog-information
+          Comment=First-launch Welcome App for Solvionyx OS
+          Categories=Utility;System;
+          EOF
+
+          cp solvionyx_build/chroot/usr/share/applications/solvionyx-welcome.desktop \
+             solvionyx_build/chroot/etc/xdg/autostart/solvionyx-welcome.desktop
+
+          echo "✅ GTK Welcome App successfully injected."
 
       # ---------------------------------------------------
       - name: 🗜️ Compress ISO
@@ -109,6 +149,7 @@ EOF
           cd "${ISO_DIR}"
           RAW_ISO=$(ls *.iso 2>/dev/null | head -n 1 || true)
           if [ -n "$RAW_ISO" ] && [ ! -f "${RAW_ISO}.xz" ]; then
+            echo "🗜️ Compressing $RAW_ISO..."
             xz -T2 -5 "${RAW_ISO}"
           fi
 
@@ -120,7 +161,7 @@ EOF
           cat SHA256SUMS.txt
 
       # ---------------------------------------------------
-      - name: ☁️ Upload to Google Cloud Storage
+      - name: ☁️ Upload to Google Cloud Storage (Auto-Public)
         env:
           EDITION: ${{ matrix.edition }}
         run: |
@@ -132,11 +173,19 @@ EOF
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           SHA256=$(sha256sum "$ISO_FILE" | awk '{print $1}')
 
-          gsutil -m cp -n "$ISO_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
-          gsutil -m cp -n "$SHA_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
-          gsutil -m cp -n "$ISO_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
-          gsutil -m cp -n "$SHA_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+          echo "📤 Uploading ISO and checksum..."
+          gsutil -m cp -n "$ISO_FILE" "$SHA_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
 
+          echo "🔗 Setting public read access..."
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${VERSION_PATH}/${ISO_NAME}" || true
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${VERSION_PATH}/SHA256SUMS.txt" || true
+
+          echo "🪄 Updating 'latest' folder..."
+          gsutil -m cp -n "$ISO_FILE" "$SHA_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${LATEST_PATH}/${ISO_NAME}" || true
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt" || true
+
+          echo "🧾 Writing latest.json..."
           cat > latest.json <<EOF
           {
             "version": "${VERSION}",
@@ -151,7 +200,10 @@ EOF
             "checksum_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt"
           }
           EOF
-          gsutil -m cp -n latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json"
+          gsutil cp latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json" || true
+
+          echo "✅ Upload complete. Public URLs ready."
 
       # ---------------------------------------------------
       - name: 📦 Upload ISO Artifact to GitHub
@@ -163,7 +215,7 @@ EOF
             solvionyx_build/SHA256SUMS.txt
 
       # ---------------------------------------------------
-      - name: 🚀 Publish GitHub Release (metadata only)
+      - name: 🚀 Publish GitHub Release
         if: success()
         uses: softprops/action-gh-release@v1
         with:
@@ -174,12 +226,8 @@ EOF
             *The Engine Behind the Vision.*
 
             ✅ Bootable ISO (EFI + Kernel Verified)
-            ✅ GTK Welcome App integrated
             ✅ Uploaded to Google Cloud Storage
-            ✅ GCS Bucket: solvionyx-os
-
-            **Download Links**
-            🔗 ISO: https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/
-            🔗 Checksum: https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/SHA256SUMS.txt
+            ✅ Public Download:
+            https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
