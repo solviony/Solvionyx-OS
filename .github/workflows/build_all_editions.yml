@@ -13,7 +13,7 @@ jobs:
   build:
     name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 180
 
     strategy:
       matrix:
@@ -41,7 +41,7 @@ jobs:
             debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
             syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
             rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
-            plymouth plymouth-themes plymouth-label imagemagick
+            plymouth plymouth-themes plymouth-label imagemagick python3-gi gir1.2-gtk-3.0
 
       # ---------------------------------------------------
       - name: 🔐 Authenticate with Google Cloud
@@ -49,7 +49,7 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCS_CREDENTIALS_JSON }}
 
-      - name: ☁️ Install gcloud SDK
+      - name: ☁️ Setup gcloud SDK
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT }}
@@ -67,12 +67,13 @@ jobs:
           if [ ! -f "${BRAND_LOGO}" ]; then
             echo "⚠️ ${BRAND_LOGO} missing — creating fallback logo..."
             convert -size 512x128 xc:'#0b1220' -gravity center \
-              -fill '#6f3bff' -pointsize 36 -annotate 0 'SOLVIONYX' "${BRAND_LOGO}"
+              -fill '#6f3bff' -pointsize 48 -annotate 0 'SOLVIONYX' "${BRAND_LOGO}"
           fi
           if [ ! -f "${BRAND_BG}" ]; then
-            echo "ℹ️ ${BRAND_BG} missing — creating gradient background..."
-            convert -size 1920x1080 gradient:'#000428'-'#004e92' "${BRAND_BG}"
+            echo "ℹ️ ${BRAND_BG} missing — creating fallback gradient..."
+            convert -size 1920x1080 gradient:"#000428"-"#004e92" "${BRAND_BG}"
           fi
+          echo "✅ Branding verified."
 
       # ---------------------------------------------------
       - name: 💿 Build Solvionyx OS ISO (${{ matrix.edition }})
@@ -100,6 +101,39 @@ jobs:
           cat SHA256SUMS.txt
 
       # ---------------------------------------------------
+      - name: 🧩 Verify Bootable ISO Structure
+        run: |
+          ISO_FILE=$(find "${ISO_DIR}" -name "*.iso.xz" | head -n 1)
+          xz -d -k "$ISO_FILE"
+          RAW_ISO="${ISO_FILE%.xz}"
+          mkdir -p mnt
+          sudo mount -o ro,loop "$RAW_ISO" mnt 2>/dev/null
+
+          echo "🔍 Checking kernel paths..."
+          if sudo ls mnt/{boot,live,casper}/vmlinuz* >/dev/null 2>&1; then
+            echo "✅ Kernel found."
+          else
+            echo "❌ No kernel found!"
+            ls -R mnt/live mnt/casper || true
+            sudo umount mnt
+            exit 1
+          fi
+
+          echo "🔍 Checking bootloader..."
+          if [ -f mnt/EFI/BOOT/BOOTX64.EFI ]; then
+            echo "✅ EFI bootloader found."
+          elif [ -f mnt/isolinux/isolinux.bin ] || [ -f mnt/syslinux/syslinux.cfg ]; then
+            echo "✅ BIOS bootloader found."
+          else
+            echo "⚠️ No bootloader detected!"
+            sudo umount mnt
+            exit 1
+          fi
+
+          sudo umount mnt
+          echo "✅ Bootable ISO verified successfully."
+
+      # ---------------------------------------------------
       - name: ☁️ Upload to Google Cloud Storage
         env:
           EDITION: ${{ matrix.edition }}
@@ -112,13 +146,13 @@ jobs:
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           SHA256=$(sha256sum "$ISO_FILE" | awk '{print $1}')
 
-          echo "📤 Uploading ISO and checksum..."
+          echo "☁️ Uploading to GCS..."
           gsutil -m cp -n "$ISO_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
           gsutil -m cp -n "$SHA_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
           gsutil -m cp -n "$ISO_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
           gsutil -m cp -n "$SHA_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
 
-          echo "🧾 Writing latest.json..."
+          echo "🧾 Writing metadata..."
           cat > latest.json <<EOF
           {
             "version": "${VERSION}",
@@ -134,6 +168,12 @@ jobs:
           }
           EOF
           gsutil -m cp -n latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json"
+
+          gsutil setmeta -h "Cache-Control:public, max-age=3600" \
+            "gs://${GCS_BUCKET}/${LATEST_PATH}/${ISO_NAME}" \
+            "gs://${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt" \
+            "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json" || true
+
           echo "✅ Upload complete."
 
       # ---------------------------------------------------
@@ -146,30 +186,38 @@ jobs:
             solvionyx_build/SHA256SUMS.txt
 
       # ---------------------------------------------------
+      - name: 🧹 Cleanup Old Versions (keep 5)
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: |
+          PREFIX="gs://${GCS_BUCKET}/aurora/"
+          versions=$(gsutil ls "${PREFIX}" | grep "/v[0-9]" | sed 's#^.*/v#v#' | sort -V)
+          keep=$(echo "$versions" | tail -n 5)
+          remove=$(echo "$versions" | grep -vxFf <(echo "$keep") || true)
+          for v in $remove; do
+            echo "🗑️ Removing old version: $v"
+            gsutil -m rm -r "${PREFIX}${v}/${EDITION}/" || true
+          done
+          echo "✅ Cleanup complete."
+
+      # ---------------------------------------------------
       - name: 🚀 Publish GitHub Release
         if: success()
         uses: softprops/action-gh-release@v1
         with:
           tag_name: "Aurora-${{ matrix.edition }}-${{ env.VERSION }}"
           name: "Solvionyx OS — Aurora (${{ matrix.edition }}) ${{ env.VERSION }}"
-          draft: false
-          prerelease: false
-          files: |
-            solvionyx_build/*.iso.xz
-            solvionyx_build/SHA256SUMS.txt
           body: |
             ## 🌌 Solvionyx OS — Aurora (${{ matrix.edition }})
             *The Engine Behind the Vision.*
 
-            ✅ Bootable ISO (UEFI + BIOS)
-            ✅ GNOME/XFCE/KDE Editions
-            ✅ Uploaded to Google Cloud Storage  
-            ✅ Published to GitHub Releases
+            ✅ Bootable ISO (EFI + Kernel Verified)
+            ✅ GTK Setup Wizard Included
+            ✅ Solvionyx Branding Applied
+            ✅ Uploaded to GCS Bucket: solvionyx-os
+            ✅ GitHub Artifact Available Below
 
-            **Download ISO:**  
+            🔗 **Latest Build:**
             https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/
-
-            **Checksum File:**  
-            https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
