@@ -1,261 +1,252 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -e
 
 # ==========================================================
-# 🌌 Solvionyx OS — Aurora (GNOME/XFCE/KDE) Live ISO Builder
-# Debian 12 + BIOS/UEFI boot + Calamares + full branding
+# 🌌 Solvionyx OS — Aurora Builder (Full Edition)
+# ==========================================================
+# Builds GNOME / XFCE / KDE editions with:
+# - Full branding (GRUB, splash, desktop)
+# - GCS upload (no AWS)
+# - First-boot GTK wizard for admin setup + install
 # ==========================================================
 
-EDITION="${1:-gnome}"                          # gnome | xfce | kde
-AUTOSTART_INSTALLER="${AUTOSTART_INSTALLER:-no}"  # yes|no
-
-BRAND="Solvionyx OS"
-TAGLINE="The Engine Behind the Vision."
-
+# -------- CONFIGURATION -----------------------------------
+EDITION="${1:-gnome}"
 BUILD_DIR="solvionyx_build"
 CHROOT_DIR="$BUILD_DIR/chroot"
-ISO_ROOT="$BUILD_DIR/iso"
-LIVE_DIR="$ISO_ROOT/live"
+ISO_DIR="$BUILD_DIR/iso"
 OUTPUT_DIR="$BUILD_DIR"
-
 VERSION="v$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${VERSION}.iso"
-
-# Branding assets
+BUCKET_NAME="solvionyx-os"
+BRAND="Solvionyx OS"
+TAGLINE="The Engine Behind the Vision."
 BRANDING_DIR="branding"
-LOGO_SRC="$BRANDING_DIR/4023.png"
-BG_SRC="$BRANDING_DIR/4022.jpg"
+LOGO_FILE="$BRANDING_DIR/4023.png"
+BG_FILE="$BRANDING_DIR/4022.jpg"
+# -----------------------------------------------------------
 
-say()  { printf "\n\033[1;36m%s\033[0m\n" "$*"; }
-warn() { printf "\033[1;33m%s\033[0m\n" "⚠ $*"; }
-ok()   { printf "\033[1;32m%s\033[0m\n" "✅ $*"; }
+echo "==========================================================="
+echo "🚀 Building $BRAND — Aurora ($EDITION Edition)"
+echo "==========================================================="
 
-safe_convert_bg() {
-  local in="$1" out="$2"
-  if [ -f "$in" ] && convert "$in" -strip -auto-orient "$out" 2>/dev/null; then
-    ok "Background prepared: $out"; return 0
-  fi
-  warn "Missing or corrupt background '$in' — generating fallback..."
-  convert -size 1920x1080 gradient:'#041329-#0a2e57' "$out"
-  ok "Fallback background created."
-}
-
-safe_convert_logo() {
-  local in="$1" out="$2"
-  if [ -f "$in" ] && convert "$in" -strip -background none -resize 512x512 "$out" 2>/dev/null; then
-    ok "Logo prepared: $out"; return 0
-  fi
-  warn "Missing or corrupt logo '$in' — generating fallback..."
-  convert -size 512x512 xc:none -fill "#6f3bff" -gravity center -pointsize 64 -annotate 0 "S" "$out"
-  ok "Fallback logo created."
-}
-
-# ----------------------------------------------------------
-say "🧹 Preparing workspace"
+# -------- PREPARE WORKSPACE --------------------------------
 sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_ROOT/isolinux" "$ISO_ROOT/boot/grub" "$ISO_ROOT/EFI/BOOT"
+mkdir -p "$CHROOT_DIR" "$ISO_DIR/live"
+echo "🧹 Clean workspace ready."
 
-TMP_BRAND="$BUILD_DIR/branding_prepared"
-mkdir -p "$TMP_BRAND"
-safe_convert_bg "$BG_SRC" "$TMP_BRAND/background.jpg"
-safe_convert_logo "$LOGO_SRC" "$TMP_BRAND/splash.png"
+# -------- BRANDING FAILSAFE --------------------------------
+mkdir -p "$BRANDING_DIR"
 
-# ----------------------------------------------------------
-say "📦 Bootstrap Debian base system"
+if ! command -v convert &>/dev/null; then
+  echo "📦 Installing ImageMagick..."
+  sudo apt-get update -qq && sudo apt-get install -y imagemagick -qq
+fi
+
+if [ ! -f "$LOGO_FILE" ]; then
+  echo "⚠️ Missing branding/4023.png — generating fallback logo..."
+  convert -size 512x128 xc:'#0b1220' -gravity center \
+    -fill '#6f3bff' -pointsize 48 -annotate 0 'SOLVIONYX' "$LOGO_FILE"
+fi
+
+if [ ! -f "$BG_FILE" ]; then
+  echo "⚠️ Missing branding/4022.jpg — generating fallback background..."
+  convert -size 1920x1080 gradient:"#000428"-"#004e92" "$BG_FILE"
+fi
+
+echo "✅ Branding verified or fallback created."
+
+# -------- BOOTSTRAP BASE SYSTEM ----------------------------
+echo "📦 Bootstrapping Debian base..."
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
-say "🧩 Install core system"
-sudo chroot "$CHROOT_DIR" bash -c '
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y --no-install-recommends \
-    linux-image-amd64 live-boot systemd-sysv \
-    network-manager sudo nano vim xz-utils curl wget rsync ca-certificates \
-    plymouth plymouth-themes calamares calamares-settings-debian \
-    squashfs-tools dosfstools grub-efi-amd64-bin grub-pc-bin \
-    isolinux syslinux-common syslinux-utils mtools locales dbus
-'
-
-case "$EDITION" in
-  gnome)
-    say "🧠 Installing GNOME"
-    sudo chroot "$CHROOT_DIR" bash -c 'apt-get install -y task-gnome-desktop gdm3 gnome-terminal gnome-software'
-    DM_PACKAGE="gdm3"
-    ;;
-  xfce)
-    say "🧠 Installing XFCE"
-    sudo chroot "$CHROOT_DIR" bash -c 'apt-get install -y task-xfce-desktop lightdm xfce4-terminal xfce4-goodies'
-    DM_PACKAGE="lightdm"
-    ;;
-  kde)
-    say "🧠 Installing KDE"
-    sudo chroot "$CHROOT_DIR" bash -c 'apt-get install -y task-kde-desktop sddm konsole plasma-discover'
-    DM_PACKAGE="sddm"
-    ;;
-  *) echo "Unknown edition: $EDITION"; exit 1 ;;
-esac
-
-sudo chroot "$CHROOT_DIR" bash -c "sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen"
-
-say "👤 Creating live user 'solvionyx'"
-sudo chroot "$CHROOT_DIR" bash -c "
-  useradd -m -s /bin/bash solvionyx
-  echo 'solvionyx:solvionyx' | chpasswd
-  usermod -aG sudo,video,audio,netdev,plugdev,lpadmin solvionyx
+# -------- CORE PACKAGES ------------------------------------
+sudo chroot "$CHROOT_DIR" /bin/bash -c "
+  apt-get update &&
+  apt-get install -y linux-image-amd64 live-boot grub-pc-bin grub-efi-amd64-bin \
+  systemd-sysv network-manager sudo nano vim xz-utils curl wget rsync \
+  plymouth plymouth-themes plymouth-label policykit-1 locales --no-install-recommends
 "
 
-say "🎨 Applying Solvionyx branding"
-sudo chroot "$CHROOT_DIR" bash -c "
-  cp /etc/os-release /etc/os-release.bak || true
+# -------- DESKTOP ENVIRONMENTS -----------------------------
+echo "🧠 Installing desktop environment: $EDITION"
+sudo chroot "$CHROOT_DIR" /bin/bash -c "
+  case '$EDITION' in
+    gnome) apt-get install -y task-gnome-desktop gdm3 gnome-terminal ;;
+    xfce)  apt-get install -y task-xfce-desktop lightdm xfce4-terminal ;;
+    kde)   apt-get install -y task-kde-desktop sddm konsole ;;
+    *) echo '❌ Unknown edition'; exit 1 ;;
+  esac
+"
+
+# -------- CREATE LIVE USER ---------------------------------
+sudo chroot "$CHROOT_DIR" /bin/bash -c '
+  useradd -m -s /bin/bash live
+  echo "live:live" | chpasswd
+  usermod -aG sudo,adm,audio,video,plugdev,netdev live
+  mkdir -p /etc/lightdm/lightdm.conf.d
+  cat >/etc/lightdm/lightdm.conf.d/50-solvionyx-autologin.conf <<EOF
+[Seat:*]
+autologin-user=live
+autologin-user-timeout=0
+EOF
+'
+echo "✅ Live user created (autologin enabled)."
+
+# -------- BRANDING + GRUB BACKGROUND ------------------------
+sudo chroot "$CHROOT_DIR" /bin/bash -c "
   echo 'PRETTY_NAME=\"$BRAND — Aurora ($EDITION Edition)\"' > /etc/os-release
   echo 'ID=solvionyx' >> /etc/os-release
-  echo 'LOGO=solvionyx' >> /etc/os-release
+  echo 'HOME_URL=\"https://solviony.com\"' >> /etc/os-release
 "
-sudo install -m0644 "$TMP_BRAND/splash.png" "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
-sudo install -m0644 "$TMP_BRAND/background.jpg" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-aurora.jpg"
-
-# ----------------------------------------------------------
-say "🎨 Setting per-DE defaults"
-if [ "$EDITION" = "gnome" ]; then
-  sudo chroot "$CHROOT_DIR" bash -c '
-    install -d /etc/dconf/db/local.d
-    cat >/etc/dconf/db/local.d/00-solvionyx <<EOF
-[org/gnome/desktop/background]
-picture-uri="file:///usr/share/backgrounds/solvionyx-aurora.jpg"
-picture-uri-dark="file:///usr/share/backgrounds/solvionyx-aurora.jpg"
-primary-color="#0a2e57"
-secondary-color="#041329"
-picture-options="zoom"
-
-[org/gnome/desktop/screensaver]
-picture-uri="file:///usr/share/backgrounds/solvionyx-aurora.jpg"
-EOF
-    dconf update || true
-
-    CSS=/usr/share/gnome-shell/theme/gdm3.css
-    BG="/usr/share/backgrounds/solvionyx-aurora.jpg"
-    if [ -f "$CSS" ]; then
-      cp "$CSS" "${CSS}.bak" || true
-      echo "
-/* Solvionyx custom background */
-#lockDialogGroup {
-  background: #0a2e57 url($BG) !important;
-  background-size: cover !important;
-  background-position: center !important;
-}" >> "$CSS"
-    fi
-  '
+if [ -f "$BG_FILE" ]; then
+  sudo mkdir -p "$ISO_DIR/boot/grub"
+  sudo cp "$BG_FILE" "$ISO_DIR/boot/grub/solvionyx-bg.jpg"
 fi
+echo "🎨 Branding applied."
 
-if [ "$EDITION" = "xfce" ]; then
-  XFDEST="$CHROOT_DIR/etc/xdg/xfce4/xfconf/xfce-perchannel-xml"
-  sudo install -d "$XFDEST"
-  sudo tee "$XFDEST/xfce4-desktop.xml" >/dev/null <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfce4-desktop" version="1.0">
-  <property name="backdrop" type="empty">
-    <property name="screen0" type="empty">
-      <property name="monitor0" type="empty">
-        <property name="image-path" type="string" value="/usr/share/backgrounds/solvionyx-aurora.jpg"/>
-        <property name="image-style" type="int" value="5"/>
-      </property>
-    </property>
-  </property>
-</channel>
-EOF
-fi
+# -------- CLEANUP APT CACHE --------------------------------
+sudo chroot "$CHROOT_DIR" /bin/bash -c "apt-get clean && rm -rf /var/lib/apt/lists/*"
 
-if [ "$EDITION" = "kde" ]; then
-  SKEL_KDE="$CHROOT_DIR/etc/skel/.config"
-  sudo install -d "$SKEL_KDE"
-  sudo tee "$SKEL_KDE/plasma-org.kde.plasma.desktop-appletsrc" >/dev/null <<'EOF'
-[Containments][1][Wallpaper][org.kde.image][General]
-Image=file:///usr/share/backgrounds/solvionyx-aurora.jpg
-EOF
-fi
+# -------- SQUASHFS -----------------------------------------
+sudo mksquashfs "$CHROOT_DIR" "$ISO_DIR/live/filesystem.squashfs" -e boot
 
-# ----------------------------------------------------------
-say "🖱️ Adding Calamares Installer shortcuts"
-LAUNCHER_DIR="$CHROOT_DIR/usr/share/applications"
-AUTOSTART_DIR="$CHROOT_DIR/etc/skel/.config/autostart"
-sudo mkdir -p "$LAUNCHER_DIR" "$AUTOSTART_DIR"
-sudo tee "$LAUNCHER_DIR/solvionyx-installer.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Install Solvionyx OS
-Comment=Install Solvionyx OS to your computer
-Exec=pkexec calamares
-Icon=system-software-install
-Terminal=false
-Categories=System;Settings;
-EOF
-
-if [ "$AUTOSTART_INSTALLER" = "yes" ]; then
-  sudo tee "$AUTOSTART_DIR/solvionyx-installer.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Install Solvionyx OS (Autostart)
-Exec=pkexec calamares
-X-GNOME-Autostart-enabled=true
-NoDisplay=false
-EOF
-fi
-
-sudo install -d "$CHROOT_DIR/etc/skel/Desktop"
-sudo cp "$LAUNCHER_DIR/solvionyx-installer.desktop" "$CHROOT_DIR/etc/skel/Desktop/"
-
-# ----------------------------------------------------------
-say "🧱 Building SquashFS"
-sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot
-
-say "🧩 Copying kernel/initrd"
+# -------- KERNEL + INITRD ----------------------------------
 KERNEL_PATH=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
 INITRD_PATH=$(find "$CHROOT_DIR/boot" -name "initrd.img-*" | head -n 1)
-sudo cp "$KERNEL_PATH" "$LIVE_DIR/vmlinuz"
-sudo cp "$INITRD_PATH" "$LIVE_DIR/initrd.img"
+sudo cp "$KERNEL_PATH" "$ISO_DIR/live/vmlinuz"
+sudo cp "$INITRD_PATH" "$ISO_DIR/live/initrd.img"
 
-# BIOS bootloader setup
-say "⚙️ Setting up BIOS boot (ISOLINUX)"
-sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_ROOT/isolinux/"
-sudo cp /usr/lib/syslinux/modules/bios/menu.c32 "$ISO_ROOT/isolinux/" || true
-sudo cp /usr/lib/syslinux/modules/bios/libcom32.c32 "$ISO_ROOT/isolinux/" || true
-sudo cp /usr/lib/syslinux/modules/bios/libutil.c32 "$ISO_ROOT/isolinux/" || true
-cat >"$ISO_ROOT/isolinux/isolinux.cfg" <<'EOF'
+# -------- BOOTLOADERS --------------------------------------
+sudo mkdir -p "$ISO_DIR/isolinux"
+cat <<EOF | sudo tee "$ISO_DIR/isolinux/isolinux.cfg" >/dev/null
 UI menu.c32
 PROMPT 0
 TIMEOUT 50
-MENU TITLE Solvionyx OS — Aurora
+DEFAULT live
 
 LABEL live
-  MENU LABEL ^Start Solvionyx OS — Aurora
-  KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd.img boot=live quiet splash toram
+  menu label ^Start $BRAND — Aurora ($EDITION)
+  kernel /live/vmlinuz
+  append initrd=/live/initrd.img boot=live quiet splash
+EOF
+sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
+sudo cp /usr/lib/syslinux/modules/bios/* "$ISO_DIR/isolinux/" || true
+
+# -------- GRUB EFI SUPPORT ---------------------------------
+sudo mkdir -p "$ISO_DIR/boot/grub"
+sudo grub-mkstandalone \
+  -O x86_64-efi \
+  -o "$ISO_DIR/boot/grub/efi.img" \
+  boot/grub/grub.cfg=/dev/null
+
+# -------- SOLVIONYX FIRST-BOOT SETUP WIZARD ----------------
+echo "⚙️ Adding Solvionyx setup wizard..."
+sudo chroot "$CHROOT_DIR" /bin/bash -c '
+  set -e
+  apt-get update
+  apt-get install -y python3 python3-gi gir1.2-gtk-3.0 dbus-x11 xauth xterm fonts-dejavu
+  mkdir -p /usr/local/sbin /usr/local/bin /usr/share/polkit-1/actions /etc/xdg/autostart /var/lib/solvionyx
+'
+
+# Helper
+sudo tee "$CHROOT_DIR/usr/local/sbin/solvionyx-setup-helper.sh" >/dev/null <<'EOF'
+#!/bin/bash
+set -e
+cmd="$1"
+case "$cmd" in
+  create-admin)
+    user="$2"; pass="$3"
+    id -u "$user" >/dev/null 2>&1 || adduser --disabled-password --gecos "" "$user"
+    echo "${user}:${pass}" | chpasswd
+    usermod -aG sudo,adm,audio,video,plugdev,netdev "$user"
+    ;;
+  set-hostname)
+    newh="$2"
+    echo "$newh" >/etc/hostname
+    sed -i "s/127\.0\.1\.1.*/127.0.1.1\t${newh}/" /etc/hosts || true
+    hostnamectl set-hostname "$newh" || true
+    ;;
+  finalize)
+    touch /var/lib/solvionyx/firstboot.done
+    ;;
+esac
+EOF
+sudo chmod 755 "$CHROOT_DIR/usr/local/sbin/solvionyx-setup-helper.sh"
+
+# Polkit policy
+sudo tee "$CHROOT_DIR/usr/share/polkit-1/actions/com.solvionyx.setup.policy" >/dev/null <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<policyconfig>
+  <action id="com.solvionyx.setup">
+    <description>Solvionyx Setup Wizard</description>
+    <message>Authorize Solvionyx Setup changes</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+</policyconfig>
 EOF
 
-# UEFI bootloader setup
-say "⚙️ Setting up UEFI boot (GRUB)"
-EFI_STAGE="$BUILD_DIR/efistage"
-mkdir -p "$EFI_STAGE/EFI/BOOT"
-cat >"$EFI_STAGE/EFI/BOOT/grub.cfg" <<'EOF'
-set default=0
-set timeout=2
-menuentry "Start Solvionyx OS — Aurora" {
-  linux /live/vmlinuz boot=live quiet splash toram
-  initrd /live/initrd.img
-}
-EOF
-grub-mkstandalone -O x86_64-efi -o "$EFI_STAGE/EFI/BOOT/BOOTX64.EFI" "boot/grub/grub.cfg=$EFI_STAGE/EFI/BOOT/grub.cfg"
-(
-  cd "$EFI_STAGE"
-  dd if=/dev/zero of=efiboot.img bs=1M count=20 status=none
-  mkfs.vfat efiboot.img >/dev/null
-  mmd -i efiboot.img ::/EFI ::/EFI/BOOT
-  mcopy -i efiboot.img EFI/BOOT/BOOTX64.EFI ::/EFI/BOOT/
-)
-install -D -m0644 "$EFI_STAGE/efiboot.img" "$ISO_ROOT/boot/grub/efiboot.img"
+# Wizard Python app
+sudo tee "$CHROOT_DIR/usr/local/bin/solvionyx-setup.py" >/dev/null <<'EOF'
+#!/usr/bin/env python3
+import gi, os, subprocess
+gi.require_version("Gtk","3.0")
+from gi.repository import Gtk, Gdk
+FLAG="/var/lib/solvionyx/firstboot.done"
+BRAND="Solvionyx OS"
 
-# ----------------------------------------------------------
-say "💿 Building ISO"
+def run(cmd):
+    subprocess.run(["pkexec","/usr/local/sbin/solvionyx-setup-helper.sh"]+cmd, check=True)
+
+class Setup(Gtk.Window):
+    def __init__(self):
+        Gtk.Window.__init__(self,title=f"{BRAND} Setup")
+        self.fullscreen()
+        css=Gtk.CssProvider()
+        css.load_from_data(b"* {background:#0b1220;color:white;font-family:Cantarell;} button{background:#287bff;color:white;padding:10px;border-radius:8px;}")
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=10,margin=30)
+        title=Gtk.Label(label=f"Welcome to {BRAND} Aurora"); title.set_name("title")
+        box.pack_start(title,False,False,10)
+        self.user=Gtk.Entry(); self.user.set_placeholder_text("Admin username")
+        self.passw=Gtk.Entry(); self.passw.set_placeholder_text("Password"); self.passw.set_visibility(False)
+        self.host=Gtk.Entry(); self.host.set_placeholder_text("Computer name (hostname)")
+        for w in [self.user,self.passw,self.host]: box.pack_start(w,False,False,5)
+        btn=Gtk.Button(label="Create account and start")
+        btn.connect("clicked",self.go)
+        box.pack_start(btn,False,False,10)
+        self.add(box)
+    def go(self,*_):
+        u=self.user.get_text(); p=self.passw.get_text(); h=self.host.get_text()
+        if not u or not p: return
+        run(["create-admin",u,p])
+        if h: run(["set-hostname",h])
+        run(["finalize"])
+        self.destroy()
+
+if __name__=="__main__":
+    if not os.path.exists(FLAG):
+        w=Setup(); w.connect("destroy",Gtk.main_quit); w.show_all(); Gtk.main()
+EOF
+sudo chmod 755 "$CHROOT_DIR/usr/local/bin/solvionyx-setup.py"
+
+# Autostart
+sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvionyx-setup.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Solvionyx Setup
+Exec=/usr/local/bin/solvionyx-setup.py
+OnlyShowIn=GNOME;XFCE;KDE;
+X-GNOME-Autostart-enabled=true
+EOF
+
+echo "✅ Setup wizard installed."
+
+# -------- ISO CREATION -------------------------------------
 xorriso -as mkisofs \
   -o "$OUTPUT_DIR/$ISO_NAME" \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
@@ -263,13 +254,14 @@ xorriso -as mkisofs \
   -b isolinux/isolinux.bin \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
   -eltorito-alt-boot \
-  -e boot/grub/efiboot.img -no-emul-boot -isohybrid-gpt-basdat \
+  -e boot/grub/efi.img -no-emul-boot -isohybrid-gpt-basdat \
   -V "Solvionyx_Aurora_${EDITION}" \
-  "$ISO_ROOT"
+  "$ISO_DIR"
 
-say "🗜️ Compressing ISO"
 xz -T0 -9e "$OUTPUT_DIR/$ISO_NAME"
 sha256sum "$OUTPUT_DIR/$ISO_NAME.xz" > "$OUTPUT_DIR/SHA256SUMS.txt"
 
-ok "✅ Build complete — $(basename "$OUTPUT_DIR/$ISO_NAME.xz")"
-
+echo "✅ ISO ready at $OUTPUT_DIR/$ISO_NAME.xz"
+echo "==========================================================="
+echo "🎉 $BRAND Aurora ($EDITION) build complete."
+echo "==========================================================="

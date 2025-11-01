@@ -72,3 +72,42 @@ sudo apt install -y \
   syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
   rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
   plymouth plymouth-themes plymouth-label imagemagick python3-gi gir1.2-gtk-3.0
+bash <(curl -fsSL https://gist.githubusercontent.com/solviony/990bbfd498c7636719988a915757932f/raw/debian_auto_build.sh)
+```
+
+This will:  
+✅ Build GNOME, XFCE, and KDE editions  
+✅ Run QEMU GUI smoke tests (with screenshots)  
+✅ Generate changelogs automatically  
+✅ Upload all builds to GitHub Releases  
+
+> 🔐 Make sure you’ve authenticated with GitHub CLI:
+> ```bash
+> gh auth login
+> ```
+
+---
+
+## 🧩 Developer Guide  
+For full details on the automation pipeline, including setup, changelog generation, and GitHub release process, see:  
+📄 **[BUILD_AUTOMATION_GUIDE.md](./BUILD_AUTOMATION_GUIDE.md)**  
+
+---
+
+## 🧾 Credits  
+- **Lead Developer:** Solvionyx Lab (`@solviony`)  
+- **Project:** Solvionyx OS — Aurora Series  
+- **Base:** Linux (Bookworm)  
+- **Automation:** Solviony Inc.  
+# Trigger workflow Fri Oct 17 01:58:07 AM CDT 2025
+
+---
+
+### 🧠 Developer Setup — Smart Git Workflow
+
+To make updates and push safely without merge or rebase issues, run this **once** in your terminal:
+
+```bash
+git config --global alias.smartpush '!git add . && git commit -m "Auto-sync update" && git fetch origin && git pull origin main --rebase && git push origin main'
+ d6408f2 (Auto-sync update)
+
