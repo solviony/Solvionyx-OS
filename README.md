@@ -1,63 +1,74 @@
-# 🧩 Solvionyx OS — Aurora Series  
-### *Next-generation Linux experience built for creators, developers, and everyday users.*
+<p align="center">
+  <img src="https://storage.googleapis.com/solvionyx-os/branding/4023.png" width="420"><br><br>
+  <b>🌌 Solvionyx OS — Aurora Series</b><br>
+  <i>The Engine Behind the Vision.</i>
+</p>
 
 ---
 
-## 🚀 Overview  
-**Solvionyx OS** is a modern, Debian-based operating system focused on performance, creativity, and automation.  
-The Aurora series introduces a powerful **multi-edition architecture**, supporting developers, producers, and general users with tailored environments.
+## 🚀 Overview
+
+**Solvionyx OS (Aurora Series)** is a next-generation, AI-ready Linux distribution  
+designed by **Solviony Technologies** to power creativity, productivity, and innovation.  
+
+It features a modern UI, intelligent system integration, and complete Solvionyx branding — built for both personal and professional use.
+
+### Available Editions
+| Edition | Description |
+|----------|--------------|
+| **GNOME** | Clean and elegant experience for general users and developers |
+| **XFCE** | Lightweight and responsive for performance and portability |
+| **KDE** | Fully customizable and feature-rich desktop |
 
 ---
 
-## 🖥️ Editions  
+## 🏗️ Build Status
 
-| Edition | Desktop | Description |
-|----------|----------|-------------|
-| **Aurora (Production)** | GNOME | Stable release for general use — sleek, productive, and user-friendly. |
-| **Aurora Lite (Developer)** | XFCE | Lightweight edition optimized for coding, testing, and development. |
-| **Aurora Studio (Experimental)** | KDE Plasma | Creative suite edition for video, 3D, and multimedia production. |
-
----
-
-## 🧠 Features  
-- Built on **Debian 12 (Bookworm)**  
-- Integrated **QEMU GUI smoke test** with screenshots  
-- **Automated build + GitHub release pipeline**  
-- Built-in **Calamares installer**, **Plymouth animation**, and **Solvionyx Welcome App**  
-- Per-edition changelogs and release notes  
-- Optimized hardware detection (Intel / AMD / NVIDIA)  
+| Edition | Status | ISO | Metadata |
+|----------|--------|------|----------|
+| **GNOME** | ![GNOME Build](https://github.com/solviony/Solvionyx-OS/actions/workflows/build_all_editions.yml/badge.svg?branch=main) | [⬇ Download ISO](https://storage.googleapis.com/solvionyx-os/aurora/latest/gnome/Solvionyx-Aurora-gnome-latest.iso.xz) | [📄 latest.json](https://storage.googleapis.com/solvionyx-os/aurora/latest/gnome/latest.json) |
+| **XFCE**  | ![XFCE Build](https://github.com/solviony/Solvionyx-OS/actions/workflows/build_all_editions.yml/badge.svg?branch=main) | [⬇ Download ISO](https://storage.googleapis.com/solvionyx-os/aurora/latest/xfce/Solvionyx-Aurora-xfce-latest.iso.xz) | [📄 latest.json](https://storage.googleapis.com/solvionyx-os/aurora/latest/xfce/latest.json) |
+| **KDE**   | ![KDE Build](https://github.com/solviony/Solvionyx-OS/actions/workflows/build_all_editions.yml/badge.svg?branch=main) | [⬇ Download ISO](https://storage.googleapis.com/solvionyx-os/aurora/latest/kde/Solvionyx-Aurora-kde-latest.iso.xz) | [📄 latest.json](https://storage.googleapis.com/solvionyx-os/aurora/latest/kde/latest.json) |
 
 ---
 
-## ⚙️ Automated Build System  
-Solvionyx OS can be built and released automatically using a single command:
+## 💡 Features
+
+- 🧩 **First-boot GTK setup wizard** — create admin user, hostname, and install to disk  
+- 🎨 **Full Solvionyx branding** — splash, boot, and desktop theme  
+- ⚙️ **Unified Build System** — GCS + GitHub CI/CD + Local parity  
+- 💾 **Calamares installer ready**  
+- ☁️ **Automatic Google Cloud Storage uploads**  
+- 🔐 **Secure, reproducible ISO builds (SHA256 verified)**  
+- 🧱 **Hybrid EFI + BIOS boot support**
+
+---
+
+## 🧠 Quick Start (Users)
+
+1. **Download your preferred edition** from the table above.  
+2. Write ISO to USB using [Balena Etcher](https://etcher.io) or [Rufus](https://rufus.ie).  
+3. Boot and select:
+   - **“Start Solvionyx OS Aurora”** — to try Live mode  
+   - **“Install Solvionyx OS”** — guided installation  
+4. After login, the **Solvionyx Setup Wizard** will appear:  
+   - Create admin user  
+   - Set computer name  
+   - Optionally install system to disk  
+   - Begin using Solvionyx OS
+
+---
+
+## 🧰 Developer / Build Environment Setup
+
+This section explains how to set up your environment for **local or CI/CD builds**.
+
+### 1️⃣ Requirements
 
 ```bash
-bash <(curl -fsSL https://gist.githubusercontent.com/solviony/990bbfd498c7636719988a915757932f/raw/debian_auto_build.sh)
-```
-
-This will:  
-✅ Build GNOME, XFCE, and KDE editions  
-✅ Run QEMU GUI smoke tests (with screenshots)  
-✅ Generate changelogs automatically  
-✅ Upload all builds to GitHub Releases  
-
-> 🔐 Make sure you’ve authenticated with GitHub CLI:
-> ```bash
-> gh auth login
-> ```
-
----
-
-## 🧩 Developer Guide  
-For full details on the automation pipeline, including setup, changelog generation, and GitHub release process, see:  
-📄 **[BUILD_AUTOMATION_GUIDE.md](./BUILD_AUTOMATION_GUIDE.md)**  
-
----
-
-## 🧾 Credits  
-- **Lead Developer:** Maurice Joway (`@solviony`)  
-- **Project:** Solvionyx OS — Aurora Series  
-- **Base:** Debian 12 (Bookworm)  
-- **Automation:** ChatGPT x Solvionyx Labs  
-# Trigger workflow Fri Oct 17 01:58:07 AM CDT 2025
+sudo apt update
+sudo apt install -y \
+  debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
+  syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
+  rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
+  plymouth plymouth-themes plymouth-label imagemagick python3-gi gir1.2-gtk-3.0
