@@ -93,6 +93,19 @@ EOF
 '
 echo "✅ Live user created (autologin enabled)."
 
+echo "🌌 Installing Welcome to Solvionyx OS GTK app..."
+mkdir -p "$CHROOT_DIR/usr/share/solvionyx"
+cp "$SOLVIONYX_WELCOME" "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh"
+chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh"
+mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
+cat > "$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" <<EOF
+[Desktop Entry]
+Name=Welcome to Solvionyx OS
+Exec=/usr/share/solvionyx/welcome-solvionyx.sh
+Type=Application
+X-GNOME-Autostart-enabled=true
+EOF
+
 # -------- BRANDING + GRUB BACKGROUND ------------------------
 sudo chroot "$CHROOT_DIR" /bin/bash -c "
   echo 'PRETTY_NAME=\"$BRAND — Aurora ($EDITION Edition)\"' > /etc/os-release
