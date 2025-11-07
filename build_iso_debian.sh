@@ -93,9 +93,12 @@ EOF
 '
 echo "✅ Live user created (autologin enabled)."
 
-echo "🌌 Installing Welcome to Solvionyx OS GTK app..."
-mkdir -p "$CHROOT_DIR/usr/share/solvionyx"
-cp "$SOLVIONYX_WELCOME" "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh"
+echo "🧠 Installing Welcome to Solvionyx OS GTK app..."
+
+sudo mkdir -p "$CHROOT_DIR/usr/share/solvionyx"
+sudo cp -r solvionyx-welcome "$CHROOT_DIR/usr/share/solvionyx/"
+sudo chown -R root:root "$CHROOT_DIR/usr/share/solvionyx"
+sudo chmod -R 755 "$CHROOT_DIR/usr/share/solvionyx"
 chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh"
 mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
 cat > "$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" <<EOF
