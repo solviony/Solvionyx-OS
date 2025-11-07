@@ -1,295 +1,182 @@
 #!/bin/bash
 set -e
+set -o pipefail
 
-# ==========================================================
-# 🌌 Solvionyx OS — Aurora Builder (Full Edition)
-# ==========================================================
-# Builds GNOME / XFCE / KDE editions with:
-# - Full branding (GRUB, splash, desktop)
-# - GCS upload (no AWS)
-# - First-boot GTK wizard for admin setup + install
-# ==========================================================
+# =============================
+# Solvionyx OS Build Script
+# =============================
 
-# -------- CONFIGURATION -----------------------------------
+export LC_ALL=C
+export DEBIAN_FRONTEND=noninteractive
+
 EDITION="${1:-gnome}"
-BUILD_DIR="solvionyx_build"
+BUILD_DIR="$(pwd)/solvionyx_build"
 CHROOT_DIR="$BUILD_DIR/chroot"
 ISO_DIR="$BUILD_DIR/iso"
 OUTPUT_DIR="$BUILD_DIR"
-VERSION="v$(date +%Y.%m.%d)"
-ISO_NAME="Solvionyx-Aurora-${EDITION}-${VERSION}.iso"
-BUCKET_NAME="solvionyx-os"
-BRAND="Solvionyx OS"
-TAGLINE="The Engine Behind the Vision."
-BRANDING_DIR="branding"
-LOGO_FILE="$BRANDING_DIR/4023.png"
-BG_FILE="$BRANDING_DIR/4022.jpg"
-# -----------------------------------------------------------
+ISO_NAME="Solvionyx-Aurora-${EDITION}-v$(date +%Y.%m.%d).iso"
 
-echo "==========================================================="
-echo "🚀 Building $BRAND — Aurora ($EDITION Edition)"
-echo "==========================================================="
+echo "🚀 Building Solvionyx OS Aurora Edition: $EDITION"
+echo "📦 Build directory: $BUILD_DIR"
+echo "📦 Chroot directory: $CHROOT_DIR"
 
-# -------- PREPARE WORKSPACE --------------------------------
+# ================================================================
+# 🧱 PREPARE ENVIRONMENT
+# ================================================================
 sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT_DIR" "$ISO_DIR/live"
-echo "🧹 Clean workspace ready."
+mkdir -p "$CHROOT_DIR" "$ISO_DIR"
 
-# -------- BRANDING FAILSAFE --------------------------------
-mkdir -p "$BRANDING_DIR"
+# Bootstrap minimal Debian system
+echo "🏗️ Bootstrapping base system..."
+sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian/
 
-if ! command -v convert &>/dev/null; then
-  echo "📦 Installing ImageMagick..."
-  sudo apt-get update -qq && sudo apt-get install -y imagemagick -qq
-fi
+# ================================================================
+# 🔧 CONFIGURE CHROOT
+# ================================================================
+echo "🔧 Configuring chroot environment..."
+sudo cp /etc/resolv.conf "$CHROOT_DIR/etc/"
+echo "deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware" | sudo tee "$CHROOT_DIR/etc/apt/sources.list"
 
-if [ ! -f "$LOGO_FILE" ]; then
-  echo "⚠️ Missing branding/4023.png — generating fallback logo..."
-  convert -size 512x128 xc:'#0b1220' -gravity center \
-    -fill '#6f3bff' -pointsize 48 -annotate 0 'SOLVIONYX' "$LOGO_FILE"
-fi
+sudo chroot "$CHROOT_DIR" bash -c "
+set -e
+apt-get update
+apt-get install -y sudo locales tasksel dbus-x11 systemd-sysv network-manager lightdm plymouth plymouth-themes \
+gnome-session gnome-terminal gnome-control-center firefox-esr vim nano curl wget git xz-utils rsync
 
-if [ ! -f "$BG_FILE" ]; then
-  echo "⚠️ Missing branding/4022.jpg — generating fallback background..."
-  convert -size 1920x1080 gradient:"#000428"-"#004e92" "$BG_FILE"
-fi
-
-echo "✅ Branding verified or fallback created."
-
-# -------- BOOTSTRAP BASE SYSTEM ----------------------------
-echo "📦 Bootstrapping Debian base..."
-sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
-
-# -------- CORE PACKAGES ------------------------------------
-sudo chroot "$CHROOT_DIR" /bin/bash -c "
-  apt-get update &&
-  apt-get install -y linux-image-amd64 live-boot grub-pc-bin grub-efi-amd64-bin \
-  systemd-sysv network-manager sudo nano vim xz-utils curl wget rsync \
-  plymouth plymouth-themes plymouth-label policykit-1 locales --no-install-recommends
+locale-gen en_US.UTF-8
 "
 
-# -------- DESKTOP ENVIRONMENTS -----------------------------
-echo "🧠 Installing desktop environment: $EDITION"
-sudo chroot "$CHROOT_DIR" /bin/bash -c "
-  case '$EDITION' in
-    gnome) apt-get install -y task-gnome-desktop gdm3 gnome-terminal ;;
-    xfce)  apt-get install -y task-xfce-desktop lightdm xfce4-terminal ;;
-    kde)   apt-get install -y task-kde-desktop sddm konsole ;;
-    *) echo '❌ Unknown edition'; exit 1 ;;
-  esac
-"
+# ================================================================
+# 👤 CREATE LIVE USER
+# ================================================================
+echo "👤 Create live user 'solvionyx'"
+sudo chroot "$CHROOT_DIR" bash -c "
+useradd -m -s /bin/bash solvionyx
+echo 'solvionyx:solvionyx' | chpasswd
+usermod -aG sudo,adm,audio,video,plugdev,netdev solvionyx
 
-# -------- CREATE LIVE USER ---------------------------------
-sudo chroot "$CHROOT_DIR" /bin/bash -c '
-  useradd -m -s /bin/bash live
-  echo "live:live" | chpasswd
-  usermod -aG sudo,adm,audio,video,plugdev,netdev live
-  mkdir -p /etc/lightdm/lightdm.conf.d
-  cat >/etc/lightdm/lightdm.conf.d/50-solvionyx-autologin.conf <<EOF
+mkdir -p /etc/lightdm/lightdm.conf.d
+cat >/etc/lightdm/lightdm.conf.d/50-solvionyx-autologin.conf <<EOF
 [Seat:*]
-autologin-user=live
+autologin-user=solvionyx
 autologin-user-timeout=0
 EOF
-'
+"
+
 echo "✅ Live user created (autologin enabled)."
 
+# ================================================================
+# 🎨 APPLY SOLVIONYX BRANDING
+# ================================================================
+echo "🎨 Applying Solvionyx branding..."
+sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds"
+sudo mkdir -p "$CHROOT_DIR/usr/share/images/desktop-base"
+
+if [ -f "$SOLVIONYX_BG_PATH" ]; then
+  sudo cp "$SOLVIONYX_BG_PATH" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-aurora.jpg"
+fi
+
+if [ -f "$SOLVIONYX_LOGO_PATH" ]; then
+  sudo cp "$SOLVIONYX_LOGO_PATH" "$CHROOT_DIR/usr/share/images/desktop-base/solvionyx-logo.png"
+fi
+
+# ================================================================
+# 🧠 INJECT GTK “WELCOME TO SOLVIONYX OS” APP
+# ================================================================
 echo "🧠 Installing Welcome to Solvionyx OS GTK app..."
 
 WELCOME_SRC="solvionyx-welcome"
 WELCOME_DST="$CHROOT_DIR/usr/share/solvionyx"
 
+# Ensure directory exists before copying
+sudo install -d -m 755 -o root -g root "$WELCOME_DST"
+
 if [ -d "$WELCOME_SRC" ]; then
-  echo "📦 Found Welcome app source — proceeding with install..."
-  sudo mkdir -p "$WELCOME_DST"
-  sudo cp -r "$WELCOME_SRC" "$WELCOME_DST/"
+  echo "📦 Found Welcome app source — injecting into chroot..."
+  sudo cp -r "$WELCOME_SRC/"* "$WELCOME_DST/"
   sudo chown -R root:root "$WELCOME_DST"
   sudo chmod -R 755 "$WELCOME_DST"
+
+  # Make executable if present
   if [ -f "$WELCOME_DST/welcome-solvionyx.sh" ]; then
-    chmod +x "$WELCOME_DST/welcome-solvionyx.sh"
+    sudo chmod +x "$WELCOME_DST/welcome-solvionyx.sh"
   fi
-  mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
-  cat >"$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" <<EOF
+
+  # Create autostart entry that only runs once on first boot
+  sudo install -d -m 755 -o root -g root "$CHROOT_DIR/etc/xdg/autostart"
+  cat <<'EOF' | sudo tee "$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" >/dev/null
 [Desktop Entry]
 Type=Application
 Name=Welcome to Solvionyx OS
-Exec=/usr/share/solvionyx/welcome-solvionyx.sh
+Exec=/usr/share/solvionyx/welcome-solvionyx.sh --once
 X-GNOME-Autostart-enabled=true
 NoDisplay=false
 EOF
-  echo "✅ GTK Welcome app installed successfully."
-else
-  echo "⚠️ Warning: 'solvionyx-welcome' folder not found. Skipping Welcome app installation."
-fi
 
-# -------- BRANDING + GRUB BACKGROUND ------------------------
-sudo chroot "$CHROOT_DIR" /bin/bash -c "
-  echo 'PRETTY_NAME=\"$BRAND — Aurora ($EDITION Edition)\"' > /etc/os-release
-  echo 'ID=solvionyx' >> /etc/os-release
-  echo 'HOME_URL=\"https://solviony.com\"' >> /etc/os-release
-"
-if [ -f "$BG_FILE" ]; then
-  sudo mkdir -p "$ISO_DIR/boot/grub"
-  sudo cp "$BG_FILE" "$ISO_DIR/boot/grub/solvionyx-bg.jpg"
-fi
-echo "🎨 Branding applied."
-
-# -------- CLEANUP APT CACHE --------------------------------
-sudo chroot "$CHROOT_DIR" /bin/bash -c "apt-get clean && rm -rf /var/lib/apt/lists/*"
-
-# -------- SQUASHFS -----------------------------------------
-sudo mksquashfs "$CHROOT_DIR" "$ISO_DIR/live/filesystem.squashfs" -e boot
-
-# -------- KERNEL + INITRD ----------------------------------
-KERNEL_PATH=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
-INITRD_PATH=$(find "$CHROOT_DIR/boot" -name "initrd.img-*" | head -n 1)
-sudo cp "$KERNEL_PATH" "$ISO_DIR/live/vmlinuz"
-sudo cp "$INITRD_PATH" "$ISO_DIR/live/initrd.img"
-
-# -------- BOOTLOADERS --------------------------------------
-sudo mkdir -p "$ISO_DIR/isolinux"
-cat <<EOF | sudo tee "$ISO_DIR/isolinux/isolinux.cfg" >/dev/null
-UI menu.c32
-PROMPT 0
-TIMEOUT 50
-DEFAULT live
-
-LABEL live
-  menu label ^Start $BRAND — Aurora ($EDITION)
-  kernel /live/vmlinuz
-  append initrd=/live/initrd.img boot=live quiet splash
-EOF
-sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
-sudo cp /usr/lib/syslinux/modules/bios/* "$ISO_DIR/isolinux/" || true
-
-# -------- GRUB EFI SUPPORT ---------------------------------
-sudo mkdir -p "$ISO_DIR/boot/grub"
-sudo grub-mkstandalone \
-  -O x86_64-efi \
-  -o "$ISO_DIR/boot/grub/efi.img" \
-  boot/grub/grub.cfg=/dev/null
-
-# -------- SOLVIONYX FIRST-BOOT SETUP WIZARD ----------------
-echo "⚙️ Adding Solvionyx setup wizard..."
-sudo chroot "$CHROOT_DIR" /bin/bash -c '
-  set -e
-  apt-get update
-  apt-get install -y python3 python3-gi gir1.2-gtk-3.0 dbus-x11 xauth xterm fonts-dejavu
-  mkdir -p /usr/local/sbin /usr/local/bin /usr/share/polkit-1/actions /etc/xdg/autostart /var/lib/solvionyx
-'
-
-# Helper
-sudo tee "$CHROOT_DIR/usr/local/sbin/solvionyx-setup-helper.sh" >/dev/null <<'EOF'
+  # Add “once-only” logic inside user profile to disable after first run
+  sudo bash -c "cat > $CHROOT_DIR/usr/share/solvionyx/welcome-once.sh" <<'EOL'
 #!/bin/bash
-set -e
-cmd="$1"
-case "$cmd" in
-  create-admin)
-    user="$2"; pass="$3"
-    id -u "$user" >/dev/null 2>&1 || adduser --disabled-password --gecos "" "$user"
-    echo "${user}:${pass}" | chpasswd
-    usermod -aG sudo,adm,audio,video,plugdev,netdev "$user"
+FLAG_FILE="$HOME/.config/.welcome_shown"
+if [ ! -f "$FLAG_FILE" ]; then
+    /usr/share/solvionyx/welcome-solvionyx.sh
+    mkdir -p "$(dirname "$FLAG_FILE")"
+    touch "$FLAG_FILE"
+fi
+EOL
+  sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-once.sh"
+
+  # Replace Exec to use the once-only wrapper
+  sudo sed -i 's|welcome-solvionyx.sh --once|/usr/share/solvionyx/welcome-once.sh|' "$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop"
+
+  echo "✅ GTK Welcome app injected and configured for one-time launch."
+else
+  echo "⚠️ Warning: 'solvionyx-welcome' folder not found. Skipping Welcome app install."
+fi
+
+# ================================================================
+# 🧩 PER-DE DEFAULTS (GNOME / XFCE / KDE)
+# ================================================================
+echo "🧩 Set per-DE defaults"
+sudo chroot "$CHROOT_DIR" bash -c "
+case '$EDITION' in
+  gnome)
+    systemctl set-default graphical.target
     ;;
-  set-hostname)
-    newh="$2"
-    echo "$newh" >/etc/hostname
-    sed -i "s/127\.0\.1\.1.*/127.0.1.1\t${newh}/" /etc/hosts || true
-    hostnamectl set-hostname "$newh" || true
+  xfce)
+    apt-get install -y task-xfce-desktop
     ;;
-  finalize)
-    touch /var/lib/solvionyx/firstboot.done
+  kde)
+    apt-get install -y task-kde-desktop
     ;;
 esac
-EOF
-sudo chmod 755 "$CHROOT_DIR/usr/local/sbin/solvionyx-setup-helper.sh"
+"
 
-# Polkit policy
-sudo tee "$CHROOT_DIR/usr/share/polkit-1/actions/com.solvionyx.setup.policy" >/dev/null <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<policyconfig>
-  <action id="com.solvionyx.setup">
-    <description>Solvionyx Setup Wizard</description>
-    <message>Authorize Solvionyx Setup changes</message>
-    <defaults>
-      <allow_any>auth_admin</allow_any>
-      <allow_inactive>auth_admin</allow_inactive>
-      <allow_active>auth_admin</allow_active>
-    </defaults>
-  </action>
-</policyconfig>
-EOF
+# ================================================================
+# 💿 BUILD ISO IMAGE
+# ================================================================
+echo "💿 Building Solvionyx OS ISO..."
+sudo mkdir -p "$ISO_DIR/live"
+sudo mksquashfs "$CHROOT_DIR" "$ISO_DIR/live/filesystem.squashfs" -e boot
 
-# Wizard Python app
-sudo tee "$CHROOT_DIR/usr/local/bin/solvionyx-setup.py" >/dev/null <<'EOF'
-#!/usr/bin/env python3
-import gi, os, subprocess
-gi.require_version("Gtk","3.0")
-from gi.repository import Gtk, Gdk
-FLAG="/var/lib/solvionyx/firstboot.done"
-BRAND="Solvionyx OS"
+sudo cp "$CHROOT_DIR/boot/vmlinuz"* "$ISO_DIR/live/vmlinuz"
+sudo cp "$CHROOT_DIR/boot/initrd"* "$ISO_DIR/live/initrd.img"
 
-def run(cmd):
-    subprocess.run(["pkexec","/usr/local/sbin/solvionyx-setup-helper.sh"]+cmd, check=True)
-
-class Setup(Gtk.Window):
-    def __init__(self):
-        Gtk.Window.__init__(self,title=f"{BRAND} Setup")
-        self.fullscreen()
-        css=Gtk.CssProvider()
-        css.load_from_data(b"* {background:#0b1220;color:white;font-family:Cantarell;} button{background:#287bff;color:white;padding:10px;border-radius:8px;}")
-        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        box=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=10,margin=30)
-        title=Gtk.Label(label=f"Welcome to {BRAND} Aurora"); title.set_name("title")
-        box.pack_start(title,False,False,10)
-        self.user=Gtk.Entry(); self.user.set_placeholder_text("Admin username")
-        self.passw=Gtk.Entry(); self.passw.set_placeholder_text("Password"); self.passw.set_visibility(False)
-        self.host=Gtk.Entry(); self.host.set_placeholder_text("Computer name (hostname)")
-        for w in [self.user,self.passw,self.host]: box.pack_start(w,False,False,5)
-        btn=Gtk.Button(label="Create account and start")
-        btn.connect("clicked",self.go)
-        box.pack_start(btn,False,False,10)
-        self.add(box)
-    def go(self,*_):
-        u=self.user.get_text(); p=self.passw.get_text(); h=self.host.get_text()
-        if not u or not p: return
-        run(["create-admin",u,p])
-        if h: run(["set-hostname",h])
-        run(["finalize"])
-        self.destroy()
-
-if __name__=="__main__":
-    if not os.path.exists(FLAG):
-        w=Setup(); w.connect("destroy",Gtk.main_quit); w.show_all(); Gtk.main()
-EOF
-sudo chmod 755 "$CHROOT_DIR/usr/local/bin/solvionyx-setup.py"
-
-# Autostart
-sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvionyx-setup.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Solvionyx Setup
-Exec=/usr/local/bin/solvionyx-setup.py
-OnlyShowIn=GNOME;XFCE;KDE;
-X-GNOME-Autostart-enabled=true
+cat >"$ISO_DIR/isolinux/isolinux.cfg" <<EOF
+UI menu.c32
+PROMPT 0
+MENU TITLE Solvionyx OS Aurora ($EDITION)
+TIMEOUT 50
+LABEL live
+  MENU LABEL Start Solvionyx OS Aurora ($EDITION)
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd.img boot=live quiet splash
 EOF
 
-echo "✅ Setup wizard installed."
-
-# -------- ISO CREATION -------------------------------------
-xorriso -as mkisofs \
-  -o "$OUTPUT_DIR/$ISO_NAME" \
+xorriso -as mkisofs -iso-level 3 -o "$OUTPUT_DIR/$ISO_NAME" \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-  -c isolinux/boot.cat \
-  -b isolinux/isolinux.bin \
-  -no-emul-boot -boot-load-size 4 -boot-info-table \
-  -eltorito-alt-boot \
-  -e boot/grub/efi.img -no-emul-boot -isohybrid-gpt-basdat \
-  -V "Solvionyx_Aurora_${EDITION}" \
-  "$ISO_DIR"
+  -c isolinux/boot.cat -b isolinux/isolinux.bin \
+  -no-emul-boot -boot-load-size 4 -boot-info-table "$ISO_DIR"
 
-xz -T0 -9e "$OUTPUT_DIR/$ISO_NAME"
-sha256sum "$OUTPUT_DIR/$ISO_NAME.xz" > "$OUTPUT_DIR/SHA256SUMS.txt"
+xz -T2 -5 "$OUTPUT_DIR/$ISO_NAME"
 
-echo "✅ ISO ready at $OUTPUT_DIR/$ISO_NAME.xz"
-echo "==========================================================="
-echo "🎉 $BRAND Aurora ($EDITION) build complete."
-echo "==========================================================="
+echo "✅ Build complete — ISO ready: $OUTPUT_DIR/$ISO_NAME.xz"
