@@ -85,8 +85,15 @@ sudo chroot "$CHROOT_DIR" /bin/bash -c "
 "
 
 # -----------------------------------------------------------
-# 💡 Inject GTK3 Welcome App
-cat > solvionyx-welcome-deb/usr/share/solvionyx/welcome-solvionyx.sh <<'EOF'
+# 💡 Inject GTK3 Welcome App (auto-installer selector)
+echo "💡 Injecting Solvionyx GTK3 Welcome App..."
+
+# Ensure build path exists
+sudo mkdir -p "$CHROOT_DIR/usr/share/solvionyx"
+sudo mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
+
+# Create app script
+sudo tee "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh" >/dev/null <<'EOF'
 #!/bin/bash
 FLAG_FILE="$HOME/.config/.welcome_shown"
 if [ -f "$FLAG_FILE" ]; then exit 0; fi
@@ -154,11 +161,13 @@ class SolvionyxFirstBoot(Gtk.Window):
         btn_install.connect("clicked", self.launch_installer)
         btn_try = Gtk.Button(label="🧠 Try Live Environment")
         btn_try.connect("clicked", self.close_app)
+        btn_learn = Gtk.Button(label="🌐 Learn More")
+        btn_learn.connect("clicked", lambda w: webbrowser.open('https://solviony.com/page/os#features'))
 
         btn_box = Gtk.HBox(spacing=15)
         btn_box.pack_start(btn_install, True, True, 5)
         btn_box.pack_start(btn_try, True, True, 5)
-
+        btn_box.pack_start(btn_learn, True, True, 5)
         vbox.pack_end(btn_box, False, False, 5)
 
     def launch_installer(self, widget):
@@ -177,6 +186,22 @@ win.show_all()
 Gtk.main()
 PYGTK
 EOF
+
+sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh"
+
+# Create autostart entry
+sudo tee "$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" >/dev/null <<EOF
+[Desktop Entry]
+Type=Application
+Exec=/usr/share/solvionyx/welcome-solvionyx.sh
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Welcome to Solvionyx OS
+Comment=Welcome and Setup for Solvionyx OS Aurora
+EOF
+
+echo "✅ GTK3 Welcome App injected successfully!"
 
 # -----------------------------------------------------------
 # 🧹 Cleanup
