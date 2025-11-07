@@ -95,19 +95,31 @@ echo "✅ Live user created (autologin enabled)."
 
 echo "🧠 Installing Welcome to Solvionyx OS GTK app..."
 
-sudo mkdir -p "$CHROOT_DIR/usr/share/solvionyx"
-sudo cp -r solvionyx-welcome "$CHROOT_DIR/usr/share/solvionyx/"
-sudo chown -R root:root "$CHROOT_DIR/usr/share/solvionyx"
-sudo chmod -R 755 "$CHROOT_DIR/usr/share/solvionyx"
-chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh"
-mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
-cat > "$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" <<EOF
+WELCOME_SRC="solvionyx-welcome"
+WELCOME_DST="$CHROOT_DIR/usr/share/solvionyx"
+
+if [ -d "$WELCOME_SRC" ]; then
+  echo "📦 Found Welcome app source — proceeding with install..."
+  sudo mkdir -p "$WELCOME_DST"
+  sudo cp -r "$WELCOME_SRC" "$WELCOME_DST/"
+  sudo chown -R root:root "$WELCOME_DST"
+  sudo chmod -R 755 "$WELCOME_DST"
+  if [ -f "$WELCOME_DST/welcome-solvionyx.sh" ]; then
+    chmod +x "$WELCOME_DST/welcome-solvionyx.sh"
+  fi
+  mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
+  cat >"$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" <<EOF
 [Desktop Entry]
+Type=Application
 Name=Welcome to Solvionyx OS
 Exec=/usr/share/solvionyx/welcome-solvionyx.sh
-Type=Application
 X-GNOME-Autostart-enabled=true
+NoDisplay=false
 EOF
+  echo "✅ GTK Welcome app installed successfully."
+else
+  echo "⚠️ Warning: 'solvionyx-welcome' folder not found. Skipping Welcome app installation."
+fi
 
 # -------- BRANDING + GRUB BACKGROUND ------------------------
 sudo chroot "$CHROOT_DIR" /bin/bash -c "
