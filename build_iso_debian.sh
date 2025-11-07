@@ -83,21 +83,19 @@ sudo chroot "$CHROOT_DIR" /bin/bash -c "
   echo 'HOME_URL=\"https://solviony.com/page/os\"' >> /etc/os-release
   echo 'SUPPORT_URL=\"mailto:dev@solviony.com\"' >> /etc/os-release
 "
-
 # -----------------------------------------------------------
 # 💡 Inject GTK3 Welcome App (auto-installer selector)
-echo "💡 Injecting Solvionyx GTK3 Welcome App..."
+echo "💡 Adding post-install Welcome to Solvionyx OS app..."
 
-# Ensure build path exists
-sudo mkdir -p "$CHROOT_DIR/usr/share/solvionyx"
-sudo mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
+sudo bash -c "
+  mkdir -p '$CHROOT_DIR/usr/share/solvionyx'
+  mkdir -p '$CHROOT_DIR/etc/xdg/autostart'
 
-# Create app script
-sudo tee "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh" >/dev/null <<'EOF'
+  cat > '$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh' <<'EOF'
 #!/bin/bash
-FLAG_FILE="$HOME/.config/.welcome_shown"
-if [ -f "$FLAG_FILE" ]; then exit 0; fi
-mkdir -p "$(dirname "$FLAG_FILE")"; touch "$FLAG_FILE"
+FLAG_FILE=\"\$HOME/.config/.welcome_shown\"
+if [ -f \"\$FLAG_FILE\" ]; then exit 0; fi
+mkdir -p \"\$(dirname \"\$FLAG_FILE\")\"; touch \"\$FLAG_FILE\"
 
 if ! dpkg -s python3-gi gir1.2-gtk-3.0 >/dev/null 2>&1; then
   sudo apt-get update -qq && sudo apt-get install -y python3-gi gir1.2-gtk-3.0 -qq
@@ -105,18 +103,18 @@ fi
 
 python3 - <<'PYGTK'
 import gi, os, subprocess, webbrowser
-gi.require_version("Gtk", "3.0")
+gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk
 
 class SolvionyxFirstBoot(Gtk.Window):
     def __init__(self):
-        Gtk.Window.__init__(self, title="Welcome to Solvionyx OS")
+        Gtk.Window.__init__(self, title='Welcome to Solvionyx OS')
         self.set_default_size(900, 600)
-        self.modify_bg(Gtk.StateType.NORMAL, Gdk.color_parse("#0B1220"))
+        self.modify_bg(Gtk.StateType.NORMAL, Gdk.color_parse('#0B1220'))
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_border_width(40)
 
-        css = b"""
+        css = b'''
         window {
             background-image: linear-gradient(135deg, #000428, #004e92);
             color: #FFFFFF;
@@ -131,7 +129,7 @@ class SolvionyxFirstBoot(Gtk.Window):
         button:hover { background-color: #532dd6; }
         label.title { font-size: 30px; font-weight: 800; }
         label.subtitle { font-size: 18px; font-weight: 400; color: #d0d0d0; }
-        """
+        '''
         style_provider = Gtk.CssProvider()
         style_provider.load_from_data(css)
         Gtk.StyleContext.add_provider_for_screen(
@@ -143,26 +141,25 @@ class SolvionyxFirstBoot(Gtk.Window):
         vbox = Gtk.VBox(spacing=25)
         self.add(vbox)
 
-        # Logo
-        logo_path = "/usr/share/images/desktop-base/solvionyx-logo.png"
+        logo_path = '/usr/share/images/desktop-base/solvionyx-logo.png'
         if os.path.exists(logo_path):
             image = Gtk.Image.new_from_file(logo_path)
             image.set_pixel_size(180)
             vbox.pack_start(image, False, False, 10)
 
-        title = Gtk.Label(label="Welcome to Solvionyx OS Aurora")
-        title.set_name("title")
-        subtitle = Gtk.Label(label="The Engine Behind the Vision.")
-        subtitle.set_name("subtitle")
+        title = Gtk.Label(label='Welcome to Solvionyx OS Aurora')
+        title.set_name('title')
+        subtitle = Gtk.Label(label='The Engine Behind the Vision.')
+        subtitle.set_name('subtitle')
         vbox.pack_start(title, False, False, 5)
         vbox.pack_start(subtitle, False, False, 10)
 
-        btn_install = Gtk.Button(label="💽 Install Solvionyx OS")
-        btn_install.connect("clicked", self.launch_installer)
-        btn_try = Gtk.Button(label="🧠 Try Live Environment")
-        btn_try.connect("clicked", self.close_app)
-        btn_learn = Gtk.Button(label="🌐 Learn More")
-        btn_learn.connect("clicked", lambda w: webbrowser.open('https://solviony.com/page/os#features'))
+        btn_install = Gtk.Button(label='💽 Install Solvionyx OS')
+        btn_install.connect('clicked', self.launch_installer)
+        btn_try = Gtk.Button(label='🧠 Try Live Environment')
+        btn_try.connect('clicked', self.close_app)
+        btn_learn = Gtk.Button(label='🌐 Learn More')
+        btn_learn.connect('clicked', lambda w: webbrowser.open('https://solviony.com/page/os#features'))
 
         btn_box = Gtk.HBox(spacing=15)
         btn_box.pack_start(btn_install, True, True, 5)
@@ -171,9 +168,9 @@ class SolvionyxFirstBoot(Gtk.Window):
         vbox.pack_end(btn_box, False, False, 5)
 
     def launch_installer(self, widget):
-        for candidate in ["calamares", "ubiquity"]:
-            if subprocess.call(["which", candidate], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
-                subprocess.Popen(["sudo", candidate])
+        for candidate in ['calamares', 'ubiquity']:
+            if subprocess.call(['which', candidate], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+                subprocess.Popen(['sudo', candidate])
                 break
         self.destroy()
 
@@ -181,16 +178,15 @@ class SolvionyxFirstBoot(Gtk.Window):
         self.destroy()
 
 win = SolvionyxFirstBoot()
-win.connect("destroy", Gtk.main_quit)
+win.connect('destroy', Gtk.main_quit)
 win.show_all()
 Gtk.main()
 PYGTK
 EOF
 
-sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh"
+  chmod +x '$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh'
 
-# Create autostart entry
-sudo tee "$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" >/dev/null <<EOF
+  cat > '$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop' <<EOF
 [Desktop Entry]
 Type=Application
 Exec=/usr/share/solvionyx/welcome-solvionyx.sh
@@ -200,6 +196,7 @@ X-GNOME-Autostart-enabled=true
 Name=Welcome to Solvionyx OS
 Comment=Welcome and Setup for Solvionyx OS Aurora
 EOF
+"
 
 echo "✅ GTK3 Welcome App injected successfully!"
 
