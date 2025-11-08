@@ -91,7 +91,21 @@ jobs:
           ./build_iso_debian.sh "${{ matrix.edition }}"
 
       # ---------------------------------------------------
-      - name: ✨ Inject GTK “Welcome to Solvionyx OS” App (Dynamic)
+      
+      # ---------------------------------------------------
+      - name: 📦 Ensure installer present
+        run: |
+          set -euo pipefail
+          case "${{ matrix.edition }}" in
+            gnome|xfce)
+              sudo chroot solvionyx_build/chroot bash -lc 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq calamares'
+              ;;
+            kde)
+              sudo chroot solvionyx_build/chroot bash -lc 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ubiquity'
+              ;;
+          esac
+          echo "✅ Installer ensured for edition ${{ matrix.edition }}"
+- name: ✨ Inject GTK “Welcome to Solvionyx OS” App (Dynamic)
         shell: bash
         env:
           CHROOT_DIR: solvionyx_build/chroot
