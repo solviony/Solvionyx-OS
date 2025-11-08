@@ -85,38 +85,52 @@ jobs:
       - name: ✨ Inject GTK “Welcome to Solvionyx OS” App
         run: |
           echo "🚀 Adding post-install Welcome to Solvionyx OS app..."
-          mkdir -p solvionyx_build/chroot/usr/share/solvionyx-welcome
-          mkdir -p solvionyx_build/chroot/usr/share/applications
-          mkdir -p solvionyx_build/chroot/etc/xdg/autostart
 
-          cat <<'EOF' > solvionyx_build/chroot/usr/share/solvionyx-welcome/welcome.py
+          CHROOT_DIR="solvionyx_build/chroot"
+          sudo install -d -m 755 "$CHROOT_DIR/usr/share/solvionyx-welcome"
+          sudo install -d -m 755 "$CHROOT_DIR/usr/share/applications"
+          sudo install -d -m 755 "$CHROOT_DIR/etc/xdg/autostart"
+
+          sudo tee "$CHROOT_DIR/usr/share/solvionyx-welcome/welcome.py" >/dev/null <<'EOF'
           #!/usr/bin/env python3
-          import gi
+          import gi, subprocess, webbrowser, os
           gi.require_version("Gtk", "3.0")
           from gi.repository import Gtk
 
           class Welcome(Gtk.Window):
               def __init__(self):
                   super().__init__(title="Welcome to Solvionyx OS")
-                  self.set_default_size(600, 400)
-                  self.set_border_width(20)
-                  box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+                  self.set_default_size(900, 600)
+                  self.set_border_width(24)
+                  box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
                   self.add(box)
 
                   title = Gtk.Label()
-                  title.set_markup("<span font='22' weight='bold'>🌌 Welcome to Solvionyx OS</span>")
+                  title.set_markup("<span font='22' weight='bold'>🌌 Welcome to Solvionyx OS — Aurora</span>")
                   subtitle = Gtk.Label(label="The Engine Behind the Vision.\nLet's get you started.")
                   subtitle.set_justify(Gtk.Justification.CENTER)
 
-                  start_button = Gtk.Button(label="Get Started")
-                  start_button.connect("clicked", self.on_get_started)
+                  b1 = Gtk.Button(label="💽 Install Solvionyx OS")
+                  b2 = Gtk.Button(label="🧠 Try Live Environment")
+                  b3 = Gtk.Button(label="🌐 Learn More")
+
+                  b1.connect("clicked", self.install)
+                  b2.connect("clicked", lambda _w: self.destroy())
+                  b3.connect("clicked", lambda _w: webbrowser.open("https://solviony.com/page/os"))
 
                   box.pack_start(title, False, False, 10)
                   box.pack_start(subtitle, False, False, 10)
-                  box.pack_start(start_button, False, False, 15)
 
-              def on_get_started(self, widget):
-                  Gtk.main_quit()
+                  row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                  for b in (b1, b2, b3):
+                      row.pack_start(b, True, True, 0)
+                  box.pack_end(row, False, False, 15)
+
+              def install(self, _w):
+                  for c in ("calamares","ubiquity"):
+                      if subprocess.call(["which", c], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+                          subprocess.Popen(["sudo", c]); break
+                  self.destroy()
 
           if __name__ == "__main__":
               win = Welcome()
@@ -125,9 +139,9 @@ jobs:
               Gtk.main()
           EOF
 
-          chmod +x solvionyx_build/chroot/usr/share/solvionyx-welcome/welcome.py
+          sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx-welcome/welcome.py"
 
-          cat <<'EOF' > solvionyx_build/chroot/usr/share/applications/solvionyx-welcome.desktop
+          sudo tee "$CHROOT_DIR/usr/share/applications/solvionyx-welcome.desktop" >/dev/null <<'EOF'
           [Desktop Entry]
           Name=Welcome to Solvionyx OS
           Exec=/usr/share/solvionyx-welcome/welcome.py
@@ -138,8 +152,8 @@ jobs:
           Categories=Utility;System;
           EOF
 
-          cp solvionyx_build/chroot/usr/share/applications/solvionyx-welcome.desktop \
-             solvionyx_build/chroot/etc/xdg/autostart/solvionyx-welcome.desktop
+          sudo cp "$CHROOT_DIR/usr/share/applications/solvionyx-welcome.desktop" \
+                  "$CHROOT_DIR/etc/xdg/autostart/solvionyx-welcome.desktop"
 
           echo "✅ GTK Welcome App successfully injected."
 
