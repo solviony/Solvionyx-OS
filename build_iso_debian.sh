@@ -10,7 +10,7 @@ set -euo pipefail
 #   - Solvionyx OS branding (no Debian visuals)
 #   - Auto-login live session (no password prompt)
 #   - First-boot GTK "Welcome to Solvionyx OS" app
-#   - Calamares / Ubiquity installer availability
+#   - Calamares installer on ALL editions
 #   - Optional upload to Google Cloud Storage
 # ==========================================================
 
@@ -58,7 +58,7 @@ fi
 if [ ! -f "$LOGO_FILE" ]; then
   echo "⚠️ Missing ${LOGO_FILE} — generating fallback Solvionyx logo..."
   convert -size 512x128 xc:'#0b1220' -gravity center \
-    -fill '#6f3bff' -pointsize 40 -annotate 0 'SOLVIONYX OS' "$LOGO_FILE"
+    -fill '#6f3bff' -pointsize 40 -annotate 0 "${OS_NAME^^}" "$LOGO_FILE"
 fi
 
 if [ ! -f "$BG_FILE" ]; then
@@ -83,7 +83,9 @@ sudo chroot "$CHROOT_DIR" /bin/bash -lc "
     grub-pc-bin grub-efi-amd64-bin grub-common \
     network-manager sudo nano vim xz-utils curl wget rsync \
     plymouth plymouth-themes plymouth-label \
-    locales dbus
+    locales dbus \
+    software-properties-common \
+    python3-gi gir1.2-gtk-3.0
 "
 
 echo "🗣️ Configuring locale (en_US.UTF-8)..."
@@ -95,30 +97,30 @@ sudo chroot "$CHROOT_DIR" /bin/bash -lc "
 
 echo "✅ Base system installed."
 
-# -------- INSTALL DESKTOP + INSTALLER ----------------------
-echo "🧠 Installing desktop environment + installer (${EDITION})..."
+# -------- INSTALL DESKTOP + CALAMARES INSTALLER ------------
+echo "🧠 Installing desktop environment + Calamares (${EDITION})..."
 sudo chroot "$CHROOT_DIR" /bin/bash -lc "
   set -e
   export DEBIAN_FRONTEND=noninteractive
+
+  # Common Calamares stack (single installer for ALL editions)
+  CALAMARES_PKGS='calamares calamares-settings-debian qml-module-qtquick-controls qml-module-qtquick-controls2 qml-module-qtquick-layouts qml-module-qt-labs-platform'
 
   case '${EDITION}' in
     gnome)
       apt-get install -y -qq \
         task-gnome-desktop gdm3 gnome-terminal \
-        python3-gi gir1.2-gtk-3.0 \
-        calamares
+        \$CALAMARES_PKGS
       ;;
     xfce)
       apt-get install -y -qq \
         task-xfce-desktop lightdm xfce4-terminal \
-        python3-gi gir1.2-gtk-3.0 \
-        calamares
+        \$CALAMARES_PKGS
       ;;
     kde)
       apt-get install -y -qq \
         task-kde-desktop sddm konsole \
-        python3-gi gir1.2-gtk-3.0 \
-        ubiquity
+        \$CALAMARES_PKGS
       ;;
     *)
       echo '❌ Unknown edition' >&2
@@ -127,7 +129,7 @@ sudo chroot "$CHROOT_DIR" /bin/bash -lc "
   esac
 "
 
-echo "✅ Desktop + installer packages ready."
+echo "✅ Desktop + Calamares installer ready."
 
 # -------- ADD LIVE USER + SUDO -----------------------------
 echo "👤 Creating live user 'solvionyx'..."
@@ -146,6 +148,8 @@ NAME=\"${OS_NAME}\"
 PRETTY_NAME=\"${OS_NAME} — ${OS_FLAVOR} (${EDITION} Edition)\"
 ID=solvionyx
 ID_LIKE=debian
+VERSION=\"${OS_FLAVOR}\"
+VERSION_ID=\"${VERSION_DATE}\"
 HOME_URL=\"https://solviony.com/page/os\"
 SUPPORT_URL=\"mailto:dev@solviony.com\"
 BUG_REPORT_URL=\"mailto:dev@solviony.com\"
@@ -153,6 +157,12 @@ EOF
 
   echo \"${OS_NAME} — ${OS_FLAVOR} (${EDITION} Edition)\" > /etc/issue
   echo \"\" > /etc/motd
+
+  # About screen logo for GNOME / others
+  mkdir -p /usr/share/pixmaps
+  if [ -f /usr/share/solvionyx/logo.png ]; then
+    cp /usr/share/solvionyx/logo.png /usr/share/pixmaps/distributor-logo.png || true
+  fi
 "
 
 echo "✅ Core branding applied (os-release, issue, motd)."
@@ -207,6 +217,10 @@ EOS
   cp /usr/share/solvionyx/logo.png /usr/share/plymouth/themes/solvionyx/logo.png
   cp /usr/share/backgrounds/solvionyx-default.jpg /usr/share/plymouth/themes/solvionyx/solvionyx-background.jpg
 
+  # Make Solvionyx the default plymouth theme (no Debian splash)
+  update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth 100 || true
+  update-alternatives --set default.plymouth /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth || true
+
   if [ -f /etc/plymouth/plymouthd.conf ]; then
     sed -i 's/^Theme=.*/Theme=solvionyx/' /etc/plymouth/plymouthd.conf || \
       echo 'Theme=solvionyx' >> /etc/plymouth/plymouthd.conf
@@ -244,6 +258,23 @@ logo='/usr/share/solvionyx/logo.png'
 banner-message-enable=true
 banner-message-text='${OS_NAME} — ${OS_FLAVOR}'
 EOF
+
+  # GDM greeter branding (no Debian 12 screen)
+  if [ -d /etc/gdm3 ]; then
+    cat >/etc/gdm3/greeter.dconf-defaults <<EOF
+[org/gnome/desktop/background]
+picture-uri='file:///usr/share/backgrounds/solvionyx-default.jpg'
+picture-uri-dark='file:///usr/share/backgrounds/solvionyx-default.jpg'
+
+[org/gnome/desktop/screensaver]
+picture-uri='file:///usr/share/backgrounds/solvionyx-default.jpg'
+
+[org/gnome/login-screen]
+logo='/usr/share/solvionyx/logo.png'
+banner-message-enable=true
+banner-message-text='${OS_NAME} — ${OS_FLAVOR}'
+EOF
+  fi
 
   dconf update || true
 "
@@ -292,16 +323,15 @@ EOF
 
 echo "✅ Auto-login configured for edition: ${EDITION}"
 
-# -------- POLKIT: ALLOW INSTALLER VIA PKEXEC ---------------
+# -------- POLKIT: ALLOW CALAMARES VIA PKEXEC ---------------
 echo "🛡️ Configuring polkit rule for installer..."
 sudo chroot "$CHROOT_DIR" /bin/bash -lc "
   mkdir -p /etc/polkit-1/rules.d
   cat >/etc/polkit-1/rules.d/10-solvionyx-installer.rules <<'EOR'
 polkit.addRule(function(action, subject) {
   if (subject.isInGroup('sudo')) {
-    if (action.id == 'org.kde.kdesu.readPassword' ||
-        action.id == 'org.calamares.calamares.pkexec.run' ||
-        action.id == 'com.ubuntu.uinstaller' ||
+    if (action.id == 'org.calamares.calamares.pkexec.run' ||
+        action.id == 'org.kde.kdesu.readPassword' ||
         action.id == 'org.freedesktop.udisks2.filesystem-mount-system') {
       return polkit.Result.YES;
     }
@@ -346,9 +376,10 @@ class Welcome(Gtk.Window):
         self.add(outer)
 
         title = Gtk.Label()
-        title.set_markup(f\"<span size='xx-large' weight='bold'>Welcome to {OS_NAME} — {OS_FLAVOR}</span>\")
+        # High-contrast title (visible on light or dark theme)
+        title.set_markup(f\"<span size='xx-large' weight='bold' foreground='#FFFFFF'>Welcome to {OS_NAME} — {OS_FLAVOR}</span>\")
         subtitle = Gtk.Label()
-        subtitle.set_markup(f\"<span size='large' foreground='#A9A9A9'>{TAGLINE}</span>\")
+        subtitle.set_markup(f\"<span size='large' foreground='#D0D0D0'>{TAGLINE}</span>\")
         subtitle.set_justify(Gtk.Justification.CENTER)
 
         outer.pack_start(title, False, False, 8)
@@ -369,12 +400,25 @@ class Welcome(Gtk.Window):
             btn_box.pack_start(b, True, True, 0)
 
     def on_install(self, _w):
-        for cmd in (\"calamares\", \"ubiquity\"):
-            if subprocess.call([\"which\", cmd],
-                               stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL) == 0:
-                subprocess.Popen([\"pkexec\", cmd])
-                break
+        # Calamares only (single installer for all editions)
+        cmd = \"calamares\"
+        if subprocess.call([\"which\", cmd],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL) == 0:
+            subprocess.Popen([\"pkexec\", cmd])
+        else:
+            dialog = Gtk.MessageDialog(
+                transient_for=self,
+                flags=0,
+                message_type=Gtk.MessageType.INFO,
+                buttons=Gtk.ButtonsType.OK,
+                text=\"Installer not available in this live session.\",
+            )
+            dialog.format_secondary_text(
+                \"You can continue exploring the live environment.\"
+            )
+            dialog.run()
+            dialog.destroy()
         self.destroy()
 
     def on_live(self, _w):
@@ -440,13 +484,13 @@ TIMEOUT 50
 DEFAULT live
 
 LABEL live
-  menu label ^Start ${OS_NAME} — ${OS_FLAVOR} (${EDITION})
+  menu label ^Start ${OS_NAME} - ${OS_FLAVOR} (${EDITION})
   kernel /live/vmlinuz
   append initrd=/live/initrd.img boot=live quiet splash
 EOF
 
 sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
-sudo cp /usr/lib/syslinux/modules/bios/"*" "$ISO_DIR/isolinux/" 2>/dev/null || true
+sudo cp /usr/lib/syslinux/modules/bios/* "$ISO_DIR/isolinux/" 2>/dev/null || true
 echo "✅ ISOLINUX BIOS boot configured."
 
 # -------- CREATE EFI BOOTLOADER ----------------------------
@@ -469,7 +513,7 @@ xorriso -as mkisofs \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
   -eltorito-alt-boot \
   -e boot/grub/efi.img -no-emul-boot -isohybrid-gpt-basdat \
-  -V "Solvionyx_Aurora_${EDITION}" \
+  -V "SOLVIONYX_AURORA_${EDITION^^}" \
   "$ISO_DIR"
 
 echo "✅ ISO created at: $OUTPUT_DIR/$ISO_NAME"
