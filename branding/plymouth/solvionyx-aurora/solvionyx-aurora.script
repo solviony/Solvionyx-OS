@@ -1,0 +1,6 @@
+wallpaper_image = Image("logo.png");
+screen_w = Window.GetWidth(); screen_h = Window.GetHeight();
+scale = 0.28; x = (screen_w - wallpaper_image.GetWidth()*scale)/2; y = (screen_h - wallpaper_image.GetHeight()*scale)/2;
+sprite = Sprite(wallpaper_image); sprite.SetX(x); sprite.SetY(y); sprite.SetZ(10); sprite.SetScale(scale, scale);
+fun progress_callback () { t = Plymouth.GetTime(); s = 0.28 + 0.01 * (1 + Math.Sin(t*2)); sprite.SetScale(s, s); return 0; }
+Plymouth.SetUpdateFunction(progress_callback);

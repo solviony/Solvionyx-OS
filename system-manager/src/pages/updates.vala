@@ -1,0 +1,1 @@
+public class PageUpdates : Gtk.Box { public PageUpdates() { this.append(new Gtk.Label("Updates Page (Logic placeholder)")); }}

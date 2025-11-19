@@ -1,0 +1,53 @@
+name: Build & Release Solvionyx OS Editions
+on: [workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        desktop: [gnome, xfce, kde]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils xorriso squashfs-tools genisoimage wget curl rsync debootstrap
+      - name: Build ${{ matrix.desktop }}
+        shell: bash
+        run: |
+          chmod +x build_iso_debian.sh
+          sudo bash -c "DESKTOP=${{ matrix.desktop }} ./build_iso_debian.sh"
+      - name: Upload ISO
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvionyx-OS-v4.3.8-${{ matrix.desktop }}
+          path: iso_output/*.iso
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release/
+          pattern: Solvionyx-OS-v4.3.8-*
+          merge-multiple: true
+      - run: |
+          cd release || exit 0
+          if ls *.iso >/dev/null 2>&1; then sha256sum *.iso > SHA256SUMS.txt; fi
+      - uses: softprops/action-gh-release@v1
+        with:
+          tag_name: Aurora-v4.3.8
+          name: "Solvionyx OS Aurora v4.3.8 (GNOME/XFCE/KDE)"
+          body: |
+            ✅ Aurora editions built successfully (partial release supported)
+            Debian Live auto-detection enabled
+          files: |
+            release/*.iso
+            release/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

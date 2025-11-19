@@ -1,0 +1,12 @@
+---
+windowTitle: "Solvionyx OS Aurora Installer"
+productName: "Solvionyx OS"
+version: "Aurora GNOME"
+strings:
+  welcome: "Welcome to Solvionyx OS — Aurora Edition"
+  next: "Next →"
+  back: "← Back"
+  quit: "Exit Installer"
+stylesheet: "style.qss"
+welcomeStyleCalamares: "Solvionyx"
+windowIcon: "images/logo-dark.png"

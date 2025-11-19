@@ -1,0 +1,12 @@
+# Secure Boot Integration for Solvionyx Builder
+
+Modify builder script to:
+
+1. Sign kernel:
+   sbsign --key keys/DB.key --cert keys/DB.crt $ISO_DIR/live/vmlinuz -o $ISO_DIR/live/vmlinuz
+
+2. Sign GRUB EFI binary:
+   sbsign --key keys/DB.key --cert keys/DB.crt $ISO_DIR/boot/grub/efi.img -o $ISO_DIR/boot/grub/efi.img
+
+3. Add keys to ISO for enrollment:
+   cp keys/*.crt $ISO_DIR/EFI/solvionyx/keys/

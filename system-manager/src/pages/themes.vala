@@ -1,0 +1,1 @@
+public class PageThemes : Gtk.Box { public PageThemes() { this.append(new Gtk.Label("Themes Page (Logic placeholder)")); }}

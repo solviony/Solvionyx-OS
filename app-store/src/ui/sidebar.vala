@@ -1,0 +1,1 @@
+public class Sidebar : Gtk.Box { public Sidebar() { this.append(new Gtk.Label("Sidebar")); }}

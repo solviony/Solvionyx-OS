@@ -1,0 +1,5 @@
++ label color = "4FE0B0"
++ normal_color = "E0E0E0"
++ selected_item_color = "0B0C10"
++ desktop-image: "background.png"
++ title-text: "Solvionyx OS — Aurora GNOME"

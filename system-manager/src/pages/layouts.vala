@@ -1,0 +1,1 @@
+public class PageLayouts : Gtk.Box { public PageLayouts() { this.append(new Gtk.Label("Layouts Page (Logic placeholder)")); }}

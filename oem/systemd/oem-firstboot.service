@@ -1,0 +1,11 @@
+
+[Unit]
+Description=Solvionyx OEM First Boot Service
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/share/solvionyx-oem/firstboot/firstboot.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,1 @@
+public class PageAbout : Gtk.Box { public PageAbout() { this.append(new Gtk.Label("About Page (Logic placeholder)")); }}

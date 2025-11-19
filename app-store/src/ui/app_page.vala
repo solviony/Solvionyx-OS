@@ -1,0 +1,1 @@
+public class AppPage : Gtk.Box { public AppPage() { this.append(new Gtk.Label("App Page")); }}

@@ -1,0 +1,6 @@
+iso_output/
+solvionyx_build/
+backup/
+*.save
+*.log
+*.iso

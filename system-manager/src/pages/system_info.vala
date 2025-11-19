@@ -1,0 +1,1 @@
+public class PageSystemInfo : Gtk.Box { public PageSystemInfo() { this.append(new Gtk.Label("System Info Page (Full logic placeholder)")); }}

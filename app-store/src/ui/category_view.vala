@@ -1,0 +1,1 @@
+public class CategoryView : Gtk.Box { public CategoryView() { this.append(new Gtk.Label("Category")); }}

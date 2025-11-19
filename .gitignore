@@ -1,0 +1,12 @@
+# Build artefacts
+iso_output/
+solvionyx_build/
+backup/
+*.save
+*.log
+*.iso
+custom-disk/
+solvionyx-gcs-key.json
+solvionyx-gcs-key.json
+solvionyx-gcs-key.json
+solvionyx-gcs-key.json

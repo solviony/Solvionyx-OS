@@ -1,0 +1,1 @@
+public class PageDrivers : Gtk.Box { public PageDrivers() { this.append(new Gtk.Label("Drivers Page (Logic placeholder)")); }}

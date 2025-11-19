@@ -1,0 +1,23 @@
+name: Auto Version Tag (on successful build)
+
+on:
+  workflow_run:
+    workflows: ["Build & Release Solvionyx OS Editions"]
+    types: [completed]
+
+jobs:
+  bump:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bump tag
+        run: |
+          latest=$(git tag --list 'Aurora-v*' | sed -E 's/[^0-9.]//g' | sort -V | tail -1)
+          base=${latest:-"4.3.8"}
+          IFS='.' read -r a b c <<< "$base"
+          c=$((c+1))
+          next="Aurora-v${a}.${b}.${c}"
+          echo "Next tag: $next"
+          git tag -a "$next" -m "Auto-tag $next"
+          git push origin "$next"
