@@ -1,0 +1,9 @@
+name: Test ISO Boot
+on: { workflow_dispatch: {} }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y qemu-system-x86
+      - run: echo "Boot test placeholder"

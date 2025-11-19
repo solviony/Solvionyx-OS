@@ -1,48 +1,12 @@
-name: Auto-Update Changelog (Aurora Series)
-
+name: Auto Changelog
 on:
-  workflow_run:
-    workflows: ["Build & Release Solvionyx OS Aurora (GNOME)"]
-    types: [completed]
-
-permissions:
-  contents: write
-
-env:
-  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-
+  push:
+    branches: ["main"]
 jobs:
   changelog:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Gather release info
-        id: info
-        run: |
-          TAG=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || echo "Aurora-v4.4.2")
-          DATE=$(date -u +'%Y-%m-%d')
-          echo "tag=$TAG"   >> $GITHUB_OUTPUT
-          echo "date=$DATE" >> $GITHUB_OUTPUT
-
-      - name: Append entry to CHANGELOG.md
-        run: |
-          echo -e "\n## ${{ steps.info.outputs.tag }} — ${{ steps.info.outputs.date }}" >> CHANGELOG.md
-          echo "- Automated Aurora build & release completed successfully." >> CHANGELOG.md
-          echo "- Added external/public download link to GitHub Release." >> CHANGELOG.md
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add CHANGELOG.md
-          git commit -m "docs(changelog): update for ${{ steps.info.outputs.tag }}" || true
-          git push
-
-      - name: Update latest GitHub Release body
-        run: |
-          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases/latest --jq '.id')
-          if [ -n "$RELEASE_ID" ]; then
-            BODY="✅ Automated Solvionyx OS Aurora Release\n\n**Version:** ${{ steps.info.outputs.tag }}\n**Date:** ${{ steps.info.outputs.date }}\n\nSee [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details."
-            gh api repos/${{ github.repository }}/releases/$RELEASE_ID \
-              -X PATCH -F body="$BODY"
-          fi
+      - uses: stefanzweifel/changelog-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}

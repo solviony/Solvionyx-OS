@@ -1,0 +1,13 @@
+name: Build App Store
+on:
+  push:
+    paths: ["app-store/**"]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y meson valac libgtk-4-dev libadwaita-1-dev
+      - run: cd app-store && meson setup build && meson compile -C build
+      - uses: actions/upload-artifact@v4
+        with: { name: app-store-build, path: "app-store/build/" }

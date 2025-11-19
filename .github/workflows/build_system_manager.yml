@@ -1,0 +1,13 @@
+name: Build System Manager
+on:
+  push:
+    paths: ["system-manager/**"]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y meson valac libgtk-4-dev libadwaita-1-dev
+      - run: cd system-manager && meson setup build && meson compile -C build
+      - uses: actions/upload-artifact@v4
+        with: { name: system-manager-build, path: "system-manager/build/" }

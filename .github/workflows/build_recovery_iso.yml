@@ -1,0 +1,11 @@
+name: Build Recovery ISO
+on: { workflow_dispatch: {} }
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y debootstrap squashfs-tools xorriso
+      - run: chmod +x recovery/scripts/build_recovery.sh && ./recovery/scripts/build_recovery.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: recovery-iso, path: "*.iso" }

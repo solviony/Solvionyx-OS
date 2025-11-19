@@ -1,0 +1,13 @@
+name: Sync APT Repo
+on:
+  push:
+    paths: ["apt-repo/**"]
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y dpkg-dev gzip
+      - run: chmod +x apt-repo/scripts/build_repo.sh && ./apt-repo/scripts/build_repo.sh
+      - run: chmod +x apt-repo/scripts/sign_repo.sh && ./apt-repo/scripts/sign_repo.sh
+      - run: GCS_BUCKET=solvionyx-os ./apt-repo/scripts/upload_repo.sh

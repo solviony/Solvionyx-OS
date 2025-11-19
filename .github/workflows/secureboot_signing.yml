@@ -1,0 +1,9 @@
+name: Secure Boot Signing
+on: { workflow_dispatch: {} }
+jobs:
+  sign:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y sbsigntool
+      - run: chmod +x secureboot/scripts/sign.sh && ./secureboot/scripts/sign.sh kernel

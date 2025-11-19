@@ -1,0 +1,10 @@
+name: Lint Scripts
+on:
+  push:
+    branches: ["main"]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y shellcheck && shellcheck **/*.sh || true
