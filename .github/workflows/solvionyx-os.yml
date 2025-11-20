@@ -1,0 +1,35 @@
+name: Solvionyx OS Aurora Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install base dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq \
+          debootstrap squashfs-tools xorriso mtools \
+          grub-pc-bin grub-efi-amd64-bin qemu-utils \
+          imagemagick git wget curl unzip cmake ninja-build
+
+    - name: Run Solvionyx OS Aurora Builder
+      run: |
+        chmod +x build_v2.sh
+        sudo ./build_v2.sh gnome
+
+    - name: Upload ISO Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Solvionyx-ISO
+        path: |
+          solvionyx_build_v2/output/*.iso.xz
+          solvionyx_build_v2/output/SHA256SUMS.txt
