@@ -1,2 +1,1 @@
-# OEM Mode
-Factory preload and first‑boot system.
+Placeholder for oem.md
