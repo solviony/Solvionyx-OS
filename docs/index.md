@@ -1,2 +1,1 @@
-# Welcome to Solvionyx OS — Aurora
-Full documentation index.
+Placeholder for index.md
