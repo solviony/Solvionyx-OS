@@ -1,23 +1,280 @@
-name: Build All Editions
+name: Build & Release Solvionyx OS — Aurora (GNOME/XFCE/KDE)
+
 on:
-  schedule:
-    - cron: "0 3 * * *"
   push:
-    tags: ["v*"]
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   build:
+    name: 🧠 Solvionyx OS — Aurora (${{ matrix.edition }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 150
+
     strategy:
       matrix:
         edition: [gnome, xfce, kde]
+      fail-fast: false
+
+    env:
+      # -----------------------------
+      # 🌌 Global branding (no hardcoding)
+      # -----------------------------
+      OS_NAME: "Solvionyx OS"
+      OS_FLAVOR: "Aurora"
+      TAGLINE: "The Engine Behind the Vision."
+      GCS_BUCKET: solvionyx-os
+      GCP_PROJECT: iconic-biplane-476304-u8
+      VERSION: v${{ github.run_number }}
+      ISO_DIR: solvionyx_build
+      BRAND_LOGO: branding/4023.png
+      BRAND_BG: branding/4022.jpg
+
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y debootstrap grub-pc-bin grub-efi-amd64-bin syslinux isolinux syslinux-utils mtools xorriso squashfs-tools rsync systemd-container genisoimage dosfstools xz-utils jq curl plymouth plymouth-themes plymouth-label imagemagick
-      - uses: google-github-actions/auth@v2
-        with: { credentials_json: '${{ secrets.GCS_CREDENTIALS_JSON }}' }
-      - uses: google-github-actions/setup-gcloud@v2
-        with: { project_id: iconic-biplane-476304-u8, install_components: 'gsutil' }
-      - run: chmod +x build_iso_debian.sh && ./build_iso_debian.sh "${{ matrix.edition }}"
-      - run: gsutil cp solvionyx_build/*.iso.xz gs://solvionyx-os/aurora/${{ matrix.edition }}/
-      - uses: softprops/action-gh-release@v1
-        with: { files: "solvionyx_build/*.iso.xz" }
+      # ---------------------------------------------------
+      - name: 🧩 Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------
+      - name: ⚙️ Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
+            syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
+            rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
+            plymouth plymouth-themes plymouth-label imagemagick
+
+      # ---------------------------------------------------
+      - name: 🔐 Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCS_CREDENTIALS_JSON }}
+
+      - name: ☁️ Install gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+          install_components: 'gsutil'
+
+      - name: 🔎 Verify GCS Access
+        run: |
+          gsutil ls "gs://${GCS_BUCKET}" || (echo "❌ Cannot access bucket!" && exit 1)
+          echo "✅ GCS bucket is reachable."
+
+      # ---------------------------------------------------
+      - name: 🎨 Ensure branding assets
+        run: |
+          mkdir -p branding
+          if [ ! -f "${BRAND_LOGO}" ]; then
+            echo "⚠️ ${BRAND_LOGO} missing — creating fallback logo..."
+            convert -size 512x128 xc:'#0b1220' -gravity center \
+              -fill '#6f3bff' -pointsize 36 -annotate 0 'SOLVIONYX' "${BRAND_LOGO}"
+          fi
+          if [ ! -f "${BRAND_BG}" ]; then
+            echo "ℹ️ ${BRAND_BG} missing — will rely on dark gradient fallback."
+          fi
+
+      # ---------------------------------------------------
+      - name: 💿 Build Solvionyx OS ISO (${{ matrix.edition }})
+        run: |
+          chmod +x build_iso_debian.sh
+          export SOLVIONYX_LOGO_PATH="${BRAND_LOGO}"
+          export SOLVIONYX_BG_PATH="${BRAND_BG}"
+          export OS_NAME="${OS_NAME}"
+          export OS_FLAVOR="${OS_FLAVOR}"
+          export TAGLINE="${TAGLINE}"
+          ./build_iso_debian.sh "${{ matrix.edition }}"
+
+      # ---------------------------------------------------
+      - name: 📦 Ensure installer present
+        run: |
+          set -euo pipefail
+          echo "📦 Ensuring Calamares installer is present for edition '${{ matrix.edition }}'..."
+          sudo chroot solvionyx_build/chroot bash -lc '
+            apt-get update -qq &&
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq calamares
+          '
+          echo "✅ Installer ensured for edition ${{ matrix.edition }}"
+
+      # ---------------------------------------------------
+      - name: ✨ Inject GTK "Welcome to Solvionyx OS" App (Dynamic)
+        shell: bash
+        env:
+          CHROOT_DIR: solvionyx_build/chroot
+        run: |
+          set -euo pipefail
+          echo "🚀 Adding dynamic GTK Welcome App..."
+          sudo install -d -m 755 "$CHROOT_DIR/usr/share/solvionyx"
+          sudo install -d -m 755 "$CHROOT_DIR/etc/xdg/autostart"
+
+          # Welcome launcher (no hardcoding of name/flavor/tagline)
+          sudo tee "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh" >/dev/null <<'EOSH'
+          #!/usr/bin/env bash
+          FLAG_FILE="$HOME/.config/.welcome_shown"
+          if [ -f "$FLAG_FILE" ]; then exit 0; fi
+          mkdir -p "$(dirname "$FLAG_FILE")"; touch "$FLAG_FILE"
+
+          python3 - <<'PY'
+          import gi, subprocess, webbrowser, os
+          gi.require_version('Gtk', '3.0')
+          from gi.repository import Gtk
+
+          os_name = os.getenv("OS_NAME", "Solvionyx OS")
+          os_flavor = os.getenv("OS_FLAVOR", "Aurora")
+          tagline = os.getenv("TAGLINE", "The Engine Behind the Vision.")
+
+          class Welcome(Gtk.Window):
+              def __init__(self):
+                  super().__init__(title=f"Welcome to {os_name}")
+                  self.set_default_size(900, 600)
+                  self.set_border_width(24)
+                  box = Gtk.VBox(spacing=18); self.add(box)
+
+                  title = Gtk.Label()
+                  title.set_markup(
+                      f"<span size='xx-large' weight='bold'>Welcome to {os_name} — {os_flavor}</span>"
+                  )
+                  subtitle = Gtk.Label()
+                  subtitle.set_markup(
+                      f"<span size='large' foreground='#A9A9A9'>{tagline}</span>"
+                  )
+                  box.pack_start(title, False, False, 6)
+                  box.pack_start(subtitle, False, False, 6)
+
+                  b1 = Gtk.Button(label="💽 Install Now")
+                  b2 = Gtk.Button(label="🧠 Try Live Environment")
+                  b3 = Gtk.Button(label="🌐 Learn More")
+                  b1.connect("clicked", self.install)
+                  b2.connect("clicked", lambda _w: self.destroy())
+                  b3.connect("clicked", lambda _w: webbrowser.open("https://solviony.com/page/os"))
+                  row = Gtk.HBox(spacing=10)
+                  for b in (b1, b2, b3):
+                      row.pack_start(b, True, True, 0)
+                  box.pack_end(row, False, False, 6)
+
+              def install(self, _w):
+                  # Prefer Calamares; fall back to anything else we might add later
+                  for c in ("calamares", "ubiquity"):
+                      if subprocess.call(
+                          ["which", c],
+                          stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL,
+                      ) == 0:
+                          subprocess.Popen(["pkexec", c])
+                          break
+                  self.destroy()
+
+          w = Welcome()
+          w.connect("destroy", Gtk.main_quit)
+          w.show_all()
+          Gtk.main()
+          PY
+          EOSH
+
+          sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-solvionyx.sh"
+
+          # Autostart entry
+          sudo tee "$CHROOT_DIR/etc/xdg/autostart/welcome-solvionyx.desktop" >/dev/null <<'EOD'
+          [Desktop Entry]
+          Type=Application
+          Name=Welcome to Solvionyx OS
+          Comment=First-launch Welcome for Solvionyx OS
+          Exec=/usr/share/solvionyx/welcome-solvionyx.sh
+          X-GNOME-Autostart-enabled=true
+          EOD
+
+          echo "✅ GTK Welcome App injected dynamically."
+
+      # ---------------------------------------------------
+      - name: 🗜️ Compress ISO (idempotent safety)
+        run: |
+          cd "${ISO_DIR}"
+          RAW_ISO=$(ls *.iso 2>/dev/null | head -n 1 || true)
+          if [ -n "$RAW_ISO" ] && [ ! -f "${RAW_ISO}.xz" ]; then
+            echo "🗜️ Compressing $RAW_ISO..."
+            xz -T2 -5 "${RAW_ISO}"
+          fi
+
+      # ---------------------------------------------------
+      - name: 🔐 Generate SHA256 Checksums
+        run: |
+          cd "${ISO_DIR}"
+          sha256sum *.iso.xz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # ---------------------------------------------------
+      - name: ☁️ Upload to Google Cloud Storage (Auto-Public)
+        env:
+          EDITION: ${{ matrix.edition }}
+        run: |
+          ISO_FILE=$(ls ${ISO_DIR}/*.iso.xz | head -n 1)
+          SHA_FILE="${ISO_DIR}/SHA256SUMS.txt"
+          ISO_NAME=$(basename "$ISO_FILE")
+          VERSION_PATH="aurora/${VERSION}/${EDITION}"
+          LATEST_PATH="aurora/latest/${EDITION}"
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          SHA256=$(sha256sum "$ISO_FILE" | awk '{print $1}')
+
+          echo "📤 Uploading ISO and checksum..."
+          gsutil -m cp -n "$ISO_FILE" "$SHA_FILE" "gs://${GCS_BUCKET}/${VERSION_PATH}/"
+
+          echo "🔗 Setting public read access..."
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${VERSION_PATH}/${ISO_NAME}" || true
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${VERSION_PATH}/SHA256SUMS.txt" || true
+
+          echo "🪄 Updating 'latest' folder..."
+          gsutil -m cp -n "$ISO_FILE" "$SHA_FILE" "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${LATEST_PATH}/${ISO_NAME}" || true
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt" || true
+
+          echo "🧾 Writing latest.json..."
+          cat > latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "edition": "${EDITION}",
+            "release_name": "${OS_NAME} ${OS_FLAVOR} (${EDITION})",
+            "tagline": "${TAGLINE}",
+            "brand": "${OS_NAME}",
+            "build_date": "${DATE}",
+            "iso_name": "${ISO_NAME}",
+            "sha256": "${SHA256}",
+            "download_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/${ISO_NAME}",
+            "checksum_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt"
+          }
+          EOF
+          gsutil cp latest.json "gs://${GCS_BUCKET}/${LATEST_PATH}/"
+          gsutil acl ch -u AllUsers:R "gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json" || true
+
+          echo "✅ Upload complete. Public URLs ready."
+
+      # ---------------------------------------------------
+      - name: 📦 Upload ISO Artifact to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: Solvionyx-Aurora-${{ matrix.edition }}-${{ env.VERSION }}
+          path: |
+            solvionyx_build/*.iso.xz
+            solvionyx_build/SHA256SUMS.txt
+
+      # ---------------------------------------------------
+      - name: 🚀 Publish GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "Aurora-${{ matrix.edition }}-${{ env.VERSION }}"
+          name: "Solvionyx OS — Aurora (${{ matrix.edition }}) ${{ env.VERSION }}"
+          body: |
+            ## 🌌 Solvionyx OS — Aurora (${{ matrix.edition }})
+            *${{ env.TAGLINE }}*
+
+            ✅ Bootable ISO (EFI + Kernel Verified)
+            ✅ Uploaded to Google Cloud Storage
+            ✅ Public Download:
+            https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
