@@ -1,8 +1,57 @@
-name: Auto Version Tag
-on: { workflow_dispatch: {} }
+name: Auto Version Tag (Aurora Series)
+on:
+  workflow_run:
+    workflows: ["Build & Release Solvionyx OS Aurora (GNOME)"]
+    types:
+      - completed
+
 jobs:
-  tag:
-    runs-on: ubuntu-24.04
+  bump:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - run: DATE=$(date +'%Y.%m.%d') && git tag "v$DATE" && git push origin --tags
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          latest=$(git describe --tags --abbrev=0 2>/dev/null || echo "v4.5.5")
+          echo "latest=$latest" >> $GITHUB_ENV
+          echo "Latest tag: $latest"
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          latest=${{ env.latest }}
+          base=${latest#v}
+          major=$(echo "$base" | cut -d. -f1)
+          minor=$(echo "$base" | cut -d. -f2)
+          patch=$(echo "$base" | cut -d. -f3)
+          next_patch=$((patch + 1))
+          new_tag="v${major}.${minor}.${next_patch}"
+          echo "new_tag=$new_tag" >> $GITHUB_ENV
+          echo "🔢 Bumping to $new_tag"
+
+      - name: Update changelog
+        run: |
+          echo "### Solvionyx Aurora ${{ env.new_tag }}" >> CHANGELOG.md
+          echo "- Auto-generated from successful Aurora GNOME build" >> CHANGELOG.md
+          echo "" >> CHANGELOG.md
+          git config user.email "actions@github.com"
+          git config user.name "Solvionyx AutoBuilder"
+          git add CHANGELOG.md
+          git commit -m "Auto bump to ${{ env.new_tag }} [Aurora GNOME]"
+
+      - name: Push commit
+        run: |
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Create and push Git tag
+        run: |
+          git tag -a ${{ env.new_tag }} -m "Solvionyx Aurora AutoBuilder ${{ env.new_tag }}"
+          git push origin ${{ env.new_tag }}
+
