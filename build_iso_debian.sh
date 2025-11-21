@@ -95,6 +95,37 @@ sudo chroot "$CHROOT_DIR" /bin/bash -lc "
 
 echo "✅ Base system installed."
 
+log "📦 Installing Solvy runtime deps (Python)..."
+
+sudo chroot "$CHROOT_DIR" /bin/bash -lc "
+  set -e
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq python3 python3-pip python3-gi
+"
+log "🎤 Installing Solvy AI assistant into chroot..."
+
+# Copy Solvy files staged in ./solvy into the chroot
+if [ -d "solvy" ]; then
+  sudo rsync -a solvy/ "$CHROOT_DIR"/
+else
+  log "⚠️ Solvy staging folder 'solvy/' not found, skipping."
+fi
+
+# Ensure solvy-daemon is executable
+sudo chroot "$CHROOT_DIR" /bin/bash -lc "
+  if [ -f /usr/share/solvy/solvy-daemon.py ]; then
+    chmod +x /usr/share/solvy/solvy-daemon.py
+  fi
+"
+log "⚙️ Enabling Solvy systemd service..."
+
+sudo chroot "$CHROOT_DIR" /bin/bash -lc "
+  if [ -f /usr/lib/systemd/system/solvy.service ]; then
+    systemctl enable solvy.service || true
+  fi
+"
+
 # -------- INSTALL DESKTOP + INSTALLER ----------------------
 echo "🧠 Installing desktop environment + installer (${EDITION})..."
 sudo chroot "$CHROOT_DIR" /bin/bash -lc "
