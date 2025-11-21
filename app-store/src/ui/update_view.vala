@@ -1,1 +1,0 @@
-public class UpdateView : Gtk.Box { public UpdateView() { this.append(new Gtk.Label("Updates")); }}

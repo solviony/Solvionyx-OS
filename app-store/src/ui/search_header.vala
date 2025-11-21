@@ -1,1 +1,0 @@
-public class SearchHeader : Gtk.Box { public SearchHeader() { this.append(new Gtk.Label("Search")); }}
