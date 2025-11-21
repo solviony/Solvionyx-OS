@@ -1,1 +1,0 @@
-public class PageNetwork : Gtk.Box { public PageNetwork() { this.append(new Gtk.Label("Network Page (Logic placeholder)")); }}

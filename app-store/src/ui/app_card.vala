@@ -1,1 +1,0 @@
-public class AppCard : Gtk.Box { public AppCard() { this.append(new Gtk.Label("App Card")); }}
