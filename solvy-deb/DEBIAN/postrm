@@ -1,0 +1,4 @@
+#!/bin/bash
+systemctl disable solvy.service || true
+systemctl daemon-reload
+exit 0

@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+chmod +x /usr/share/solvy/solvy-daemon.py
+chmod +x /usr/share/solvy/solvy-gui.py
+chmod +x /usr/bin/solvy
+chmod +x /usr/bin/solvy-gui
+systemctl daemon-reload
+systemctl enable solvy.service || true
+systemctl restart solvy.service || true
+exit 0

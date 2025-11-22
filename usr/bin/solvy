@@ -1,2 +1,2 @@
-#!/usr/bin/env bash
-python3 /usr/share/solvy/solvy-cli.py "$@"
+#!/bin/bash
+python3 /usr/share/solvy/solvy-daemon.py

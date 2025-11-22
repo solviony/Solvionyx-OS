@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Solvy Assistant
+Exec=solvy-gui
+Icon=solvy
+Categories=Utility;AI;Assistant;

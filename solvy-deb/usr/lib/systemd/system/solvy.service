@@ -1,11 +1,10 @@
 [Unit]
-Description=Solvy Daemon v3
+Description=Solvy AI Daemon
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/solvy-daemon
+ExecStart=/usr/bin/python3 /usr/share/solvy/solvy-daemon.py
 Restart=always
-User=root
 
 [Install]
 WantedBy=multi-user.target

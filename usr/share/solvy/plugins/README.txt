@@ -1,0 +1,1 @@
+Files for usr/share/solvy/plugins

@@ -1,0 +1,3 @@
+#!/bin/bash
+systemctl stop solvy.service || true
+exit 0

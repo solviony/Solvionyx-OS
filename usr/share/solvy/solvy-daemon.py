@@ -1,35 +1,57 @@
 #!/usr/bin/env python3
-import os, time, requests, traceback
-ENV="/etc/solvy/solvy.env"
-LOG="/var/log/solvy.log"
+import asyncio, yaml
+from aiohttp import web
 
-def load():
-    env={}
-    if os.path.exists(ENV):
-        for line in open(ENV):
-            if "=" in line:
-                k,v=line.strip().split("=",1)
-                env[k]=v.strip('"')
-    return env
+from solvy.providers import openai, claude, gemini, deepseek, ollama
+from solvy.router.router import Router
+from solvy.engine.chat_engine import ChatEngine
+from solvy.engine.streaming import StreamAggregator
+from solvy.engine.failover import ProviderFailover
+from solvy.engine.safety import SafetyFilter
+from solvy.engine.queue_manager import QueueManager
 
-def log(m):
-    with open(LOG,"a") as f: f.write(m+"\n")
+from solvy.compat import compat_chat, compat_status, compat_system
+from solvy.server.ws_server import ws_handler
+from solvy.server.http_server import http_routes
 
-def ask(prompt,env):
-    try:
-        h={"Authorization":f"Bearer {env['OPENAI_API_KEY']}"}
-        data={"model":env.get("SOLVY_MODEL","gpt-5.1"),
-              "messages":[{"role":"user","content":prompt}]}
-        r=requests.post("https://api.openai.com/v1/chat/completions",headers=h,json=data)
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        log(str(e)); log(traceback.format_exc())
-        return "Solvy Error"
+async def main():
+    with open('/usr/share/solvy/config.yml') as f:
+        cfg = yaml.safe_load(f)
 
-def main():
-    env=load()
-    log("Solvy started")
-    while True: time.sleep(5)
+    providers = {
+        "openai": openai.OpenAIProvider(cfg),
+        "claude": claude.ClaudeProvider(cfg),
+        "gemini": gemini.GeminiProvider(cfg),
+        "deepseek": deepseek.DeepSeekProvider(cfg),
+        "ollama": ollama.OllamaProvider(cfg)
+    }
 
-if __name__=="__main__": main()
+    router = Router(cfg, providers)
+    chat_engine = ChatEngine(router)
+    streaming = StreamAggregator()
+    safety = SafetyFilter()
+    queue = QueueManager()
+
+    app = web.Application()
+
+    # http
+    import solvy.compat.compat_chat as compat_chat_mod
+    import solvy.compat.compat_status as compat_status_mod
+    import solvy.compat.compat_system as compat_system_mod
+    http_routes(app, chat_engine, safety, queue, compat_system_mod, compat_status_mod)
+
+    # ws
+    async def ws(request):
+        return await ws_handler(request, chat_engine, streaming, safety, queue)
+    app.router.add_get("/v1/ws", ws)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 3278)
+    await site.start()
+    print("Solvy Daemon v3 running on 0.0.0.0:3278")
+    while True:
+        await asyncio.sleep(3600)
+
+if __name__ == "__main__":
+    asyncio.run(main())

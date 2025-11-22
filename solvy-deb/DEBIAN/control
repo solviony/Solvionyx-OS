@@ -1,0 +1,8 @@
+Package: solvy
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: Solvionyx OS Team <dev@solviony.com>
+Description: Solvy AI Assistant for Solvionyx OS
+Depends: python3, python3-gi, python3-websockets, python3-requests, gir1.2-gtk-4.0, gir1.2-adw-1, libgtk-4-bin, libadwaita-1-0
