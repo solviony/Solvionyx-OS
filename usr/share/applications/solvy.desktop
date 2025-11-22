@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Solvy Assistant
+Exec=python3 /usr/share/solvy/solvy-gui.py
+Icon=utilities-terminal
+Type=Application
+Categories=Utility;
