@@ -1,15 +1,12 @@
 [Unit]
-Description=Solvy AI Voice Assistant
-After=network.target sound.target graphical.target
+Description=Solvy AI Assistant Daemon
+After=network.target sound.target
 
 [Service]
 Type=simple
-ExecStart=/usr/share/solvy/solvy-daemon.py
-Restart=always
-RestartSec=3
-Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /usr/share/solvy/solvy-daemon.py
+Restart=on-failure
 User=solvionyx
-Group=solvionyx
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical.target

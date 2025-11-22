@@ -95,6 +95,8 @@ sudo chroot "$CHROOT_DIR" /bin/bash -lc "
 
 echo "✅ Base system installed."
 
+log() { echo "[Solvionyx] $*"; }
+
 log "📦 Installing Solvy runtime deps (Python)..."
 
 sudo chroot "$CHROOT_DIR" /bin/bash -lc "
