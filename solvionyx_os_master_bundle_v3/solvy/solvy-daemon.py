@@ -1,1 +1,0 @@
-# solvy daemon
