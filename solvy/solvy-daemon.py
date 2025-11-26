@@ -1,1 +1,1 @@
-# Solvy AI daemon placeholder
+# solvy daemon

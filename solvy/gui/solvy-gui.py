@@ -1,1 +1,1 @@
-# Advanced real GUI placeholder
+# solvy gui
