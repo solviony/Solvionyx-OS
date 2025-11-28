@@ -1,0 +1,6 @@
+[Unit]
+Description=Solvy Daemon
+[Service]
+ExecStart=/usr/bin/solvyd
+[Install]
+WantedBy=multi-user.target

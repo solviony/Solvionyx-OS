@@ -1,0 +1,12 @@
+[Unit]
+Description=Solvy AI Daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/solvyd
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target

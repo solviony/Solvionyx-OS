@@ -115,6 +115,67 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   chmod +x /usr/share/solvy/solvy-daemon.py /usr/bin/solvy || true
   systemctl enable solvy.service || true
 "
+echo "📦 Installing Solvy v3 into user-space..."
+
+# Create Solvy user-space directory
+sudo chroot "$CHROOT_DIR" /bin/bash -lc "
+  mkdir -p /home/solvionyx/.solvy
+  mkdir -p /home/solvionyx/.local/bin
+  mkdir -p /home/solvionyx/.local/share/applications
+  mkdir -p /home/solvionyx/.config/autostart
+  chown -R solvionyx:solvionyx /home/solvionyx
+"
+
+# Copy solvy .deb into chroot
+sudo mkdir -p "$CHROOT_DIR/tmp/solvy"
+sudo cp solvy_preinstall/solvy_3.0_amd64.deb "$CHROOT_DIR/tmp/solvy/"
+
+# Extract .deb manually (B2 mode)
+sudo chroot "$CHROOT_DIR" /bin/bash -lc "
+  cd /tmp/solvy
+  ar x solvy_3.0_amd64.deb
+  tar -xf data.tar.* --directory /home/solvionyx/.solvy/
+  chown -R solvionyx:solvionyx /home/solvionyx/.solvy
+"
+
+# Install launcher
+sudo chroot "$CHROOT_DIR" /bin/bash -lc "
+  echo '#!/bin/bash' > /home/solvionyx/.local/bin/solvy-gui
+  echo 'python3 /home/solvionyx/.solvy/usr/share/solvy/gui/solvy-gui.py' >> /home/solvionyx/.local/bin/solvy-gui
+  chmod +x /home/solvionyx/.local/bin/solvy-gui
+
+  echo '#!/bin/bash' > /home/solvionyx/.local/bin/solvyd
+  echo 'python3 /home/solvionyx/.solvy/usr/share/solvy/solvy-daemon.py' >> /home/solvionyx/.local/bin/solvyd
+  chmod +x /home/solvionyx/.local/bin/solvyd
+
+  chown -R solvionyx:solvionyx /home/solvionyx/.local
+"
+
+# Desktop shortcut
+sudo chroot "$CHROOT_DIR" /bin/bash -lc "
+cat >/home/solvionyx/.local/share/applications/solvy.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Solvy AI Assistant
+Exec=/home/solvionyx/.local/bin/solvy-gui
+Icon=/home/solvionyx/.solvy/usr/share/icons/hicolor/256x256/apps/solvy.png
+Terminal=false
+Categories=Utility;
+EOF
+  chown solvionyx:solvionyx /home/solvionyx/.local/share/applications/solvy.desktop
+"
+
+# Autostart
+sudo chroot "$CHROOT_DIR" /bin/bash -lc "
+cat >/home/solvionyx/.config/autostart/solvy.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Solvy AI Assistant
+Exec=/home/solvionyx/.local/bin/solvy-gui
+X-GNOME-Autostart-enabled=true
+EOF
+  chown solvionyx:solvionyx /home/solvionyx/.config/autostart/solvy.desktop
+"
 
 #######################################################################
 # DESKTOP ENVIRONMENT
@@ -148,8 +209,8 @@ PRETTY_NAME=\"$OS_NAME — $OS_FLAVOR ($EDITION Edition)\"
 ID=solvionyx
 ID_LIKE=debian
 HOME_URL=\"https://solviony.com/page/os\"
-SUPPORT_URL=\"mailto:dev@solviony.com\"
-BUG_REPORT_URL=\"mailto:dev@solviony.com\"
+SUPPORT_URL=\"mailto:deve@solviony.com\"
+BUG_REPORT_URL=\"mailto:deve@solviony.com\"
 EOF
 "
 

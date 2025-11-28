@@ -1,0 +1,1 @@
+def run(msg): return {'provider':'deepseek','reply':'demo'}

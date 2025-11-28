@@ -1,0 +1,6 @@
+
+[Desktop Entry]
+Type=Application
+Name=Solvy AI Assistant
+Exec=/usr/bin/solvy-gui
+X-GNOME-Autostart-enabled=true

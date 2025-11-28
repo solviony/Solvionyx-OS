@@ -1,0 +1,1 @@
+def route(msg): return {'provider':'openai','reply':'demo routed'}

@@ -1,0 +1,1 @@
+def log(x): print('[SOLVY]',x)
