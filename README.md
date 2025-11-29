@@ -41,6 +41,18 @@ It features a modern UI, intelligent system integration, and complete Solvionyx 
 - ☁️ **Automatic Google Cloud Storage uploads**  
 - 🔐 **Secure, reproducible ISO builds (SHA256 verified)**  
 - 🧱 **Hybrid EFI + BIOS boot support**
+- Full Solvionyx branding across GNOME, GRUB, Plymouth, Calamares, and desktop assets  
+- Automatic dark/light mode switching  
+- Solvy v3 AI engine (daemon + GUI + CLI)  
+- Aurora v4 design pack (new wallpapers, logos, icons, splash screens)  
+- System Restore boot entry  
+- OEM installation mode + First Boot Wizard  
+- Recovery environment (+ cloud restore)  
+- Secure Boot toolchain  
+- Fully integrated App Store & System Manager  
+- APT Repository builder  
+- Full CI/CD GitHub workflow suite  
+- Production-ready builder_v4
 
 ---
 
