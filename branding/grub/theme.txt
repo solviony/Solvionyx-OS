@@ -1,0 +1,8 @@
++ title-text: "Solvionyx OS — Aurora"
++ title-font: "DejaVu Sans Mono 24"
++ message-font: "DejaVu Sans Mono 16"
++ terminal-font: "DejaVu Sans Mono 14"
++ desktop-image: "background.png"
++ progress-bar: "progress_bar.png"
++ progress-bar-highlight: "progress_bar_hl.png"
++ pointer: "pointer.png"
