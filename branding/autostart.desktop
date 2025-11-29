@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome to Solvionyx OS
+Exec=/usr/share/solvionyx/welcome/welcome.sh
+X-GNOME-Autostart-enabled=true
+
