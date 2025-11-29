@@ -1,3 +1,47 @@
+# Solvionyx OS — .gitignore
+
+# Build directories
+solvionyx_build/
+iso/
+build/
+
+# Debian build files
+*.deb
+*.changes
+*.dsc
+*.buildinfo
+
+# Logs
+*.log
+*.tmp
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor configs
+*.swp
+*.swo
+
+# macOS junk
+.DS_Store
+
+# QEMU / VM outputs
+*.iso
+*.iso.xz
+*.qcow2
+
+# GitHub Actions artifacts
+artifacts/
+dist/
+
+# Node (if any future UI tools)
+node_modules/
+
+# Backup files
+*~
+
 # Build artefacts
 iso_output/
 solvionyx_build/
