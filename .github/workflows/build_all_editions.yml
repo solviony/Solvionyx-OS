@@ -1,0 +1,192 @@
+name: Build & Release Solvionyx OS — Aurora v6 Ultra
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    name: 🧠 Solvionyx OS v6 Ultra — ${{ matrix.edition }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    strategy:
+      matrix:
+        edition: [gnome, xfce, kde]
+      fail-fast: false
+
+    env:
+      OS_NAME: "Solvionyx OS"
+      OS_FLAVOR: "Aurora"
+      TAGLINE: "The Engine Behind the Vision."
+      VERSION: v${{ github.run_number }}
+
+      ISO_DIR: solvionyx_build
+      BRAND_LOGO: branding/logo/solvionyx-logo.png
+      BRAND_BG: branding/wallpapers/aurora-bg.jpg
+
+      SECUREBOOT_DIR: secureboot
+      SBAT_URL: "https://solviony.com/security/"
+
+      GCS_BUCKET: solvionyx-os
+      GCP_PROJECT: iconic-biplane-476304-u8
+
+    steps:
+
+    # ---------------------------------------------------------
+    - name: 🧩 Checkout Repository
+      uses: actions/checkout@v4
+
+    # ---------------------------------------------------------
+    - name: ⚙️ Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          debootstrap grub-pc-bin grub-efi-amd64-bin grub-common \
+          syslinux isolinux syslinux-utils mtools xorriso squashfs-tools \
+          rsync systemd-container genisoimage dosfstools xz-utils jq curl unzip \
+          plymouth plymouth-themes plymouth-label imagemagick \
+          sbsigntool efitools openssl shim-signed mokutil
+
+    # ---------------------------------------------------------
+    - name: 🔐 Generate SecureBoot Keys
+      run: |
+        mkdir -p $SECUREBOOT_DIR/sbat $SECUREBOOT_DIR/output
+
+        echo "🔑 Generating PK, KEK, DB..."
+        openssl req -new -x509 -newkey rsa:4096 -nodes \
+          -keyout $SECUREBOOT_DIR/pk.key \
+          -out $SECUREBOOT_DIR/pk.crt \
+          -days 3650 \
+          -subj "/C=US/ST=Missouri/L=Columbia/O=Solviony Inc/OU=Solvionyx OS Security/CN=Solvionyx OS PK/emailAddress=dev@solviony.com"
+
+        openssl req -new -x509 -newkey rsa:4096 -nodes \
+          -keyout $SECUREBOOT_DIR/kek.key \
+          -out $SECUREBOOT_DIR/kek.crt \
+          -days 3650 \
+          -subj "/C=US/ST=Missouri/L=Columbia/O=Solviony Inc/OU=Solvionyx OS Security/CN=Solvionyx OS KEK/emailAddress=dev@solviony.com"
+
+        openssl req -new -x509 -newkey rsa:4096 -nodes \
+          -keyout $SECUREBOOT_DIR/db.key \
+          -out $SECUREBOOT_DIR/db.crt \
+          -days 3650 \
+          -subj "/C=US/ST=Missouri/L=Columbia/O=Solviony Inc/OU=Solvionyx OS Security/CN=Solvionyx OS DB/emailAddress=dev@solviony.com"
+
+        echo "sbat,1,Solviony,Solvionyx-OS,1,${SBAT_URL}" \
+          > $SECUREBOOT_DIR/sbat/grub-sbat.txt
+
+        echo "sbat,1,Solviony,Solvionyx-OS,1,${SBAT_URL}" \
+          > $SECUREBOOT_DIR/sbat/kernel-sbat.txt
+
+    # ---------------------------------------------------------
+    - name: 🔽 Extract Shim + Signed GRUB from System
+      run: |
+        mkdir -p efi-bin
+
+        cp /usr/lib/shim/shimx64.efi.signed efi-bin/bootx64.efi
+        cp /usr/lib/shim/mmx64.efi efi-bin/
+        cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed efi-bin/grubx64.efi
+
+        echo "Extracted:"
+        ls -lh efi-bin/
+
+    # ---------------------------------------------------------
+    - name: 🎨 Ensure Branding Exists
+      run: |
+        if [ ! -f "${BRAND_LOGO}" ]; then
+          convert -size 512x128 xc:'#0b1220' -gravity center \
+              -fill '#6f3bff' -pointsize 48 \
+              -annotate 0 'SOLVIONYX' "${BRAND_LOGO}"
+        fi
+
+    # ---------------------------------------------------------
+    - name: 💿 Build Unsigned ISO
+      run: |
+        chmod +x build/builder_v6_ultra.sh
+        ./build/builder_v6_ultra.sh "${{ matrix.edition }}"
+
+    # ---------------------------------------------------------
+    - name: 🔐 SecureBoot — Sign Kernel + GRUB
+      run: |
+        UNSIGNED=$(ls solvionyx_build/*.iso | head -n 1)
+        mkdir -p signed-iso
+
+        echo "📦 Extracting ISO..."
+        xorriso -osirrox on -indev "$UNSIGNED" -extract / signed-iso/
+
+        echo "🔏 Signing GRUB..."
+        sbsign --key $SECUREBOOT_DIR/db.key \
+               --cert $SECUREBOOT_DIR/db.crt \
+               --output signed-iso/EFI/ubuntu/grubx64.efi \
+               efi-bin/grubx64.efi
+
+        echo "🔍 Patching SBAT..."
+        cp $SECUREBOOT_DIR/sbat/grub-sbat.txt signed-iso/boot/grub/grubx64.efi.sbat
+
+        echo "🔏 Signing Kernel..."
+        KERNEL=$(find signed-iso/live -name "vmlinuz*" | head -n 1)
+        sbsign --key $SECUREBOOT_DIR/db.key --cert $SECUREBOOT_DIR/db.crt \
+               --output "${KERNEL}.signed" "$KERNEL"
+        mv "${KERNEL}.signed" "$KERNEL"
+
+        echo "📦 Inserting shim..."
+        mkdir -p signed-iso/EFI/boot
+        cp efi-bin/bootx64.efi signed-iso/EFI/boot/
+        cp efi-bin/mmx64.efi signed-iso/EFI/boot/
+
+        echo "🔄 Rebuilding SecureBoot ISO..."
+        xorriso -as mkisofs \
+          -o solvionyx_build/SecureBoot-${{ matrix.edition }}-${{ env.VERSION }}.iso \
+          -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+          -c isolinux/boot.cat \
+          -b isolinux/isolinux.bin \
+          -no-emul-boot -boot-load-size 4 -boot-info-table \
+          -eltorito-alt-boot \
+          -e boot/grub/efi.img -no-emul-boot -isohybrid-gpt-basdat \
+          signed-iso/
+
+    # ---------------------------------------------------------
+    - name: 🗜️ Compress ISO + Generate Checksums
+      run: |
+        xz -T2 -9 solvionyx_build/*.iso
+        sha256sum solvionyx_build/*.xz > solvionyx_build/SHA256SUMS.txt
+
+    # ---------------------------------------------------------
+    - name: ☁️ Upload to Google Cloud Storage
+      env:
+        EDITION: ${{ matrix.edition }}
+      run: |
+        gsutil -m cp solvionyx_build/*.xz solvionyx_build/SHA256SUMS.txt \
+          gs://${GCS_BUCKET}/aurora/${VERSION}/${EDITION}/
+
+        gsutil acl ch -u AllUsers:R \
+          gs://${GCS_BUCKET}/aurora/${VERSION}/${EDITION}/*
+
+    # ---------------------------------------------------------
+    - name: 📦 Upload ISO Artifact to GitHub
+      uses: actions/upload-artifact@v4
+      with:
+        name: Solvionyx-Aurora-v6-Ultra-${{ matrix.edition }}-${{ env.VERSION }}
+        path: |
+          solvionyx_build/*.xz
+          solvionyx_build/SHA256SUMS.txt
+
+    # ---------------------------------------------------------
+    - name: 🚀 Publish GitHub Release
+      if: success()
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: "Aurora-v6-ultra-${{ matrix.edition }}-${{ env.VERSION }}"
+        name: "Solvionyx OS — Aurora v6 Ultra (${{ matrix.edition }})"
+        body: |
+          🔐 SecureBoot Enabled (shim + GRUB + Kernel signed)
+          🌌 Aurora v6 UI + Branding
+          🖥 Editions: GNOME, XFCE, KDE
+          📦 Auto-uploaded to GCS + GitHub Releases
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
