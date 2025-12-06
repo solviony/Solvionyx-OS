@@ -37,7 +37,6 @@ sudo lb config \
     --debian-installer live \
     --bootappend-live "boot=live quiet splash" \
     --linux-flavours "$OS_ARCH" \
-    --packages-list "$EDITION" \
     --apt-recommends false
 
 sudo lb build
