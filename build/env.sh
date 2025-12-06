@@ -19,11 +19,31 @@ export OS_ARCH="$(dpkg --print-architecture)"
 export BUILD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PROJECT_ROOT="$(cd "$BUILD_ROOT/.." && pwd)"
 
-# Config and branding directories
-export CONFIG_DIR="$BUILD_ROOT/configs"
-export BRANDING_DIR="$PROJECT_ROOT/branding"
-export PKG_LISTS_DIR="$BUILD_ROOT/config/package-lists"
+# ============================
+# Live-build configuration dirs
+# ============================
 
-# Output folder for ISOs
+export CONFIG_DIR="$BUILD_ROOT/config"
+export PKG_LISTS_DIR="$CONFIG_DIR/package-lists"
+
+# ============================
+# Debian Repository Mirrors
+# ============================
+
+export DEBIAN_RELEASE="bookworm"
+
+# Primary mirror
+export MIRROR="http://deb.debian.org/debian"
+
+# Security updates repository
+export MIRROR_SECURITY="http://security.debian.org/debian-security"
+
+# Recommended update mirror
+export MIRROR_UPDATES="http://deb.debian.org/debian"
+
+# ============================
+# Output directory for ISOs
+# ============================
+
 export OUTPUT_DIR="$BUILD_ROOT/output"
 mkdir -p "$OUTPUT_DIR"
