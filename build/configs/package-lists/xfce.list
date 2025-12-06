@@ -1,0 +1,10 @@
+# ==========================
+# Solvionyx OS - XFCE Edition
+# ==========================
+
+xfce4
+xfce4-terminal
+xfce4-screenshooter
+thunar
+lightdm
+lightdm-gtk-greeter

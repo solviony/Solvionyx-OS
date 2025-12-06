@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>WelcomeWindow</class>
+ <widget class="QMainWindow" name="WelcomeWindow">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>780</width><height>560</height></rect>
+  </property>
+  <property name="windowTitle">
+   <string>Welcome to Solvionyx OS — Aurora</string>
+  </property>
+
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout">
+
+    <!-- Top Logo -->
+    <item>
+     <widget class="QLabel" name="logoLabel">
+      <property name="pixmap">
+       <pixmap>icons/logo.png</pixmap>
+      </property>
+      <property name="alignment"><set>Qt::AlignCenter</set></property>
+     </widget>
+    </item>
+
+    <!-- Title -->
+    <item>
+     <widget class="QLabel" name="titleLabel">
+      <property name="text">
+       <string>Welcome to Solvionyx OS — Aurora</string>
+      </property>
+      <property name="alignment"><set>Qt::AlignCenter</set></property>
+     </widget>
+    </item>
+
+    <!-- Buttons Grid -->
+    <item>
+     <layout class="QGridLayout">
+
+      <item row="0" column="0">
+       <widget class="QPushButton" name="openSolvyButton">
+        <property name="text"><string>Open Solvy</string></property>
+       </widget>
+      </item>
+
+      <item row="0" column="1">
+       <widget class="QPushButton" name="connectWifiButton">
+        <property name="text"><string>Connect to Wi-Fi</string></property>
+       </widget>
+      </item>
+
+      <item row="1" column="0">
+       <widget class="QPushButton" name="systemUpdateButton">
+        <property name="text"><string>Check for Updates</string></property>
+       </widget>
+      </item>
+
+      <item row="1" column="1">
+       <widget class="QPushButton" name="storeButton">
+        <property name="text"><string>Visit Solvionyx Store</string></property>
+       </widget>
+      </item>
+
+      <item row="2" column="0" colspan="2" alignment="Qt::AlignCenter">
+       <widget class="QPushButton" name="supportButton">
+        <property name="text"><string>Get Support</string></property>
+       </widget>
+      </item>
+
+     </layout>
+    </item>
+
+   </layout>
+  </widget>
+ </widget>
+</ui>

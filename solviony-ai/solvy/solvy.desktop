@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Solvy AI Assistant
+Comment=Your personal OS companion
+Exec=/usr/share/solvionyx/solvy/solvy.py
+Icon=solvy
+Terminal=false
+Categories=Utility;System;AI;
+StartupNotify=true

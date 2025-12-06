@@ -1,0 +1,18 @@
+wallpaper_image = Image("background.png");
+logo_image = Image("logo.png");
+
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+# Center the splash wallpaper
+sprite = Sprite(wallpaper_image);
+sprite.SetPosition(0, 0);
+
+# Center logo
+logo = Sprite(logo_image);
+logo.SetPosition(screen_width / 2 - logo_image.GetWidth() / 2,
+                 screen_height / 2 - logo_image.GetHeight() / 2);
+
+# Simple fade-in animation
+logo.SetOpacity(0);
+logo.FadeIn(2.0);

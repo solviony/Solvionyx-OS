@@ -1,0 +1,13 @@
+{
+  "assistant_name": "Solvy",
+  "tagline": "Your personal OS companion",
+  "theme": "aurora",
+  "wakeword_enabled": true,
+  "wakeword_phrase": "hello solvy",
+  "voice_gender": "neutral",
+  "tts_engine": "local",
+  "stt_engine": "local",
+  "api_mode": "local",
+  "api_endpoint": "",
+  "firstboot": true
+}

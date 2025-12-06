@@ -1,0 +1,16 @@
+title-text: "Solvionyx OS — Aurora"
+title-color: "#FFFFFF"
+
+desktop-image: "background.png"
+
+terminal-box: "terminal_box_*.png"
+terminal-font: "Unifont Regular 16"
+
++ boot_menu {
+    left = 10%
+    top = 30%
+    width = 80%
+    height = auto
+    item_color = "#CCCCCC"
+    selected_item_color = "#5DA9FF"
+}

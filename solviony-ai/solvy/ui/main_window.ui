@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>760</width><height>560</height></rect>
+  </property>
+  <property name="windowTitle">
+   <string>Solvy</string>
+  </property>
+
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout">
+
+    <item>
+     <widget class="QLabel" name="headerLabel">
+      <property name="text">
+       <string>Hi, I’m Solvy — Your personal OS companion.</string>
+      </property>
+      <property name="alignment"><set>Qt::AlignCenter</set></property>
+     </widget>
+    </item>
+
+    <item>
+     <widget class="QTextEdit" name="chatBox"/>
+    </item>
+
+    <item>
+     <layout class="QHBoxLayout">
+      <item>
+       <widget class="QLineEdit" name="inputField"/>
+      </item>
+
+      <item>
+       <widget class="QPushButton" name="sendButton">
+        <property name="text"><string>Send</string></property>
+       </widget>
+      </item>
+
+      <item>
+       <widget class="QPushButton" name="micButton">
+        <property name="icon">
+         <iconset>
+          <normaloff>icons/mic.svg</normaloff>
+         </iconset>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+
+   </layout>
+  </widget>
+ </widget>
+</ui>

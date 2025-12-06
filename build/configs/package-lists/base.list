@@ -1,1 +1,57 @@
-# placeholder for build/configs/package-lists/base.list
+# =========================
+# Solvionyx OS - Base System
+# =========================
+
+# Core system
+systemd
+systemd-sysv
+udev
+bash
+coreutils
+sed
+grep
+tar
+gzip
+bzip2
+xz-utils
+file
+dialog
+
+# Networking
+network-manager
+network-manager-gnome
+wpasupplicant
+openssh-client
+
+# Filesystems
+dosfstools
+btrfs-progs
+e2fsprogs
+
+# Audio
+pipewire
+pipewire-pulse
+wireplumber
+
+# Tools
+sudo
+curl
+wget
+git
+vim
+nano
+
+# Bootloader
+grub-pc
+
+# Plymouth
+plymouth
+plymouth-themes
+
+# Installer
+calamares
+calamares-settings-debian
+
+# System roles
+task-laptop
+task-desktop
