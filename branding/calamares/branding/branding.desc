@@ -1,0 +1,11 @@
+---
+componentName: "Solvionyx OS Installer"
+strings:
+  welcome: "Welcome to Solvionyx OS"
+  productName: "Solvionyx OS — Aurora"
+  shortVersion: "Aurora"
+  version: "1"
+
+images:
+  product: "product.png"
+  productIcon: "product.png"
