@@ -1,0 +1,4 @@
+title-text: "Solvionyx OS — Aurora"
+desktop-color: "#0b1220"
+title-color: white
+border-color: "#6f3bff"

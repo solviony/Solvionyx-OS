@@ -53,6 +53,61 @@ jobs:
           plymouth plymouth-themes plymouth-label imagemagick \
           sbsigntool efitools openssl shim-signed mokutil
 
+    # --------------------------------------------------------
+    # 🔐 SecureBoot — Generate PK / KEK / DB Keys + SBAT
+    # --------------------------------------------------------
+    - name: 🔐 Generate SecureBoot Keys
+      run: |
+        mkdir -p $SECUREBOOT_DIR/sbat $SECUREBOOT_DIR/output
+
+        echo "🔑 Generating SecureBoot PK/KEK/DB..."
+
+        # Platform Key (PK)
+        openssl req -new -x509 -newkey rsa:4096 -nodes \
+          -keyout $SECUREBOOT_DIR/pk.key \
+          -out $SECUREBOOT_DIR/pk.crt \
+          -days 3650 \
+          -subj "/C=US/ST=Missouri/L=Columbia/O=Solviony Inc/OU=Solvionyx OS Security/CN=Solvionyx OS Platform Key/emailAddress=dev@solviony.com"
+
+        # Key Exchange Key (KEK)
+        openssl req -new -x509 -newkey rsa:4096 -nodes \
+          -keyout $SECUREBOOT_DIR/kek.key \
+          -out $SECUREBOOT_DIR/kek.crt \
+          -days 3650 \
+          -subj "/C=US/ST=Missouri/L=Columbia/O=Solviony Inc/OU=Solvionyx OS Security/CN=Solvionyx OS KEK/emailAddress=dev@solviony.com"
+
+        # Signature Database Key (DB)
+        openssl req -new -x509 -newkey rsa:4096 -nodes \
+          -keyout $SECUREBOOT_DIR/db.key \
+          -out $SECUREBOOT_DIR/db.crt \
+          -days 3650 \
+          -subj "/C=US/ST=Missouri/L=Columbia/O=Solviony Inc/OU=Solvionyx OS Security/CN=Solvionyx OS DB/emailAddress=dev@solviony.com"
+
+        echo "🔧 Writing SBAT metadata..."
+        cat > $SECUREBOOT_DIR/sbat/sbat.csv <<EOF
+sbat,1,Solviony,Solvionyx-OS,1,${SBAT_URL}
+EOF
+
+        echo "✅ SecureBoot Keys + SBAT ready."
+
+
+    # --------------------------------------------------------
+    # 🔽 Extract shim & GRUB EFI from system
+    # --------------------------------------------------------
+    - name: 📦 Extract shim + GRUB EFI binaries
+      run: |
+        mkdir -p efi-bin
+
+        echo "📥 Extracting shim..."
+        cp /usr/lib/shim/shimx64.efi.signed efi-bin/bootx64.efi || true
+        cp /usr/lib/shim/mmx64.efi efi-bin/ || true
+
+        echo "📥 Extracting GRUB EFI (signed)..."
+        cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed efi-bin/grubx64.efi || true
+
+        echo "EFI binaries extracted:"
+        ls -lh efi-bin/
+
     # ---------------------------------------------------------
     - name: 🔐 Generate SecureBoot Keys
       run: |
@@ -149,12 +204,197 @@ jobs:
           -eltorito-alt-boot \
           -e boot/grub/efi.img -no-emul-boot -isohybrid-gpt-basdat \
           signed-iso/
+    # --------------------------------------------------------
+    # 💿 Build Unsigned Aurora ISO
+    # --------------------------------------------------------
+    - name: 💿 Build Unsigned Solvionyx OS ISO
+      run: |
+        echo "🚀 Building unsigned Aurora ISO for edition: ${{ matrix.edition }}"
+        chmod +x build/builder_v6_ultra.sh
+        ./build/builder_v6_ultra.sh "${{ matrix.edition }}"
+
+        echo "📦 ISO build complete."
+        ls -lh solvionyx_build/
+
+
+    # --------------------------------------------------------
+    # 🔐 SecureBoot — Sign GRUB + Kernel
+    # --------------------------------------------------------
+    - name: 🔐 SecureBoot — Sign GRUB + Kernel
+      run: |
+        echo "🔎 Locating ISO..."
+        UNSIGNED_ISO=$(ls solvionyx_build/*.iso | head -n 1)
+        echo "Found unsigned ISO: $UNSIGNED_ISO"
+
+        echo "📦 Extracting ISO filesystem..."
+        mkdir -p iso_extract
+        xorriso -osirrox on -indev "$UNSIGNED_ISO" -extract / iso_extract/
+
+        echo "🔐 Applying SBAT metadata to GRUB..."
+        if [ -f iso_extract/boot/grub/grubx64.efi ]; then
+          cp $SECUREBOOT_DIR/sbat/sbat.csv iso_extract/boot/grub/grubx64.efi.sbat
+        fi
+
+        echo "📝 Signing GRUB EFI using Solvionyx DB key..."
+        sbsign \
+          --key $SECUREBOOT_DIR/db.key \
+          --cert $SECUREBOOT_DIR/db.crt \
+          --output iso_extract/EFI/ubuntu/grubx64.efi \
+          efi-bin/grubx64.efi
+
+        echo "📝 Signing Linux Kernel..."
+        KERNEL=$(find iso_extract/live -name "vmlinuz*" | head -n 1)
+        sbsign \
+          --key $SECUREBOOT_DIR/db.key \
+          --cert $SECUREBOOT_DIR/db.crt \
+          --output "${KERNEL}.signed" \
+          "$KERNEL"
+
+        mv "${KERNEL}.signed" "$KERNEL"
+
+
+    # --------------------------------------------------------
+    # 🔁 Reinsertion of SHIM + MM + final EFI layout
+    # --------------------------------------------------------
+    - name: 🔁 Insert SHIM + MM into ISO
+      run: |
+        echo "📥 Reinserting SHIM into ISO..."
+        mkdir -p iso_extract/EFI/boot/
+
+        cp efi-bin/bootx64.efi iso_extract/EFI/boot/
+        cp efi-bin/mmx64.efi iso_extract/EFI/boot/
+
+        echo "EFI bootloader components now in place."
+
+
+    # --------------------------------------------------------
+    # 📦 Rebuild SecureBoot-enabled ISO
+    # --------------------------------------------------------
+    - name: 📦 Repack SecureBoot-enabled ISO
+      run: |
+        SECUREBOOT_ISO="solvionyx_build/Solvionyx-Aurora-v6-${{ matrix.edition }}-secureboot.iso"
+
+        echo "🔄 Rebuilding ISO with SecureBoot..."
+        xorriso -as mkisofs \
+          -o "$SECUREBOOT_ISO" \
+          -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+          -c isolinux/boot.cat \
+          -b isolinux/isolinux.bin \
+          -no-emul-boot -boot-load-size 4 -boot-info-table \
+          -eltorito-alt-boot \
+          -e boot/grub/efi.img \
+          -no-emul-boot -isohybrid-gpt-basdat \
+          iso_extract/
+
+        echo "🎉 SecureBoot ISO created:"
+        ls -lh "$SECUREBOOT_ISO"
 
     # ---------------------------------------------------------
     - name: 🗜️ Compress ISO + Generate Checksums
       run: |
         xz -T2 -9 solvionyx_build/*.iso
         sha256sum solvionyx_build/*.xz > solvionyx_build/SHA256SUMS.txt
+    # --------------------------------------------------------
+    # 🗜️ Compress SecureBoot ISO + Generate SHA256SUMS
+    # --------------------------------------------------------
+    - name: 🗜️ Compress SecureBoot ISO + Checksum
+      run: |
+        echo "🔍 Finding SecureBoot ISO..."
+        SECUREBOOT_ISO=$(ls solvionyx_build/*secureboot.iso | head -n 1)
+        echo "Found: $SECUREBOOT_ISO"
+
+        echo "🗜️ Compressing ISO..."
+        xz -T2 -9 "$SECUREBOOT_ISO"
+
+        echo "🔐 Generating SHA256SUMS..."
+        sha256sum solvionyx_build/*.xz > solvionyx_build/SHA256SUMS.txt
+
+        echo "Checksums:"
+        cat solvionyx_build/SHA256SUMS.txt
+
+
+    # --------------------------------------------------------
+    # ☁️ Upload to Google Cloud Storage (Auto-Public)
+    # --------------------------------------------------------
+    - name: ☁️ Upload SecureBoot ISO to Google Cloud Storage
+      env:
+        EDITION: ${{ matrix.edition }}
+      run: |
+        echo "📤 Uploading to GCS bucket: ${GCS_BUCKET}"
+
+        VERSION_PATH="aurora/${VERSION}/${EDITION}"
+        LATEST_PATH="aurora/latest/${EDITION}"
+
+        gsutil -m cp solvionyx_build/*.xz solvionyx_build/SHA256SUMS.txt \
+          gs://${GCS_BUCKET}/${VERSION_PATH}/
+
+        gsutil -m cp solvionyx_build/*.xz solvionyx_build/SHA256SUMS.txt \
+          gs://${GCS_BUCKET}/${LATEST_PATH}/
+
+        echo "🌍 Setting public access..."
+        gsutil acl ch -u AllUsers:R gs://${GCS_BUCKET}/${VERSION_PATH}/*
+        gsutil acl ch -u AllUsers:R gs://${GCS_BUCKET}/${LATEST_PATH}/*
+
+        echo "📡 Writing latest.json metadata..."
+        ISO_NAME=$(basename $(ls solvionyx_build/*.xz | head -n 1))
+        SHA256=$(awk '{print $1}' solvionyx_build/SHA256SUMS.txt)
+        DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        cat > latest.json <<EOF
+        {
+          "version": "${VERSION}",
+          "edition": "${EDITION}",
+          "release_name": "${OS_NAME} ${OS_FLAVOR} (${EDITION})",
+          "tagline": "${TAGLINE}",
+          "sha256": "${SHA256}",
+          "iso_name": "${ISO_NAME}",
+          "download_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/${ISO_NAME}",
+          "checksum_url": "https://storage.googleapis.com/${GCS_BUCKET}/${LATEST_PATH}/SHA256SUMS.txt",
+          "updated": "${DATE}"
+        }
+        EOF
+
+        gsutil cp latest.json gs://${GCS_BUCKET}/${LATEST_PATH}/
+        gsutil acl ch -u AllUsers:R gs://${GCS_BUCKET}/${LATEST_PATH}/latest.json
+
+        echo "🌟 Upload complete!"
+
+
+    # --------------------------------------------------------
+    # 📦 Upload ISO + Checksums to GitHub Artifacts
+    # --------------------------------------------------------
+    - name: 📦 Upload ISO Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Solvionyx-Aurora-v6-${{ matrix.edition }}-${{ env.VERSION }}
+        path: |
+          solvionyx_build/*.xz
+          solvionyx_build/SHA256SUMS.txt
+
+
+    # --------------------------------------------------------
+    # 🚀 Publish GitHub Release
+    # --------------------------------------------------------
+    - name: 🚀 Publish Release
+      if: success()
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: "Aurora-v6-${{ matrix.edition }}-${{ env.VERSION }}"
+        name: "Solvionyx OS — Aurora v6 Ultra (${ { matrix.edition } })"
+        body: |
+          ## 🌌 Solvionyx OS — Aurora v6 Ultra
+          **Edition:** ${{ matrix.edition }}
+          **SecureBoot:** Fully Signed (Shim + GRUB + Kernel)
+          **Branding:** Aurora UI v6
+          **Checksum:** SHA256 included
+
+          **Download Latest:**
+          https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/latest/${{ matrix.edition }}/
+
+          **Google Cloud Versioned Build:**
+          https://storage.googleapis.com/${{ env.GCS_BUCKET }}/aurora/${{ env.VERSION }}/${{ matrix.edition }}/
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     # ---------------------------------------------------------
     - name: ☁️ Upload to Google Cloud Storage

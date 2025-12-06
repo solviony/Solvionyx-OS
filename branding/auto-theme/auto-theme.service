@@ -1,0 +1,9 @@
+[Unit]
+Description=Auto Light/Dark Theme Switcher
+
+[Service]
+Type=simple
+ExecStart=/usr/share/solvionyx/auto-theme.sh
+
+[Install]
+WantedBy=default.target

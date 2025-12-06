@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome to Solvionyx OS
+Exec=echo "Welcome App Placeholder"

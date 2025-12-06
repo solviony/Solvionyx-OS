@@ -1,0 +1,3 @@
+wallpaper_image = Image("solvionyx-logo.png");
+wallpaper_image.Scale(1.0, 1.0);
+Sprite(wallpaper_image);
