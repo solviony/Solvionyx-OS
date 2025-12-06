@@ -49,10 +49,11 @@ jobs:
       # ---------------------------------------------------------
       # RUN YOUR REAL BUILDER SCRIPT
       # ---------------------------------------------------------
-      - name: 🛠 Run Solvionyx Builder — ${{ matrix.edition }}
-        run: |
-          chmod +x build/builder_v6_ultra.sh
-          sudo ./build/builder_v6_ultra.sh "${{ matrix.edition }}"
+- name: 🛠 Run Solvionyx Builder — ${{ matrix.edition }}
+  shell: bash
+  run: |
+    chmod +x build/builder_v6_ultra.sh
+    sudo bash build/builder_v6_ultra.sh "${{ matrix.edition }}"
 
       # ---------------------------------------------------------
       # LOCATE OUTPUT (signed + compressed)
