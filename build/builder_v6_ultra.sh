@@ -10,6 +10,9 @@ log() { echo -e "[$(date +"%H:%M:%S")] $*"; }
 
 EDITION="${1:-gnome}"
 
+# Load global build environment variables
+source "$(dirname "$0")/env.sh"
+
 # --- Directories --------------------------------------------------------------
 BUILD_DIR="solvionyx_build"
 CHROOT_DIR="$BUILD_DIR/chroot"
