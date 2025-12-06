@@ -22,7 +22,7 @@ export PROJECT_ROOT="$(cd "$BUILD_ROOT/.." && pwd)"
 # Config and branding directories
 export CONFIG_DIR="$BUILD_ROOT/configs"
 export BRANDING_DIR="$PROJECT_ROOT/branding"
-export PKG_LISTS_DIR="$BUILD_ROOT/configs/package-lists"
+export PKG_LISTS_DIR="$BUILD_ROOT/config/package-lists"
 
 # Output folder for ISOs
 export OUTPUT_DIR="$BUILD_ROOT/output"
