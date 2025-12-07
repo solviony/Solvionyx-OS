@@ -56,6 +56,11 @@ jobs:
           echo "${{ secrets.SECUREBOOT_DB_CRT }}" > secureboot/db.crt
           chmod 600 secureboot/db.key
           chmod 644 secureboot/db.crt
+      - name: Restore SecureBoot Keys
+        run: |
+          mkdir -p secureboot
+          echo "${{ secrets.SECUREBOOT_DB_KEY_B64 }}" | base64 -d > secureboot/db.key
+          echo "${{ secrets.SECUREBOOT_DB_CRT_B64 }}" | base64 -d > secureboot/db.crt
 
       # ---------------------------------------------------------
       # RUN BUILDER SCRIPT
