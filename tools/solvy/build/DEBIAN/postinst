@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+# Reload systemd so it sees the new service
+systemctl daemon-reload || true
+
+# Enable Solvy service at boot
+systemctl enable solvy.service || true
+
+# Start service immediately (optional)
+systemctl restart solvy.service || true
+
+exit 0

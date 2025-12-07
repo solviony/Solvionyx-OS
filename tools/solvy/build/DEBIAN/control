@@ -1,0 +1,8 @@
+Package: solvy
+Version: 3.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Solvionyx OS <support@solviony.com>
+Description: Solvy AI Assistant for Solvionyx OS
+ A command-line and desktop AI assistant integrated into Solvionyx OS.

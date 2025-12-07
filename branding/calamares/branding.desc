@@ -1,0 +1,9 @@
+---
+name: solvionyx
+version: "v6 Aurora"
+welcome: "Install Solvionyx OS Aurora"
+product: "Solvionyx OS"
+shortVersion: "Aurora"
+longVersion: "Solvionyx OS — Aurora Edition"
+logo: "branding/calamares/branding/logo.png"
+productLogo: "branding/calamares/branding/product.png"

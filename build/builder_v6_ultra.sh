@@ -80,11 +80,50 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 sudo mkdir -p "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora"
 sudo rsync -a "$GRUB_THEME/" "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
 
+log "Copying Calamares branding"
+sudo mkdir -p "$CHROOT_DIR/etc/calamares"
+sudo rsync -a branding/calamares/ "$CHROOT_DIR/etc/calamares/"
+
 log "Creating live user"
 sudo chroot "$CHROOT_DIR" bash -lc "
   useradd -m -s /bin/bash solvionyx
   echo 'solvionyx:solvionyx' | chpasswd
   usermod -aG sudo solvionyx
+"
+log "Configuring live auto-login"
+
+sudo tee "$CHROOT_DIR/etc/systemd/system/getty@tty1.service.d/autologin.conf" >/dev/null <<EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin solvionyx --noclear %I \$TERM
+EOF
+
+sudo mkdir -p "$CHROOT_DIR/etc/gdm3"
+sudo tee "$CHROOT_DIR/etc/gdm3/custom.conf" >/dev/null <<EOF
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=solvionyx
+EOF
+
+sudo mkdir -p "$CHROOT_DIR/etc/sddm.conf.d"
+sudo tee "$CHROOT_DIR/etc/sddm.conf.d/autologin.conf" >/dev/null <<EOF
+[Autologin]
+User=solvionyx
+Session=plasma
+EOF
+
+sudo mkdir -p "$CHROOT_DIR/etc/lightdm"
+sudo tee "$CHROOT_DIR/etc/lightdm/lightdm.conf" >/dev/null <<EOF
+[Seat:*]
+autologin-user=solvionyx
+EOF
+
+log "Installing Calamares + dependencies"
+sudo chroot "$CHROOT_DIR" bash -lc "
+  apt-get install -y calamares calamares-settings-debian \
+  qml-module-qtquick-controls qml-module-qtquick-controls2 \
+  qml-module-qtquick-layouts qml-module-qtgraphicaleffects \
+  libyaml-cpp0.7 network-manager
 "
 
 log "Installing Solvy AI"
@@ -93,6 +132,11 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
   systemctl enable solvy.service || true
 "
+log "Setting Welcome App for installed system"
+
+sudo mkdir -p "$CHROOT_DIR/etc/skel/.config/autostart"
+sudo cp branding/welcome/autostart.desktop \
+        "$CHROOT_DIR/etc/skel/.config/autostart/"
 
 log "Building SquashFS"
 sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot -noappend -comp xz -Xbcj x86
@@ -102,6 +146,35 @@ KERNEL=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
 INITRD=$(find "$CHROOT_DIR/boot" -name "initrd.img-*" | head -n 1)
 sudo cp "$KERNEL" "$LIVE_DIR/vmlinuz"
 sudo cp "$INITRD" "$LIVE_DIR/initrd.img"
+
+###############################################################################
+### PATCH ADDED — EFI BOOT SUPPORT (REQUIRED FOR ISO + SECUREBOOT)
+###############################################################################
+
+log "Adding EFI bootloader"
+sudo mkdir -p "$ISO_DIR/EFI/BOOT"
+
+sudo cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
+sudo cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed "$ISO_DIR/EFI/BOOT/grubx64.efi"
+
+log "Adding EFI GRUB configuration"
+sudo mkdir -p "$ISO_DIR/boot/grub"
+
+sudo tee "$ISO_DIR/boot/grub/grub.cfg" >/dev/null <<EOF
+search --set=root --file /live/vmlinuz
+set default=0
+set timeout=5
+
+menuentry "Start Solvionyx OS" {
+    linux /live/vmlinuz boot=live quiet splash
+    initrd /live/initrd.img
+}
+EOF
+
+###############################################################################
+### PATCH END
+###############################################################################
+
 
 log "Creating ISOLINUX boot"
 sudo mkdir -p "$ISO_DIR/isolinux"
@@ -119,6 +192,25 @@ LABEL live
   APPEND initrd=/live/initrd.img boot=live quiet splash
 EOF
 
+log "Adding EFI bootloader"
+
+sudo mkdir -p "$ISO_DIR/EFI/BOOT"
+
+sudo cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
+sudo cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed "$ISO_DIR/EFI/BOOT/grubx64.efi"
+
+sudo mkdir -p "$ISO_DIR/boot/grub"
+sudo tee "$ISO_DIR/boot/grub/grub.cfg" >/dev/null <<EOF
+search --set=root --file /live/vmlinuz
+set default=0
+set timeout=5
+
+menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
+    linux /live/vmlinuz boot=live quiet splash
+    initrd /live/initrd.img
+}
+EOF
+
 log "Building ISO"
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
@@ -129,8 +221,8 @@ sudo xorriso -as mkisofs \
   "$ISO_DIR"
 
 log "Signing GRUB and kernel"
-SIGNED_DIR="$BUILD_DIR/signed-iso"
 mkdir -p "$SIGNED_DIR"
+xorriso ... "$SIGNED_DIR"
 
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
