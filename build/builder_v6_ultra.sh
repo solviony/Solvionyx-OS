@@ -4,7 +4,7 @@ set -euo pipefail
 log() { echo -e "[$(date +"%H:%M:%S")] $*"; }
 
 ###############################################################################
-# 🌌 Solvionyx OS — Aurora Builder v6 Ultra
+# ? Solvionyx OS -- Aurora Builder v6 Ultra
 # FULL MANUAL BUILDER WITH SECUREBOOT + CALAMARES
 ###############################################################################
 
@@ -52,17 +52,17 @@ ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
 
 ###############################################################################
-# 🧹 PHASE 0 — CLEAN WORKSPACE
+# ? PHASE 0 -- CLEAN WORKSPACE
 ###############################################################################
 sudo rm -rf "$BUILD_DIR"
 mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR" "$ISO_DIR/EFI/BOOT" "$ISO_DIR/EFI/ubuntu"
 
-log "🧹 Workspace reset."
+log "? Workspace reset."
 
 ###############################################################################
-# 📦 PHASE 1 — BOOTSTRAP DEBIAN BOOKWORM
+# ? PHASE 1 -- BOOTSTRAP DEBIAN BOOKWORM
 ###############################################################################
-log "📦 Bootstrapping Debian bookworm..."
+log "? Bootstrapping Debian bookworm..."
 
 sudo debootstrap \
   --arch=amd64 \
@@ -71,10 +71,10 @@ sudo debootstrap \
   http://deb.debian.org/debian
 
 ###############################################################################
-# 🛠 PHASE 2 — FIX APT SOURCES + KEYRINGS
+# ? PHASE 2 -- FIX APT SOURCES + KEYRINGS
 ###############################################################################
 
-log "🛠 Writing correct Debian sources.list..."
+log "? Writing correct Debian sources.list..."
 
 sudo tee "$CHROOT_DIR/etc/apt/sources.list" >/dev/null <<EOF
 deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
@@ -82,7 +82,7 @@ deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free
 deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 EOF
 
-log "🔐 Installing Debian keyrings + base tools..."
+log "? Installing Debian keyrings + base tools..."
 
 sudo chroot "$CHROOT_DIR" bash -lc "
   apt-get update &&
@@ -101,15 +101,15 @@ sudo chroot "$CHROOT_DIR" bash -lc "
     live-boot
 "
 
-log "🌐 Generating locales..."
+log "? Generating locales..."
 sudo chroot "$CHROOT_DIR" bash -lc "
   sed -i 's/^# en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
   locale-gen
 "
 ###############################################################################
-# 🖥 PHASE 3 — INSTALL DESKTOP ENVIRONMENT + DISPLAY MANAGER
+# ? PHASE 3 -- INSTALL DESKTOP ENVIRONMENT + DISPLAY MANAGER
 ###############################################################################
-log "🖥 Installing Desktop Environment: ${EDITION}"
+log "? Installing Desktop Environment: ${EDITION}"
 
 sudo chroot "$CHROOT_DIR" bash -lc "
   export DEBIAN_FRONTEND=noninteractive
@@ -124,9 +124,9 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# 🎨 PHASE 4 — SOLVIONYX AURORA BRANDING
+# ? PHASE 4 -- SOLVIONYX AURORA BRANDING
 ###############################################################################
-log "🎨 Applying Solvionyx Aurora branding..."
+log "? Applying Solvionyx Aurora branding..."
 
 # Wallpapers + Logo
 sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds" "$CHROOT_DIR/usr/share/solvionyx"
@@ -145,9 +145,9 @@ sudo mkdir -p "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora"
 sudo rsync -a "$GRUB_THEME/" "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
 
 ###############################################################################
-# 👤 PHASE 5 — LIVE USER ACCOUNT
+# ? PHASE 5 -- LIVE USER ACCOUNT
 ###############################################################################
-log "👤 Creating live session user..."
+log "? Creating live session user..."
 
 sudo chroot "$CHROOT_DIR" bash -lc "
   useradd -m -s /bin/bash solvionyx
@@ -156,9 +156,9 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# 🤖 PHASE 6 — INSTALL SOLVY AI
+# ? PHASE 6 -- INSTALL SOLVY AI
 ###############################################################################
-log "🤖 Installing Solvy AI v3..."
+log "? Installing Solvy AI v3..."
 
 sudo cp "$SOLVY_DEB" "$CHROOT_DIR/tmp/solvy.deb"
 sudo chroot "$CHROOT_DIR" bash -lc "
@@ -167,9 +167,9 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# ✨ PHASE 7 — WELCOME APP & AUTO-THEME ENGINE
+# ? PHASE 7 -- WELCOME APP & AUTO-THEME ENGINE
 ###############################################################################
-log "✨ Installing Welcome App and Auto-Theme Engine..."
+log "? Installing Welcome App and Auto-Theme Engine..."
 
 # Welcome App
 sudo rsync -a branding/welcome/ "$CHROOT_DIR/usr/share/solvionyx/welcome/"
@@ -188,9 +188,9 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# 🔓 PHASE 8 — AUTOLOGIN CONFIGURATION
+# ? PHASE 8 -- AUTOLOGIN CONFIGURATION
 ###############################################################################
-log "🔓 Configuring autologin..."
+log "? Configuring autologin..."
 
 sudo chroot "$CHROOT_DIR" bash -lc "
   case '${EDITION}' in
@@ -213,9 +213,9 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   esac
 "
 ###############################################################################
-# 🛠 PHASE 9 — INSTALL CALAMARES BUILD DEPENDENCIES
+# ? PHASE 9 -- INSTALL CALAMARES BUILD DEPENDENCIES
 ###############################################################################
-log "🛠 Installing Calamares build dependencies..."
+log "? Installing Calamares build dependencies..."
 
 sudo chroot "$CHROOT_DIR" bash -lc "
   apt-get update
@@ -240,9 +240,9 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# 📥 PHASE 10 — DOWNLOAD & BUILD CALAMARES
+# ? PHASE 10 -- DOWNLOAD & BUILD CALAMARES
 ###############################################################################
-log "📥 Downloading Calamares source..."
+log "? Downloading Calamares source..."
 
 sudo chroot "$CHROOT_DIR" bash -lc "
   mkdir -p /src
@@ -257,9 +257,9 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# 🎨 PHASE 11 — CREATE SOLVIONYX INSTALLER BRANDING
+# ? PHASE 11 -- CREATE SOLVIONYX INSTALLER BRANDING
 ###############################################################################
-log "🎨 Creating Solvionyx Installer branding..."
+log "? Creating Solvionyx Installer branding..."
 
 sudo mkdir -p "$CHROOT_DIR/usr/share/calamares/branding/solvionyx"
 
@@ -296,9 +296,9 @@ sudo cp "$AURORA_WALL" "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/welco
 sudo cp "$AURORA_LOGO" "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/product.png"
 
 ###############################################################################
-# ⚙️ PHASE 12 — CALAMARES MODULE CONFIGURATION
+# ? PHASE 12 -- CALAMARES MODULE CONFIGURATION
 ###############################################################################
-log "⚙️ Writing Calamares configuration..."
+log "? Writing Calamares configuration..."
 
 sudo mkdir -p "$CHROOT_DIR/etc/calamares"
 
@@ -319,7 +319,7 @@ sequence:
 EOF
 
 ###############################################################################
-# 🧩 MODULE — LOCALE
+# ? MODULE -- LOCALE
 ###############################################################################
 sudo tee "$CHROOT_DIR/etc/calamares/modules/locale.conf" >/dev/null <<EOF
 ---
@@ -329,7 +329,7 @@ systemLang: "en_US.UTF-8"
 EOF
 
 ###############################################################################
-# 🧩 MODULE — KEYBOARD
+# ? MODULE -- KEYBOARD
 ###############################################################################
 sudo tee "$CHROOT_DIR/etc/calamares/modules/keyboard.conf" >/dev/null <<EOF
 ---
@@ -339,7 +339,7 @@ keyboard:
 EOF
 
 ###############################################################################
-# 🧩 MODULE — USERS (Installer username = user)
+# ? MODULE -- USERS (Installer username = user)
 ###############################################################################
 sudo tee "$CHROOT_DIR/etc/calamares/modules/users.conf" >/dev/null <<EOF
 ---
@@ -353,7 +353,7 @@ autologinUser: user
 EOF
 
 ###############################################################################
-# 🧩 MODULE — PARTITIONING (Option B: Manual, Replace, Erase)
+# ? MODULE -- PARTITIONING (Option B: Manual, Replace, Erase)
 ###############################################################################
 sudo tee "$CHROOT_DIR/etc/calamares/modules/partition.conf" >/dev/null <<EOF
 ---
@@ -370,7 +370,7 @@ partitionLayouts:
 EOF
 
 ###############################################################################
-# 🧩 MODULE — FINISHED
+# ? MODULE -- FINISHED
 ###############################################################################
 sudo tee "$CHROOT_DIR/etc/calamares/modules/finished.conf" >/dev/null <<EOF
 ---
@@ -378,11 +378,11 @@ restartNowEnabled: true
 restartNowChecked: true
 EOF
 
-log "🎉 Calamares Installer configured and branded for Solvionyx."
+log "? Calamares Installer configured and branded for Solvionyx."
 ###############################################################################
-# 📦 PHASE 13 — BUILD SQUASHFS (ROOT FILESYSTEM)
+# ? PHASE 13 -- BUILD SQUASHFS (ROOT FILESYSTEM)
 ###############################################################################
-log "📦 Building SquashFS filesystem..."
+log "? Building SquashFS filesystem..."
 
 sudo mksquashfs \
   "$CHROOT_DIR" \
@@ -390,9 +390,9 @@ sudo mksquashfs \
   -e boot -noappend -comp xz -Xbcj x86
 
 ###############################################################################
-# 🧬 PHASE 14 — COPY KERNEL + INITRD
+# ? PHASE 14 -- COPY KERNEL + INITRD
 ###############################################################################
-log "🧬 Extracting kernel and initrd..."
+log "? Extracting kernel and initrd..."
 
 KERNEL_PATH=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
 INITRD_PATH=$(find "$CHROOT_DIR/boot" -name "initrd.img-*" | head -n 1)
@@ -401,9 +401,9 @@ sudo cp "$KERNEL_PATH" "$LIVE_DIR/vmlinuz"
 sudo cp "$INITRD_PATH" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# 🔧 PHASE 15 — CREATE ISO BOOT STRUCTURE
+# ? PHASE 15 -- CREATE ISO BOOT STRUCTURE
 ###############################################################################
-log "🔧 Creating ISO bootloader structure..."
+log "? Creating ISO bootloader structure..."
 
 # BIOS boot (ISOLINUX)
 sudo mkdir -p "$ISO_DIR/isolinux"
@@ -423,9 +423,9 @@ LABEL live
 EOF
 
 ###############################################################################
-# 🖥️ PHASE 16 — UEFI BOOTLOADER STRUCTURE (GRUB-EFI)
+# ? PHASE 16 -- UEFI BOOTLOADER STRUCTURE (GRUB-EFI)
 ###############################################################################
-log "🖥️ Creating EFI bootloader structure..."
+log "? Creating EFI bootloader structure..."
 
 sudo mkdir -p "$ISO_DIR/EFI/BOOT"
 sudo mkdir -p "$ISO_DIR/boot/grub"
@@ -446,9 +446,9 @@ menuentry "Start $OS_NAME ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# 🧭 PHASE 17 — GRUB BIOS CONFIG
+# ? PHASE 17 -- GRUB BIOS CONFIG
 ###############################################################################
-log "🧭 Creating BIOS GRUB configuration..."
+log "? Creating BIOS GRUB configuration..."
 
 sudo tee "$ISO_DIR/boot/grub/grub.cfg" >/dev/null <<EOF
 set timeout=5
@@ -461,9 +461,9 @@ menuentry "Start $OS_NAME ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# 💽 PHASE 18 — BUILD UNSIGNED ISO
+# ? PHASE 18 -- BUILD UNSIGNED ISO
 ###############################################################################
-log "💽 Building UNSIGNED ISO..."
+log "? Building UNSIGNED ISO..."
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
@@ -477,11 +477,11 @@ sudo xorriso -as mkisofs \
   -isohybrid-gpt-basdat \
   "$ISO_DIR"
 
-log "📀 Unsigned ISO created successfully."
+log "? Unsigned ISO created successfully."
 ###############################################################################
-# 🔐 PHASE 19 — SECUREBOOT SIGNING (KERNEL + GRUB + SHIM)
+# ? PHASE 19 -- SECUREBOOT SIGNING (KERNEL + GRUB + SHIM)
 ###############################################################################
-log "🔐 Starting SecureBoot signing procedures..."
+log "? Starting SecureBoot signing procedures..."
 
 SIGNED_DIR="$BUILD_DIR/signed-iso"
 mkdir -p "$SIGNED_DIR"
@@ -495,9 +495,9 @@ if [[ -f "$SBAT_DIR/grub-sbat.txt" ]]; then
 fi
 
 ###############################################################################
-# 🔐 SIGN GRUB EFI
+# ? SIGN GRUB EFI
 ###############################################################################
-log "🔐 Signing GRUB EFI..."
+log "? Signing GRUB EFI..."
 
 GRUB_EFI=$(find "$SIGNED_DIR/EFI/BOOT" -name "BOOTX64.EFI" | head -n 1)
 
@@ -508,9 +508,9 @@ sudo sbsign \
   "$GRUB_EFI"
 
 ###############################################################################
-# 🔐 SIGN KERNEL
+# ? SIGN KERNEL
 ###############################################################################
-log "🔐 Signing Linux kernel..."
+log "? Signing Linux kernel..."
 
 KERNEL2=$(find "$SIGNED_DIR/live" -name "vmlinuz*" | head -n 1)
 
@@ -523,17 +523,17 @@ sudo sbsign \
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# 🧩 INSERT SHIM + MM (UEFI TARGET)
+# ? INSERT SHIM + MM (UEFI TARGET)
 ###############################################################################
-log "🧩 Inserting shim + mm into ISO..."
+log "? Inserting shim + mm into ISO..."
 
 sudo cp /usr/lib/shim/shimx64.efi.signed      "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
 sudo cp /usr/lib/shim/mmx64.efi              "$SIGNED_DIR/EFI/BOOT/"
 
 ###############################################################################
-# 💽 PHASE 20 — CREATE SECUREBOOT-SIGNED ISO
+# ? PHASE 20 -- CREATE SECUREBOOT-SIGNED ISO
 ###############################################################################
-log "💽 Building SecureBoot-signed ISO..."
+log "? Building SecureBoot-signed ISO..."
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
@@ -547,24 +547,24 @@ sudo xorriso -as mkisofs \
   -isohybrid-gpt-basdat \
   "$SIGNED_DIR"
 
-log "🔏 SecureBoot-signed ISO created: $SIGNED_NAME"
+log "? SecureBoot-signed ISO created: $SIGNED_NAME"
 
 ###############################################################################
-# 🗜 PHASE 21 — COMPRESS & GENERATE SHA256SUMS
+# ? PHASE 21 -- COMPRESS & GENERATE SHA256SUMS
 ###############################################################################
-log "🗜 Compressing ISO (xz -9)…"
+log "? Compressing ISO (xz -9)..."
 
 sudo xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 
-log "🔎 Generating SHA256 checksums..."
+log "? Generating SHA256 checksums..."
 
 sudo sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
 ###############################################################################
-# 🎉 PHASE 22 — BUILD COMPLETE
+# ? PHASE 22 -- BUILD COMPLETE
 ###############################################################################
 log "=============================================================="
-log "🎉 BUILD COMPLETE — Solvionyx OS Aurora ISO Ready!"
-log "📦 $BUILD_DIR/$SIGNED_NAME.xz"
-log "🔐 SecureBoot Signed"
+log "? BUILD COMPLETE -- Solvionyx OS Aurora ISO Ready!"
+log "? $BUILD_DIR/$SIGNED_NAME.xz"
+log "? SecureBoot Signed"
 log "=============================================================="
