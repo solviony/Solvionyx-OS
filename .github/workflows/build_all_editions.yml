@@ -45,16 +45,14 @@ jobs:
             git \
             wget curl unzip rsync \
             plymouth plymouth-themes plymouth-label
-
       # ---------------------------------------------------------
       # RUN YOUR REAL BUILDER SCRIPT
       # ---------------------------------------------------------
-- name: 🛠 Run Solvionyx Builder — ${{ matrix.edition }}
-  shell: bash
-  run: |
-    chmod +x build/builder_v6_ultra.sh
-    sudo bash build/builder_v6_ultra.sh "${{ matrix.edition }}"
-
+      - name: 🛠 Run Solvionyx Builder — ${{ matrix.edition }}
+        shell: bash
+        run: |
+          chmod +x build/builder_v6_ultra.sh
+          sudo bash build/builder_v6_ultra.sh "${{ matrix.edition }}"
       # ---------------------------------------------------------
       # LOCATE OUTPUT (signed + compressed)
       # builder generates: secureboot-Solvionyx-Aurora-<edition>-<date>.iso.xz
