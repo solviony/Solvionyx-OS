@@ -45,6 +45,7 @@ jobs:
             git \
             wget curl unzip rsync \
             plymouth plymouth-themes plymouth-label
+
       # ---------------------------------------------------------
       # RUN YOUR REAL BUILDER SCRIPT
       # ---------------------------------------------------------
@@ -53,9 +54,9 @@ jobs:
         run: |
           chmod +x build/builder_v6_ultra.sh
           sudo bash build/builder_v6_ultra.sh "${{ matrix.edition }}"
+
       # ---------------------------------------------------------
       # LOCATE OUTPUT (signed + compressed)
-      # builder generates: secureboot-Solvionyx-Aurora-<edition>-<date>.iso.xz
       # ---------------------------------------------------------
       - name: 📄 Locate Output Artifact
         id: iso_path
@@ -76,7 +77,7 @@ jobs:
             solvionyx_build/SHA256SUMS.txt
 
   # ---------------------------------------------------------
-  # UNIFIED RELEASE JOB (runs after all editions complete)
+  # UNIFIED RELEASE JOB
   # ---------------------------------------------------------
   release:
     name: 🚀 Publish Unified Solvionyx Aurora Release
