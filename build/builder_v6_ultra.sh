@@ -126,13 +126,16 @@ sudo rm -rf "$CHROOT_DIR/etc/lightdm/lightdm.conf" || true
 sudo rm -rf "$CHROOT_DIR/etc/sddm.conf.d" || true
 
 ###############################################################################
-# INSTALL CALAMARES + DEPENDENCIES
+# INSTALL CALAMARES + DEPENDENCIES (PATCHED)
 ###############################################################################
-log "Installing Calamares"
+log "Installing Calamares (patched – removed broken package)"
+
 sudo chroot "$CHROOT_DIR" bash -lc "
-  apt-get install -y calamares calamares-settings-debian network-manager \
+  apt-get update
+  apt-get install -y calamares network-manager \
     qml-module-qtquick-controls qml-module-qtquick-controls2 \
-    qml-module-qtquick-layouts qml-module-qtgraphicaleffects libyaml-cpp0.7
+    qml-module-qtquick-layouts qml-module-qtgraphicaleffects \
+    libyaml-cpp0.7
 "
 
 ###############################################################################
@@ -145,7 +148,6 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
 "
 
-# Add Solvy service
 log "Enabling Solvy service"
 sudo chroot "$CHROOT_DIR" bash -lc "
   systemctl enable solvy.service || true
