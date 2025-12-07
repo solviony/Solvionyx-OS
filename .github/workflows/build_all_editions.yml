@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: 🌌 Build Solvionyx OS Aurora — ${{ matrix.edition }}
+    name: Build Solvionyx OS Aurora — ${{ matrix.edition }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
 
@@ -22,11 +22,11 @@ jobs:
 
     steps:
       # ---------------------------------------------------------
-      - name: 🧩 Checkout Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       # ---------------------------------------------------------
-      - name: ⚙️ Install Build Dependencies
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -58,7 +58,7 @@ jobs:
       # ---------------------------------------------------------
       # LOCATE OUTPUT (signed + compressed)
       # ---------------------------------------------------------
-      - name: 📄 Locate Output Artifact
+      - name: Locate Output Artifact
         id: iso_path
         run: |
           OUT=$(ls solvionyx_build/*.xz | head -n 1)
@@ -68,7 +68,7 @@ jobs:
       # ---------------------------------------------------------
       # Upload per-edition artifacts
       # ---------------------------------------------------------
-      - name: 📦 Upload ISO Artifact
+      - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Solvionyx-Aurora-${{ matrix.edition }}
@@ -80,7 +80,7 @@ jobs:
   # UNIFIED RELEASE JOB
   # ---------------------------------------------------------
   release:
-    name: 🚀 Publish Unified Solvionyx Aurora Release
+    name: Publish Unified Solvionyx Aurora Release
     runs-on: ubuntu-24.04
     needs: build
     permissions:
@@ -101,7 +101,7 @@ jobs:
           tag_name: "Aurora-v6-${{ github.run_number }}"
           name: "Solvionyx OS — Aurora v6 Ultra"
           body: |
-            ## 🌌 Solvionyx OS — Aurora v6 Ultra
+            ##  Solvionyx OS — Aurora v6 Ultra
             ### Editions Included:
             - GNOME
             - KDE
