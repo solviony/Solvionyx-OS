@@ -1,11 +1,15 @@
 ---
-componentName: "Solvionyx OS Installer"
+componentName: solvionyx
+
+welcomeStyle: side
+showReleaseNotes: false
+
 strings:
-  welcome: "Welcome to Solvionyx OS"
   productName: "Solvionyx OS — Aurora"
+  version: "v6 Ultra"
   shortVersion: "Aurora"
-  version: "1"
+  productUrl: "https://solviony.com"
 
 images:
-  product: "product.png"
+  productLogo: "logo.png"
   productIcon: "product.png"
