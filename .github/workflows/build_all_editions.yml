@@ -47,7 +47,18 @@ jobs:
             plymouth plymouth-themes plymouth-label
 
       # ---------------------------------------------------------
-      # RUN YOUR REAL BUILDER SCRIPT
+      # RESTORE SECUREBOOT KEYS
+      # ---------------------------------------------------------
+      - name: Restore SecureBoot Keys
+        run: |
+          mkdir -p secureboot
+          echo "${{ secrets.SECUREBOOT_DB_KEY }}" > secureboot/db.key
+          echo "${{ secrets.SECUREBOOT_DB_CRT }}" > secureboot/db.crt
+          chmod 600 secureboot/db.key
+          chmod 644 secureboot/db.crt
+
+      # ---------------------------------------------------------
+      # RUN BUILDER SCRIPT
       # ---------------------------------------------------------
       - name: 🛠 Run Solvionyx Builder — ${{ matrix.edition }}
         shell: bash
@@ -101,7 +112,7 @@ jobs:
           tag_name: "Aurora-v6-${{ github.run_number }}"
           name: "Solvionyx OS — Aurora v6 Ultra"
           body: |
-            ##  Solvionyx OS — Aurora v6 Ultra
+            ## Solvionyx OS — Aurora v6 Ultra
             ### Editions Included:
             - GNOME
             - KDE
