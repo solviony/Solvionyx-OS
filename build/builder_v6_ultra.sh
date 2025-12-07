@@ -5,10 +5,14 @@ log() { echo "[BUILD] $*"; }
 
 EDITION="${1:-gnome}"
 
+###############################################################################
+# DIRECTORIES
+###############################################################################
 BUILD_DIR="solvionyx_build"
 CHROOT_DIR="$BUILD_DIR/chroot"
 ISO_DIR="$BUILD_DIR/iso"
 LIVE_DIR="$ISO_DIR/live"
+SIGNED_DIR="$BUILD_DIR/signed-iso"
 
 BRANDING_DIR="branding"
 AURORA_WALL="$BRANDING_DIR/wallpapers/aurora-bg.jpg"
@@ -29,10 +33,16 @@ DATE="$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
 
+###############################################################################
+# CLEAN WORKSPACE
+###############################################################################
 log "Cleaning workspace"
 sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR" "$ISO_DIR/EFI/BOOT" "$ISO_DIR/EFI/ubuntu"
+mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$ISO_DIR/EFI/ubuntu" "$SIGNED_DIR"
 
+###############################################################################
+# BOOTSTRAP DEBIAN
+###############################################################################
 log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
@@ -43,12 +53,15 @@ deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free
 deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 EOF
 
+###############################################################################
+# BASE SYSTEM
+###############################################################################
 log "Installing base packages"
 sudo chroot "$CHROOT_DIR" bash -lc "
   apt-get update
   apt-get install -y debian-archive-keyring ca-certificates coreutils \
-  sudo systemd-sysv curl wget xz-utils rsync locales dbus nano vim \
-  plymouth plymouth-themes plymouth-label linux-image-amd64 live-boot
+    sudo systemd-sysv curl wget xz-utils rsync locales dbus nano vim \
+    plymouth plymouth-themes plymouth-label linux-image-amd64 live-boot
 "
 
 sudo chroot "$CHROOT_DIR" bash -lc "
@@ -56,7 +69,11 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   locale-gen
 "
 
-log "Installing desktop environment"
+###############################################################################
+# DESKTOP ENVIRONMENT
+###############################################################################
+log "Installing desktop environment: $EDITION"
+
 sudo chroot "$CHROOT_DIR" bash -lc "
   case '${EDITION}' in
     gnome) apt-get install -y task-gnome-desktop gdm3 ;;
@@ -65,8 +82,13 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   esac
 "
 
+###############################################################################
+# BRANDING
+###############################################################################
 log "Applying Solvionyx branding"
+
 sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds" "$CHROOT_DIR/usr/share/solvionyx"
+
 sudo cp "$AURORA_WALL" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-default.jpg"
 sudo cp "$AURORA_LOGO" "$CHROOT_DIR/usr/share/solvionyx/logo.png"
 
@@ -80,103 +102,83 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 sudo mkdir -p "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora"
 sudo rsync -a "$GRUB_THEME/" "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
 
+###############################################################################
+# CALAMARES BRANDING
+###############################################################################
 log "Copying Calamares branding"
 sudo mkdir -p "$CHROOT_DIR/etc/calamares"
 sudo rsync -a branding/calamares/ "$CHROOT_DIR/etc/calamares/"
 
+###############################################################################
+# LIVE USER (ONLY FOR LIVE MODE)
+###############################################################################
 log "Creating live user"
 sudo chroot "$CHROOT_DIR" bash -lc "
-  useradd -m -s /bin/bash solvionyx
+  useradd -m -s /bin/bash solvionyx || true
   echo 'solvionyx:solvionyx' | chpasswd
   usermod -aG sudo solvionyx
 "
-log "Configuring live auto-login"
 
-sudo tee "$CHROOT_DIR/etc/systemd/system/getty@tty1.service.d/autologin.conf" >/dev/null <<EOF
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin solvionyx --noclear %I \$TERM
-EOF
+# REMOVE autologin so installer user creation works
+log "Removing autologin (installer will create real user)"
+sudo rm -rf "$CHROOT_DIR/etc/gdm3/custom.conf" || true
+sudo rm -rf "$CHROOT_DIR/etc/lightdm/lightdm.conf" || true
+sudo rm -rf "$CHROOT_DIR/etc/sddm.conf.d" || true
 
-sudo mkdir -p "$CHROOT_DIR/etc/gdm3"
-sudo tee "$CHROOT_DIR/etc/gdm3/custom.conf" >/dev/null <<EOF
-[daemon]
-AutomaticLoginEnable=true
-AutomaticLogin=solvionyx
-EOF
-
-sudo mkdir -p "$CHROOT_DIR/etc/sddm.conf.d"
-sudo tee "$CHROOT_DIR/etc/sddm.conf.d/autologin.conf" >/dev/null <<EOF
-[Autologin]
-User=solvionyx
-Session=plasma
-EOF
-
-sudo mkdir -p "$CHROOT_DIR/etc/lightdm"
-sudo tee "$CHROOT_DIR/etc/lightdm/lightdm.conf" >/dev/null <<EOF
-[Seat:*]
-autologin-user=solvionyx
-EOF
-
-log "Installing Calamares + dependencies"
+###############################################################################
+# INSTALL CALAMARES + DEPENDENCIES
+###############################################################################
+log "Installing Calamares"
 sudo chroot "$CHROOT_DIR" bash -lc "
-  apt-get install -y calamares calamares-settings-debian \
-  qml-module-qtquick-controls qml-module-qtquick-controls2 \
-  qml-module-qtquick-layouts qml-module-qtgraphicaleffects \
-  libyaml-cpp0.7 network-manager
+  apt-get install -y calamares calamares-settings-debian network-manager \
+    qml-module-qtquick-controls qml-module-qtquick-controls2 \
+    qml-module-qtquick-layouts qml-module-qtgraphicaleffects libyaml-cpp0.7
 "
 
+###############################################################################
+# SOLVY AI INSTALLATION
+###############################################################################
 log "Installing Solvy AI"
+
 sudo cp "$SOLVY_DEB" "$CHROOT_DIR/tmp/solvy.deb"
 sudo chroot "$CHROOT_DIR" bash -lc "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
+"
+
+# Add Solvy service
+log "Enabling Solvy service"
+sudo chroot "$CHROOT_DIR" bash -lc "
   systemctl enable solvy.service || true
 "
-log "Setting Welcome App for installed system"
 
+###############################################################################
+# WELCOME APP
+###############################################################################
+log "Configuring Welcome App"
 sudo mkdir -p "$CHROOT_DIR/etc/skel/.config/autostart"
-sudo cp branding/welcome/autostart.desktop \
-        "$CHROOT_DIR/etc/skel/.config/autostart/"
+sudo cp branding/welcome/autostart.desktop "$CHROOT_DIR/etc/skel/.config/autostart/"
 
+###############################################################################
+# SQUASHFS CREATION
+###############################################################################
 log "Building SquashFS"
 sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot -noappend -comp xz -Xbcj x86
 
-log "Copying kernel"
+###############################################################################
+# COPY KERNEL
+###############################################################################
+log "Copying kernel + initrd"
 KERNEL=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
 INITRD=$(find "$CHROOT_DIR/boot" -name "initrd.img-*" | head -n 1)
+
 sudo cp "$KERNEL" "$LIVE_DIR/vmlinuz"
 sudo cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-### PATCH ADDED — EFI BOOT SUPPORT (REQUIRED FOR ISO + SECUREBOOT)
+# EFI + BIOS BOOTLOADER SETUP
 ###############################################################################
+log "Configuring ISOLINUX + EFI GRUB"
 
-log "Adding EFI bootloader"
-sudo mkdir -p "$ISO_DIR/EFI/BOOT"
-
-sudo cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
-sudo cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed "$ISO_DIR/EFI/BOOT/grubx64.efi"
-
-log "Adding EFI GRUB configuration"
-sudo mkdir -p "$ISO_DIR/boot/grub"
-
-sudo tee "$ISO_DIR/boot/grub/grub.cfg" >/dev/null <<EOF
-search --set=root --file /live/vmlinuz
-set default=0
-set timeout=5
-
-menuentry "Start Solvionyx OS" {
-    linux /live/vmlinuz boot=live quiet splash
-    initrd /live/initrd.img
-}
-EOF
-
-###############################################################################
-### PATCH END
-###############################################################################
-
-
-log "Creating ISOLINUX boot"
 sudo mkdir -p "$ISO_DIR/isolinux"
 sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
 sudo cp /usr/lib/syslinux/modules/bios/ldlinux.c32 "$ISO_DIR/isolinux/"
@@ -192,37 +194,40 @@ LABEL live
   APPEND initrd=/live/initrd.img boot=live quiet splash
 EOF
 
-log "Adding EFI bootloader"
-
-sudo mkdir -p "$ISO_DIR/EFI/BOOT"
+sudo mkdir -p "$ISO_DIR/EFI/BOOT" "$ISO_DIR/boot/grub"
 
 sudo cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 sudo cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed "$ISO_DIR/EFI/BOOT/grubx64.efi"
 
-sudo mkdir -p "$ISO_DIR/boot/grub"
 sudo tee "$ISO_DIR/boot/grub/grub.cfg" >/dev/null <<EOF
 search --set=root --file /live/vmlinuz
 set default=0
 set timeout=5
-
 menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
     linux /live/vmlinuz boot=live quiet splash
     initrd /live/initrd.img
 }
 EOF
 
-log "Building ISO"
+###############################################################################
+# BUILD UNSIGNED ISO
+###############################################################################
+log "Building UNSIGNED ISO"
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
+  -eltorito-alt-boot \
+  -e EFI/BOOT/BOOTX64.EFI \
+  -no-emul-boot \
   "$ISO_DIR"
 
-log "Signing GRUB and kernel"
-mkdir -p "$SIGNED_DIR"
-xorriso ... "$SIGNED_DIR"
+###############################################################################
+# SECUREBOOT SIGNING
+###############################################################################
+log "Signing GRUB + kernel"
 
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
@@ -233,7 +238,10 @@ KERNEL2=$(find "$SIGNED_DIR/live" -name "vmlinuz*" | head -n 1)
 sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERNEL2"
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
-log "Building signed ISO"
+###############################################################################
+# BUILD SIGNED ISO
+###############################################################################
+log "Building SIGNED ISO"
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
@@ -242,6 +250,9 @@ sudo xorriso -as mkisofs \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
   "$SIGNED_DIR"
 
+###############################################################################
+# COMPRESS + CHECKSUM
+###############################################################################
 log "Compressing ISO"
 sudo xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 
