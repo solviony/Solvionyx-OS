@@ -119,14 +119,13 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   usermod -aG sudo solvionyx
 "
 
-# REMOVE autologin so installer user creation works
 log "Removing autologin (installer will create real user)"
 sudo rm -rf "$CHROOT_DIR/etc/gdm3/custom.conf" || true
 sudo rm -rf "$CHROOT_DIR/etc/lightdm/lightdm.conf" || true
 sudo rm -rf "$CHROOT_DIR/etc/sddm.conf.d" || true
 
 ###############################################################################
-# INSTALL CALAMARES + DEPENDENCIES (PATCHED)
+# INSTALL CALAMARES (PATCHED)
 ###############################################################################
 log "Installing Calamares (patched – removed broken package)"
 
@@ -212,11 +211,12 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO
+# BUILD UNSIGNED ISO  (FIX: ALLOW LARGE ISO)
 ###############################################################################
 log "Building UNSIGNED ISO"
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
+  --size_limit off \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
@@ -241,11 +241,12 @@ sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERN
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# BUILD SIGNED ISO
+# BUILD SIGNED ISO (FIX: ALLOW LARGE ISO)
 ###############################################################################
 log "Building SIGNED ISO"
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
+  --size_limit off \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
