@@ -23,7 +23,6 @@ GRUB_THEME="$BRANDING_DIR/grub"
 SOLVY_DEB="tools/solvy/solvy_3.0_amd64.deb"
 
 SECUREBOOT_DIR="secureboot"
-SBAT_DIR="$SECUREBOOT_DIR/sbat"
 DB_KEY="$SECUREBOOT_DIR/db.key"
 DB_CRT="$SECUREBOOT_DIR/db.crt"
 
@@ -38,7 +37,7 @@ SIGNED_NAME="secureboot-${ISO_NAME}.iso"
 ###############################################################################
 log "Cleaning workspace"
 sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$ISO_DIR/EFI/ubuntu" "$SIGNED_DIR"
+mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR"
 
 ###############################################################################
 # BOOTSTRAP DEBIAN
@@ -46,7 +45,6 @@ mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$ISO_DIR/EFI/ubuntu" "$S
 log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
-log "Fixing sources.list"
 sudo tee "$CHROOT_DIR/etc/apt/sources.list" >/dev/null <<EOF
 deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
 deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
@@ -93,14 +91,12 @@ sudo cp "$AURORA_WALL" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-default.jpg"
 sudo cp "$AURORA_LOGO" "$CHROOT_DIR/usr/share/solvionyx/logo.png"
 
 sudo rsync -a "$PLYMOUTH_THEME/" "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx-aurora/"
+sudo rsync -a "$GRUB_THEME/" "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
 
 sudo chroot "$CHROOT_DIR" bash -lc "
   echo 'Theme=solvionyx-aurora' > /etc/plymouth/plymouthd.conf
   update-initramfs -c -k all || true
 "
-
-sudo mkdir -p "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora"
-sudo rsync -a "$GRUB_THEME/" "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
 
 ###############################################################################
 # CALAMARES BRANDING
@@ -119,18 +115,15 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   usermod -aG sudo solvionyx
 "
 
-log "Removing autologin (installer will create real user)"
 sudo rm -rf "$CHROOT_DIR/etc/gdm3/custom.conf" || true
 sudo rm -rf "$CHROOT_DIR/etc/lightdm/lightdm.conf" || true
 sudo rm -rf "$CHROOT_DIR/etc/sddm.conf.d" || true
 
 ###############################################################################
-# INSTALL CALAMARES (PATCHED)
+# INSTALL CALAMARES
 ###############################################################################
-log "Installing Calamares (patched – removed broken package)"
-
+log "Installing Calamares"
 sudo chroot "$CHROOT_DIR" bash -lc "
-  apt-get update
   apt-get install -y calamares network-manager \
     qml-module-qtquick-controls qml-module-qtquick-controls2 \
     qml-module-qtquick-layouts qml-module-qtgraphicaleffects \
@@ -138,35 +131,31 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# SOLVY AI INSTALLATION
+# SOLVY AI
 ###############################################################################
 log "Installing Solvy AI"
-
 sudo cp "$SOLVY_DEB" "$CHROOT_DIR/tmp/solvy.deb"
+
 sudo chroot "$CHROOT_DIR" bash -lc "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
-"
-
-log "Enabling Solvy service"
-sudo chroot "$CHROOT_DIR" bash -lc "
   systemctl enable solvy.service || true
 "
 
 ###############################################################################
 # WELCOME APP
 ###############################################################################
-log "Configuring Welcome App"
 sudo mkdir -p "$CHROOT_DIR/etc/skel/.config/autostart"
 sudo cp branding/welcome/autostart.desktop "$CHROOT_DIR/etc/skel/.config/autostart/"
 
 ###############################################################################
-# SQUASHFS CREATION
+# SQUASHFS
 ###############################################################################
 log "Building SquashFS"
-sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot -noappend -comp xz -Xbcj x86
+sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
+  -e boot -noappend -comp xz -Xbcj x86
 
 ###############################################################################
-# COPY KERNEL
+# KERNEL
 ###############################################################################
 log "Copying kernel + initrd"
 KERNEL=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
@@ -178,7 +167,7 @@ sudo cp "$INITRD" "$LIVE_DIR/initrd.img"
 ###############################################################################
 # EFI + BIOS BOOTLOADER
 ###############################################################################
-log "Configuring ISOLINUX + EFI GRUB"
+log "Configuring ISOLINUX + GRUB EFI"
 
 sudo mkdir -p "$ISO_DIR/isolinux"
 sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
@@ -211,12 +200,14 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO  (FIX: ALLOW LARGE ISO)
+# BUILD UNSIGNED ISO (Ventoy/Rufus optimized)
 ###############################################################################
 log "Building UNSIGNED ISO"
+
 sudo xorriso -as mkisofs \
-  --allow-limited-size \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
+  -iso-level 3 \
+  -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
@@ -229,7 +220,7 @@ sudo xorriso -as mkisofs \
 ###############################################################################
 # SECUREBOOT SIGNING
 ###############################################################################
-log "Signing GRUB + kernel"
+log "Signing GRUB + KERNEL"
 
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
@@ -241,12 +232,14 @@ sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERN
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# BUILD SIGNED ISO  (FIX: ALLOW LARGE ISO)
+# BUILD SIGNED ISO (Ventoy/Rufus optimized)
 ###############################################################################
 log "Building SIGNED ISO"
+
 sudo xorriso -as mkisofs \
-  --allow-limited-size \
   -o "$BUILD_DIR/$SIGNED_NAME" \
+  -iso-level 3 \
+  -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
