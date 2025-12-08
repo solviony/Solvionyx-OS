@@ -40,7 +40,7 @@ sudo rm -rf "$BUILD_DIR"
 mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR"
 
 ###############################################################################
-# BOOTSTRAP DEBIAN
+# BOOTSTRAP
 ###############################################################################
 log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
@@ -85,9 +85,10 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 ###############################################################################
 # BRANDING
 ###############################################################################
-log "Applying Solvionyx branding"
+log "Applying Solvionyx OS branding"
 
 sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds" "$CHROOT_DIR/usr/share/solvionyx"
+
 sudo cp "$AURORA_WALL" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-default.jpg"
 sudo cp "$AURORA_LOGO" "$CHROOT_DIR/usr/share/solvionyx/logo.png"
 
@@ -151,7 +152,6 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
 "
 
-# Prevent systemctl errors inside chroot
 sudo chroot "$CHROOT_DIR" bash -lc "ln -s /bin/true /usr/sbin/systemctl || true"
 
 ###############################################################################
@@ -179,7 +179,7 @@ sudo cp "$KERNEL" "$LIVE_DIR/vmlinuz"
 sudo cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# ISO BOOTLOADER
+# ISO BOOTLOADER SETUP
 ###############################################################################
 log "Configuring ISOLINUX + EFI GRUB"
 
@@ -197,8 +197,7 @@ LABEL live
   APPEND initrd=/live/initrd.img boot=live quiet splash
 EOF
 
-sudo mkdir -p "$ISO_DIR/boot/grub"
-sudo mkdir -p "$ISO_DIR/EFI/BOOT"
+sudo mkdir -p "$ISO_DIR/boot/grub" "$ISO_DIR/EFI/BOOT"
 
 sudo cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 sudo cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed "$ISO_DIR/EFI/BOOT/grubx64.efi"
@@ -214,14 +213,15 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO (FIXED — ALLOW LARGE SIZE)
+# BUILD UNSIGNED ISO (UDF HYBRID)
 ###############################################################################
-log "Building UNSIGNED ISO"
+log "Building UNSIGNED ISO (UDF hybrid)"
 
 sudo xorriso -as mkisofs \
-  --allow-limited-size \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
-  -iso-level 3 -joliet-long \
+  -iso-level 3 \
+  -udf \
+  -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
@@ -246,14 +246,15 @@ sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERN
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# BUILD SIGNED ISO (FIXED — ALLOW LARGE SIZE)
+# BUILD SIGNED ISO (UDF HYBRID)
 ###############################################################################
-log "Building SIGNED ISO"
+log "Building SIGNED ISO (UDF hybrid)"
 
 sudo xorriso -as mkisofs \
-  --allow-limited-size \
   -o "$BUILD_DIR/$SIGNED_NAME" \
-  -iso-level 3 -joliet-long \
+  -iso-level 3 \
+  -udf \
+  -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
