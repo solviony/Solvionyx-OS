@@ -18,7 +18,9 @@ BRANDING_DIR="branding"
 AURORA_WALL="$BRANDING_DIR/wallpapers/aurora-bg.jpg"
 AURORA_LOGO="$BRANDING_DIR/logo/solvionyx-logo.png"
 PLYMOUTH_THEME="$BRANDING_DIR/plymouth"
-GRUB_THEME="$BRANDING_DIR/grub/solvionyx-aurora"
+
+# FIXED — YOUR REAL GRUB THEME LOCATION
+GRUB_THEME="$BRANDING_DIR/grub"
 
 SOLVY_DEB="tools/solvy/solvy_3.0_amd64.deb"
 
@@ -83,11 +85,12 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# BRANDING ASSETS
+# BRANDING
 ###############################################################################
 log "Applying Solvionyx branding"
 
 sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds" "$CHROOT_DIR/usr/share/solvionyx"
+
 sudo cp "$AURORA_WALL" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-default.jpg"
 sudo cp "$AURORA_LOGO" "$CHROOT_DIR/usr/share/solvionyx/logo.png"
 
@@ -100,7 +103,7 @@ sudo chroot "$CHROOT_DIR" bash -lc "
 "
 
 ###############################################################################
-# GRUB THEME (FIXED)
+# GRUB THEME — FIXED, FINAL, CORRECT
 ###############################################################################
 log "Applying GRUB theme"
 
@@ -140,7 +143,7 @@ sudo rm -rf "$CHROOT_DIR/etc/lightdm/lightdm.conf" || true
 sudo rm -rf "$CHROOT_DIR/etc/sddm.conf.d" || true
 
 ###############################################################################
-# SOLVY AI (NO SYSTEMD ERRORS)
+# SOLVY AI — No systemd warnings
 ###############################################################################
 log "Installing Solvy AI"
 
@@ -150,7 +153,7 @@ sudo chroot "$CHROOT_DIR" bash -lc "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
 "
 
-# Avoid systemd warning inside chroot
+# avoid systemd errors inside chroot
 sudo chroot "$CHROOT_DIR" bash -lc "ln -s /bin/true /usr/sbin/systemctl || true"
 
 ###############################################################################
@@ -163,7 +166,8 @@ sudo cp branding/welcome/autostart.desktop "$CHROOT_DIR/etc/skel/.config/autosta
 # SQUASHFS
 ###############################################################################
 log "Building SquashFS"
-sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot -noappend -comp xz -Xbcj x86
+sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
+  -e boot -noappend -comp xz -Xbcj x86
 
 ###############################################################################
 # KERNEL + INITRD
