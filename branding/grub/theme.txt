@@ -1,4 +1,36 @@
+# Solvionyx OS Aurora GRUB Theme Configuration
+
 title-text: "Solvionyx OS — Aurora"
-desktop-color: "#0b1220"
-title-color: white
-border-color: "#6f3bff"
+title-font: "Unifont Regular 16"
+
+desktop-color: "#000000"
+desktop-image: "background.png"
+
+terminal-font: "Unifont Regular 16"
+terminal-box: "center 60% 40% #00000080 #000000cc"
+
++ boot_menu {
+    left = 10%
+    top = 65%
+    width = 80%
+    height = 200
+    item_height = 32
+    item_padding = 6
+    item_spacing = 4
+    icon_width = 24
+    icon_height = 24
+    item_font = "Unifont Regular 18"
+    selected_item_font = "Unifont Regular 18"
+    item_color = "#B0B0B0"
+    selected_item_color = "#FFFFFF"
+    selected_item_background = "#005FFF"
+}
+
++ progress_bar {
+    left = 10%
+    width = 80%
+    top = 94%
+    height = 12
+    fg_color = "#00AEEF"
+    bg_color = "#002040"
+}
