@@ -110,7 +110,7 @@ sudo mkdir -p "$CHROOT_DIR/etc/calamares"
 sudo rsync -a branding/calamares/ "$CHROOT_DIR/etc/calamares/"
 
 ###############################################################################
-# LIVE USER (ONLY FOR LIVE MODE)
+# LIVE USER
 ###############################################################################
 log "Creating live user"
 sudo chroot "$CHROOT_DIR" bash -lc "
@@ -176,7 +176,7 @@ sudo cp "$KERNEL" "$LIVE_DIR/vmlinuz"
 sudo cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# EFI + BIOS BOOTLOADER SETUP
+# EFI + BIOS BOOTLOADER
 ###############################################################################
 log "Configuring ISOLINUX + EFI GRUB"
 
@@ -215,8 +215,8 @@ EOF
 ###############################################################################
 log "Building UNSIGNED ISO"
 sudo xorriso -as mkisofs \
+  --allow-limited-size \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
-  --size_limit off \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
@@ -241,12 +241,12 @@ sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERN
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# BUILD SIGNED ISO (FIX: ALLOW LARGE ISO)
+# BUILD SIGNED ISO  (FIX: ALLOW LARGE ISO)
 ###############################################################################
 log "Building SIGNED ISO"
 sudo xorriso -as mkisofs \
+  --allow-limited-size \
   -o "$BUILD_DIR/$SIGNED_NAME" \
-  --size_limit off \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
