@@ -101,18 +101,10 @@ in_chroot "
 log "Installing desktop environment: $EDITION"
 
 case "$EDITION" in
-  gnome)
-    in_chroot "apt-get install -y task-gnome-desktop gdm3"
-    ;;
-  kde)
-    in_chroot "apt-get install -y task-kde-desktop sddm"
-    ;;
-  xfce)
-    in_chroot "apt-get install -y task-xfce-desktop lightdm"
-    ;;
-  *)
-    fail "Unknown desktop: use gnome|kde|xfce"
-    ;;
+  gnome) in_chroot "apt-get install -y task-gnome-desktop gdm3" ;;
+  kde)   in_chroot "apt-get install -y task-kde-desktop sddm" ;;
+  xfce)  in_chroot "apt-get install -y task-xfce-desktop lightdm" ;;
+  *) fail "Unknown desktop: use gnome|kde|xfce" ;;
 esac
 
 ###############################################################################
@@ -170,10 +162,6 @@ in_chroot "
   usermod -aG sudo solvionyx
 "
 
-sudo rm -rf "$CHROOT_DIR/etc/gdm3/custom.conf" || true
-sudo rm -rf "$CHROOT_DIR/etc/lightdm/lightdm.conf" || true
-sudo rm -rf "$CHROOT_DIR/etc/sddm.conf.d" || true
-
 ###############################################################################
 # SOLVY AI
 ###############################################################################
@@ -185,25 +173,24 @@ in_chroot "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
 "
 
-# Disable systemd inside chroot
+# Disable systemctl inside chroot
 in_chroot "ln -s /bin/true /usr/sbin/systemctl || true"
 
 ###############################################################################
-# WELCOME APP AUTOSTART
+# AUTOSTART WELCOME APP
 ###############################################################################
 sudo mkdir -p "$CHROOT_DIR/etc/skel/.config/autostart"
 sudo cp branding/welcome/autostart.desktop "$CHROOT_DIR/etc/skel/.config/autostart/"
 
 ###############################################################################
-# BUILD SQUASHFS
+# SQUASHFS
 ###############################################################################
 log "Building SquashFS"
-
 sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
   -e boot -noappend -comp xz -Xbcj x86
 
 ###############################################################################
-# COPY KERNEL & INITRD
+# KERNEL + INITRD
 ###############################################################################
 log "Copying kernel + initrd"
 
@@ -214,7 +201,7 @@ sudo cp "$KERNEL" "$LIVE_DIR/vmlinuz"
 sudo cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# CONFIGURE BOOTLOADERS
+# BOOTLOADERS
 ###############################################################################
 log "Configuring ISOLINUX + EFI GRUB"
 
@@ -248,7 +235,7 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO (HYBRID GPT + FIXES)
+# BUILD UNSIGNED ISO (HYBRID GPT + UNIVERSAL FIX)
 ###############################################################################
 log "Building UNSIGNED ISO (Hybrid GPT Mode)"
 
@@ -260,8 +247,8 @@ sudo xorriso -as mkisofs \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -isohybrid-gpt-basdat \
   -partition_offset 16 \
-  -allow-limited-size \
   -no-pad \
+  -graft-points \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -285,7 +272,7 @@ sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERN
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# BUILD SIGNED ISO (HYBRID GPT + FIXES)
+# BUILD SIGNED ISO (HYBRID GPT + UNIVERSAL FIX)
 ###############################################################################
 log "Building SIGNED ISO (Hybrid GPT Mode)"
 
@@ -297,15 +284,15 @@ sudo xorriso -as mkisofs \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -isohybrid-gpt-basdat \
   -partition_offset 16 \
-  -allow-limited-size \
   -no-pad \
+  -graft-points \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
   "$SIGNED_DIR"
 
 ###############################################################################
-# COMPRESS + CHECKSUM
+# COMPRESS & CHECKSUM
 ###############################################################################
 log "Compressing ISO"
 sudo xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
