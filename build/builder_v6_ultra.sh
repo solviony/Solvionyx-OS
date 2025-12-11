@@ -213,14 +213,14 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO (UDF HYBRID)
+# BUILD UNSIGNED ISO (HYBRID, NO UDF)
 ###############################################################################
-log "Building UNSIGNED ISO (UDF hybrid)"
+log "Building UNSIGNED ISO (HYBRID, NO UDF)"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
+  -volid "$ISO_NAME" \
   -iso-level 3 \
-  -udf \
   -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
@@ -246,14 +246,14 @@ sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERN
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# BUILD SIGNED ISO (UDF HYBRID)
+# BUILD SIGNED ISO (HYBRID, NO UDF)
 ###############################################################################
-log "Building SIGNED ISO (UDF hybrid)"
+log "Building SIGNED ISO (HYBRID, NO UDF)"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
+  -volid "$ISO_NAME" \
   -iso-level 3 \
-  -udf \
   -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -c isolinux/boot.cat \
