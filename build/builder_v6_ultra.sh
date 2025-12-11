@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v8
+# Solvionyx OS Aurora Builder v8 (FINAL FIXED VERSION)
 set -euo pipefail
 
 ###############################################################################
@@ -14,7 +14,7 @@ trap 'fail "Build failed at line $LINENO"' ERR
 # PARAMETERS
 ###############################################################################
 EDITION="${1:-gnome}"      # gnome | kde | xfce
-PROFILE="${PROFILE:-full}" # full | minimal (hook for future use)
+PROFILE="${PROFILE:-full}" # full | minimal (future use)
 
 log "Edition: ${EDITION}"
 log "Profile: ${PROFILE}"
@@ -47,7 +47,7 @@ ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
 
 ###############################################################################
-# VOLUME LABEL (MUST BE <= 32 CHARACTERS)
+# VOLUME LABEL (ISO level max = 32 chars)
 ###############################################################################
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
@@ -61,16 +61,17 @@ sudo rm -rf "$BUILD_DIR"
 mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR"
 
 ###############################################################################
-# HELPER: RUN COMMANDS INSIDE CHROOT
+# CHROOT HELPER
 ###############################################################################
 in_chroot() {
   sudo chroot "$CHROOT_DIR" bash -lc "$*"
 }
 
 ###############################################################################
-# BOOTSTRAP
+# BOOTSTRAP BASE SYSTEM
 ###############################################################################
 log "Bootstrapping Debian (bookworm)"
+
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 sudo tee "$CHROOT_DIR/etc/apt/sources.list" >/dev/null <<EOF
@@ -79,12 +80,9 @@ deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free
 deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 EOF
 
-###############################################################################
-# BASE SYSTEM
-###############################################################################
-log "Installing base system"
+log "Installing base system inside chroot"
 in_chroot "
-  apt-get update
+  apt-get update &&
   apt-get install -y \
     debian-archive-keyring ca-certificates coreutils sudo systemd-sysv \
     curl wget xz-utils rsync dbus nano vim locales \
@@ -93,7 +91,7 @@ in_chroot "
 "
 
 in_chroot "
-  sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
+  sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen &&
   locale-gen
 "
 
@@ -113,25 +111,24 @@ case "$EDITION" in
     in_chroot "apt-get install -y task-xfce-desktop lightdm"
     ;;
   *)
-    fail "Unknown desktop edition: ${EDITION}. Use: gnome | kde | xfce."
+    fail "Unknown desktop: use gnome|kde|xfce"
     ;;
 esac
 
 ###############################################################################
 # BRANDING
 ###############################################################################
-log "Applying Solvionyx OS branding"
+log "Applying Solvionyx branding"
 
 sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds" "$CHROOT_DIR/usr/share/solvionyx"
 
 sudo cp "$AURORA_WALL" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-default.jpg"
 sudo cp "$AURORA_LOGO" "$CHROOT_DIR/usr/share/solvionyx/logo.png"
 
-sudo rsync -a "$PLYMOUTH_THEME/" \
-  "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx-aurora/"
+sudo rsync -a "$PLYMOUTH_THEME/" "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx-aurora/"
 
 in_chroot "
-  echo 'Theme=solvionyx-aurora' > /etc/plymouth/plymouthd.conf
+  echo 'Theme=solvionyx-aurora' > /etc/plymouth/plymouthd.conf &&
   update-initramfs -c -k all || true
 "
 
@@ -141,16 +138,15 @@ in_chroot "
 log "Applying GRUB theme"
 
 sudo mkdir -p "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora"
-sudo rsync -a "$GRUB_THEME/" \
-  "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
+sudo rsync -a "$GRUB_THEME/" "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
 
 in_chroot "
-  echo 'GRUB_THEME=/boot/grub/themes/solvionyx-aurora/theme.txt' >> /etc/default/grub
+  echo 'GRUB_THEME=/boot/grub/themes/solvionyx-aurora/theme.txt' >> /etc/default/grub &&
   update-grub || true
 "
 
 ###############################################################################
-# CALAMARES INSTALLER
+# CALAMARES
 ###############################################################################
 log "Installing Calamares"
 
@@ -169,8 +165,8 @@ in_chroot "
 log "Creating live user"
 
 in_chroot "
-  useradd -m -s /bin/bash solvionyx || true
-  echo 'solvionyx:solvionyx' | chpasswd
+  useradd -m -s /bin/bash solvionyx || true &&
+  echo 'solvionyx:solvionyx' | chpasswd &&
   usermod -aG sudo solvionyx
 "
 
@@ -189,29 +185,27 @@ in_chroot "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
 "
 
-# Disable systemd operations inside chroot
+# Disable systemd inside chroot
 in_chroot "ln -s /bin/true /usr/sbin/systemctl || true"
 
 ###############################################################################
 # WELCOME APP AUTOSTART
 ###############################################################################
-log "Enabling Welcome app autostart"
-
 sudo mkdir -p "$CHROOT_DIR/etc/skel/.config/autostart"
-sudo cp branding/welcome/autostart.desktop \
-        "$CHROOT_DIR/etc/skel/.config/autostart/"
+sudo cp branding/welcome/autostart.desktop "$CHROOT_DIR/etc/skel/.config/autostart/"
 
 ###############################################################################
 # BUILD SQUASHFS
 ###############################################################################
-log "Building SquashFS root filesystem"
+log "Building SquashFS"
+
 sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
   -e boot -noappend -comp xz -Xbcj x86
 
 ###############################################################################
-# KERNEL + INITRD
+# COPY KERNEL & INITRD
 ###############################################################################
-log "Copying kernel + initrd from chroot"
+log "Copying kernel + initrd"
 
 KERNEL=$(find "$CHROOT_DIR/boot" -name "vmlinuz-*" | head -n 1)
 INITRD=$(find "$CHROOT_DIR/boot" -name "initrd.img-*" | head -n 1)
@@ -220,7 +214,7 @@ sudo cp "$KERNEL" "$LIVE_DIR/vmlinuz"
 sudo cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# ISO BOOTLOADER SETUP
+# CONFIGURE BOOTLOADERS
 ###############################################################################
 log "Configuring ISOLINUX + EFI GRUB"
 
@@ -254,9 +248,9 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO (HYBRID GPT)
+# BUILD UNSIGNED ISO (HYBRID GPT + FIXES)
 ###############################################################################
-log "Building UNSIGNED ISO (HYBRID GPT MODE)"
+log "Building UNSIGNED ISO (Hybrid GPT Mode)"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
@@ -266,6 +260,8 @@ sudo xorriso -as mkisofs \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -isohybrid-gpt-basdat \
   -partition_offset 16 \
+  -allow-limited-size \
+  -no-pad \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -277,7 +273,7 @@ sudo xorriso -as mkisofs \
 ###############################################################################
 # SECUREBOOT SIGNING
 ###############################################################################
-log "Signing SecureBoot components"
+log "Signing SecureBoot Components"
 
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
@@ -289,9 +285,9 @@ sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERN
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# BUILD SIGNED ISO (HYBRID GPT)
+# BUILD SIGNED ISO (HYBRID GPT + FIXES)
 ###############################################################################
-log "Building SIGNED ISO (HYBRID GPT MODE)"
+log "Building SIGNED ISO (Hybrid GPT Mode)"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
@@ -301,6 +297,8 @@ sudo xorriso -as mkisofs \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -isohybrid-gpt-basdat \
   -partition_offset 16 \
+  -allow-limited-size \
+  -no-pad \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -310,8 +308,8 @@ sudo xorriso -as mkisofs \
 # COMPRESS + CHECKSUM
 ###############################################################################
 log "Compressing ISO"
-
 sudo xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
+
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
 log "BUILD COMPLETE for edition: $EDITION"
