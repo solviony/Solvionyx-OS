@@ -33,6 +33,13 @@ ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
 
 ###############################################################################
+# VOLUME LABEL FIX (MUST BE <= 32 CHARACTERS)
+###############################################################################
+VOLID="Solvionyx-${EDITION}-${DATE//./}"
+VOLID="${VOLID:0:32}"
+log "Using ISO Volume ID: $VOLID"
+
+###############################################################################
 # CLEAN WORKSPACE
 ###############################################################################
 log "Cleaning workspace"
@@ -219,7 +226,7 @@ log "Building UNSIGNED ISO (HYBRID, NO UDF)"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
-  -volid "$ISO_NAME" \
+  -volid "$VOLID" \
   -iso-level 3 \
   -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
@@ -252,7 +259,7 @@ log "Building SIGNED ISO (HYBRID, NO UDF)"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
-  -volid "$ISO_NAME" \
+  -volid "$VOLID" \
   -iso-level 3 \
   -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
