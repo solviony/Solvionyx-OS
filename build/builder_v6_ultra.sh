@@ -1,9 +1,9 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — FINAL (Native xorriso, SecureBoot Safe)
+# Solvionyx OS Aurora Builder v6 Ultra — FINAL STABLE
 set -euo pipefail
 
 ###############################################################################
-# LOGGING & ERROR HANDLING
+# LOGGING
 ###############################################################################
 log() { echo "[BUILD] $*"; }
 fail() { echo "[ERROR] $*" >&2; exit 1; }
@@ -13,21 +13,7 @@ trap 'fail "Build failed at line $LINENO"' ERR
 # PARAMETERS
 ###############################################################################
 EDITION="${1:-gnome}"
-PROFILE="${PROFILE:-full}"
-OS_FLAVOR="${OS_FLAVOR:-Aurora}"
-
-log "Edition: $EDITION"
-log "Profile: $PROFILE"
-log "Flavor: $OS_FLAVOR"
-
-###############################################################################
-# ULTRA DEBUG MODE
-###############################################################################
-log "Ultra Debug Mode Enabled"
-xorriso -version || true
-uname -a
-df -h
-lsb_release -a || true
+OS_FLAVOR="Aurora"
 
 ###############################################################################
 # DIRECTORIES
@@ -38,31 +24,17 @@ ISO_DIR="$BUILD_DIR/iso"
 LIVE_DIR="$ISO_DIR/live"
 SIGNED_DIR="$BUILD_DIR/signed-iso"
 
-BRANDING_DIR="branding"
-AURORA_WALL="$BRANDING_DIR/wallpapers/aurora-bg.jpg"
-AURORA_LOGO="$BRANDING_DIR/logo/solvionyx-logo.png"
-PLYMOUTH_THEME="$BRANDING_DIR/plymouth"
-GRUB_THEME="$BRANDING_DIR/grub"
-
-SOLVY_DEB="tools/solvy/solvy_3.0_amd64.deb"
-
-SECUREBOOT_DIR="secureboot"
-DB_KEY="$SECUREBOOT_DIR/db.key"
-DB_CRT="$SECUREBOOT_DIR/db.crt"
-
 DATE="$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
-
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
 
 ###############################################################################
-# CLEAN WORKSPACE
+# CLEAN
 ###############################################################################
-log "Cleaning workspace"
 sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT_DIR" "$ISO_DIR" "$LIVE_DIR" "$SIGNED_DIR"
+mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR"
 
 ###############################################################################
 # CHROOT HELPER
@@ -186,30 +158,23 @@ sudo cp branding/welcome/autostart.desktop \
 ###############################################################################
 # SQUASHFS
 ###############################################################################
-log "Creating SquashFS"
-
-sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
-  -e boot -noappend -comp zstd -Xcompression-level 19
+sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot
 
 ###############################################################################
-# KERNEL & INITRD
+# KERNEL + INITRD
 ###############################################################################
-log "Copying kernel and initrd"
-
-sudo cp "$(find "$CHROOT_DIR/boot" -name 'vmlinuz-*' | head -n1)" "$LIVE_DIR/vmlinuz"
-sudo cp "$(find "$CHROOT_DIR/boot" -name 'initrd.img-*' | head -n1)" "$LIVE_DIR/initrd.img"
+cp "$CHROOT_DIR"/boot/vmlinuz-* "$LIVE_DIR/vmlinuz"
+cp "$CHROOT_DIR"/boot/initrd.img-* "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# BOOTLOADERS
+# ISOLINUX
 ###############################################################################
-log "Configuring bootloaders"
-
-mkdir -p "$ISO_DIR/isolinux" "$ISO_DIR/EFI/BOOT" "$ISO_DIR/boot/grub"
-
+mkdir -p "$ISO_DIR/isolinux"
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
-cp /usr/lib/syslinux/modules/bios/*.c32 "$ISO_DIR/isolinux/"
+cp /usr/lib/syslinux/modules/bios/ldlinux.c32 "$ISO_DIR/isolinux/"
+cp /usr/lib/syslinux/modules/bios/vesamenu.c32 "$ISO_DIR/isolinux/"
 
-cat <<EOF > "$ISO_DIR/isolinux/isolinux.cfg"
+cat > "$ISO_DIR/isolinux/isolinux.cfg" <<EOF
 UI vesamenu.c32
 DEFAULT live
 LABEL live
@@ -217,91 +182,86 @@ LABEL live
   APPEND initrd=/live/initrd.img boot=live quiet splash
 EOF
 
+###############################################################################
+# EFI
+###############################################################################
 cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed "$ISO_DIR/EFI/BOOT/grubx64.efi"
 
-cat <<EOF > "$ISO_DIR/boot/grub/grub.cfg"
-search --set=root --file /live/vmlinuz
+mkdir -p "$ISO_DIR/boot/grub"
+cat > "$ISO_DIR/boot/grub/grub.cfg" <<EOF
+set default=0
 set timeout=5
-menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
- linux /live/vmlinuz boot=live quiet splash
- initrd /live/initrd.img
+menuentry "Start Solvionyx OS" {
+  linux /live/vmlinuz boot=live quiet splash
+  initrd /live/initrd.img
 }
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO — NATIVE XORRISO
+# BUILD UNSIGNED ISO — **THIS IS THE FIX**
 ###############################################################################
 log "Building UNSIGNED ISO"
 
-sudo xorriso \
-  -outdev "$BUILD_DIR/${ISO_NAME}.iso" \
-  -volid "$VOLID" \
-  -map "$ISO_DIR" / \
-  -boot_image isolinux \
-      dir=/isolinux \
-      bin_path=isolinux.bin \
-      cat_path=boot.cat \
-      load_size=4 \
-      boot_info_table=on \
-  -boot_image any \
-      efi_path=EFI/BOOT/BOOTX64.EFI \
-  -boot_image any replay \
-  -append_partition 2 0xef "$ISO_DIR/EFI/BOOT/BOOTX64.EFI" \
+xorriso -as mkisofs \
+  -o "$BUILD_DIR/${ISO_NAME}.iso" \
+  -V "$VOLID" \
+  -iso-level 3 \
+  -full-iso9660-filenames \
+  -joliet -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -isohybrid-gpt-basdat \
   -partition_offset 16 \
-  -compliance no_emul_toc
+  -c isolinux/boot.cat \
+  -b isolinux/isolinux.bin \
+  -no-emul-boot \
+  -boot-load-size 4 \
+  -boot-info-table \
+  -eltorito-alt-boot \
+  -e EFI/BOOT/BOOTX64.EFI \
+  -no-emul-boot \
+  "$ISO_DIR"
 
 ###############################################################################
-# SECUREBOOT SIGNING
+# SECUREBOOT SIGN
 ###############################################################################
-log "Signing SecureBoot components"
-
-rm -rf "$SIGNED_DIR"
-mkdir -p "$SIGNED_DIR"
-
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
-sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" \
+sbsign --key secureboot/db.key --cert secureboot/db.crt \
   --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
   "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
 
-sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" \
-  --output "$SIGNED_DIR/live/vmlinuz.signed" \
+sbsign --key secureboot/db.key --cert secureboot/db.crt \
+  --output "$SIGNED_DIR/live/vmlinuz" \
   "$SIGNED_DIR/live/vmlinuz"
 
-mv "$SIGNED_DIR/live/vmlinuz.signed" "$SIGNED_DIR/live/vmlinuz"
-
 ###############################################################################
-# BUILD SIGNED ISO — NATIVE XORRISO
+# BUILD SIGNED ISO
 ###############################################################################
 log "Building SIGNED ISO"
 
-sudo xorriso \
-  -outdev "$BUILD_DIR/$SIGNED_NAME" \
-  -volid "$VOLID" \
-  -map "$SIGNED_DIR" / \
-  -boot_image isolinux \
-      dir=/isolinux \
-      bin_path=isolinux.bin \
-      cat_path=boot.cat \
-      load_size=4 \
-      boot_info_table=on \
-  -boot_image any \
-      efi_path=EFI/BOOT/BOOTX64.EFI \
-  -boot_image any replay \
-  -append_partition 2 0xef "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
+xorriso -as mkisofs \
+  -o "$BUILD_DIR/$SIGNED_NAME" \
+  -V "$VOLID" \
+  -iso-level 3 \
+  -full-iso9660-filenames \
+  -joliet -joliet-long \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -isohybrid-gpt-basdat \
   -partition_offset 16 \
-  -compliance no_emul_toc
+  -c isolinux/boot.cat \
+  -b isolinux/isolinux.bin \
+  -no-emul-boot \
+  -boot-load-size 4 \
+  -boot-info-table \
+  -eltorito-alt-boot \
+  -e EFI/BOOT/BOOTX64.EFI \
+  -no-emul-boot \
+  "$SIGNED_DIR"
 
 ###############################################################################
-# COMPRESS & CHECKSUM
+# COMPRESS
 ###############################################################################
-log "Compressing ISO"
-
 xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
