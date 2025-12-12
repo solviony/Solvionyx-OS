@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — FINAL FIXED VERSION
+# Solvionyx OS Aurora Builder v6 Ultra — Ultra Debug Mode
 set -euo pipefail
 
 ###############################################################################
@@ -7,20 +7,35 @@ set -euo pipefail
 ###############################################################################
 log() { echo "[BUILD] $*"; }
 fail() { echo "[ERROR] $*" >&2; exit 1; }
+
 trap 'fail "Build failed at line $LINENO"' ERR
 
 ###############################################################################
 # PARAMETERS
 ###############################################################################
-EDITION="${1:-gnome}"         
-PROFILE="${PROFILE:-full}"    
-
-# FIX 1 — Guarantee OS_FLAVOR always exists
+EDITION="${1:-gnome}"
+PROFILE="${PROFILE:-full}"
 OS_FLAVOR="${OS_FLAVOR:-Aurora}"
 
 log "Edition: $EDITION"
 log "Profile: $PROFILE"
 log "Flavor: $OS_FLAVOR"
+
+###############################################################################
+# ULTRA DEBUG MODE — NEW
+###############################################################################
+log "Enabling ULTRA DEBUG MODE…"
+
+export XORRISO="xorriso"
+export XORRISO_DEBUG_OPTS="--report_about ALL -follow_links -for_backup -report_el_torito as_mkisofs -report_system_area as_mkisofs"
+
+log "Xorriso version:"
+xorriso -version || true
+
+log "System info:"
+uname -a
+df -h
+lsb_release -a || true
 
 ###############################################################################
 # DIRECTORIES
@@ -70,7 +85,6 @@ in_chroot() {
 # BOOTSTRAP
 ###############################################################################
 log "Bootstrapping Debian…"
-
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 sudo tee "$CHROOT_DIR/etc/apt/sources.list" > /dev/null <<EOF
@@ -83,7 +97,6 @@ EOF
 # BASE SYSTEM
 ###############################################################################
 log "Installing base system…"
-
 in_chroot "
   apt-get update &&
   apt-get install -y \
@@ -116,12 +129,10 @@ esac
 log "Applying Solvionyx branding…"
 
 sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds" "$CHROOT_DIR/usr/share/solvionyx"
-
 sudo cp "$AURORA_WALL" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-default.jpg"
 sudo cp "$AURORA_LOGO" "$CHROOT_DIR/usr/share/solvionyx/logo.png"
 
-sudo rsync -a "$PLYMOUTH_THEME/" \
-  "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx-aurora/"
+sudo rsync -a "$PLYMOUTH_THEME/" "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx-aurora/"
 
 in_chroot "
   echo 'Theme=solvionyx-aurora' > /etc/plymouth/plymouthd.conf &&
@@ -243,13 +254,25 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# ISO OPTIONS (AUTO-MBR FIX APPLIED)
+# DEBUG: DUMP ISO DIRECTORY
+###############################################################################
+log "[DEBUG] ISO staging directory tree:"
+tree -a "$ISO_DIR" || ls -R "$ISO_DIR"
+
+###############################################################################
+# DEBUG: PRINT SYSTEM AREA ANALYSIS
+###############################################################################
+log "[DEBUG] System-area analysis before mkisofs:"
+xorriso -report_system_area as_mkisofs -as mkisofs -print-size "$ISO_DIR" || true
+
+###############################################################################
+# ISO OPTIONS
 ###############################################################################
 ISO_OPTS=(
   -volid "$VOLID"
   -iso-level 3
   -joliet-long
-  -isohybrid-mbr auto        # FIX 2 — use xorriso internal MBR
+  -isohybrid-mbr auto
   -isohybrid-gpt-basdat
   -partition_offset 16
   -no-pad
@@ -263,6 +286,12 @@ ISO_OPTS=(
 )
 
 ###############################################################################
+# DEBUG: SHOW MKISOFS COMMAND
+###############################################################################
+log "[DEBUG] mkisofs command line:"
+echo sudo xorriso -as mkisofs -o "$BUILD_DIR/${ISO_NAME}.iso" "${ISO_OPTS[@]}" $XORRISO_DEBUG_OPTS "$ISO_DIR"
+
+###############################################################################
 # BUILD UNSIGNED ISO
 ###############################################################################
 log "Building UNSIGNED ISO…"
@@ -270,6 +299,7 @@ log "Building UNSIGNED ISO…"
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
   "${ISO_OPTS[@]}" \
+  $XORRISO_DEBUG_OPTS \
   "$ISO_DIR"
 
 ###############################################################################
@@ -289,15 +319,17 @@ sudo mv "${KERNEL_SIGN}.signed" "$KERNEL_SIGN"
 ###############################################################################
 # BUILD SIGNED ISO
 ###############################################################################
-log "Building SIGNED ISO…"
+log "[DEBUG] mkisofs command for signed ISO:"
+echo sudo xorriso -as mkisofs -o "$BUILD_DIR/$SIGNED_NAME" "${ISO_OPTS[@]}" $XORRISO_DEBUG_OPTS "$SIGNED_DIR"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
   "${ISO_OPTS[@]}" \
+  $XORRISO_DEBUG_OPTS \
   "$SIGNED_DIR"
 
 ###############################################################################
-# COMPRESS + CHECKSUM
+# COMPRESS & CHECKSUM
 ###############################################################################
 log "Compressing ISO…"
 
