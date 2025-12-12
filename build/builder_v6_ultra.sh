@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v8 (FINAL FIXED VERSION)
+# Solvionyx OS Aurora Builder v8 (FINAL AUTO-MBR FIX)
 set -euo pipefail
 
 ###############################################################################
@@ -173,7 +173,6 @@ in_chroot "
   dpkg -i /tmp/solvy.deb || apt-get install -f -y
 "
 
-# Disable systemctl inside chroot
 in_chroot "ln -s /bin/true /usr/sbin/systemctl || true"
 
 ###############################################################################
@@ -203,7 +202,7 @@ sudo cp "$INITRD" "$LIVE_DIR/initrd.img"
 ###############################################################################
 # BOOTLOADERS
 ###############################################################################
-log "Configuring ISOLINUX + EFI GRUB"
+log "Configuring ISOLINUX + GRUB"
 
 sudo mkdir -p "$ISO_DIR/isolinux"
 sudo cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
@@ -235,20 +234,20 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO (HYBRID GPT + UNIVERSAL FIX)
+# BUILD UNSIGNED ISO (AUTO-MBR FIX + GPT)
 ###############################################################################
-log "Building UNSIGNED ISO (Hybrid GPT Mode)"
+log "Building UNSIGNED ISO (auto-MBR + GPT hybrid)"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
   -volid "$VOLID" \
   -iso-level 3 \
   -joliet-long \
-  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+  -isohybrid-mbr auto \
   -isohybrid-gpt-basdat \
   -partition_offset 16 \
-  -no-pad \
   -graft-points \
+  -no-pad \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -272,20 +271,20 @@ sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL2}.signed" "$KERN
 sudo mv "${KERNEL2}.signed" "$KERNEL2"
 
 ###############################################################################
-# BUILD SIGNED ISO (HYBRID GPT + UNIVERSAL FIX)
+# BUILD SIGNED ISO (AUTO-MBR FIX + GPT)
 ###############################################################################
-log "Building SIGNED ISO (Hybrid GPT Mode)"
+log "Building SIGNED ISO (auto-MBR + GPT hybrid)"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
   -volid "$VOLID" \
   -iso-level 3 \
   -joliet-long \
-  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+  -isohybrid-mbr auto \
   -isohybrid-gpt-basdat \
   -partition_offset 16 \
-  -no-pad \
   -graft-points \
+  -no-pad \
   -c isolinux/boot.cat \
   -b isolinux/isolinux.bin \
   -no-emul-boot -boot-load-size 4 -boot-info-table \
