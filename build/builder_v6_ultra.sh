@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v9 (High Performance Edition)
+# Solvionyx OS Aurora Builder v6 Ultra — FINAL FIXED VERSION
 set -euo pipefail
 
 ###############################################################################
@@ -12,11 +12,15 @@ trap 'fail "Build failed at line $LINENO"' ERR
 ###############################################################################
 # PARAMETERS
 ###############################################################################
-EDITION="${1:-gnome}"         # gnome | kde | xfce
-PROFILE="${PROFILE:-full}"    # full | minimal (future use)
+EDITION="${1:-gnome}"         
+PROFILE="${PROFILE:-full}"    
+
+# FIX 1 — Guarantee OS_FLAVOR always exists
+OS_FLAVOR="${OS_FLAVOR:-Aurora}"
 
 log "Edition: $EDITION"
 log "Profile: $PROFILE"
+log "Flavor: $OS_FLAVOR"
 
 ###############################################################################
 # DIRECTORIES
@@ -182,25 +186,9 @@ sudo mkdir -p "$CHROOT_DIR/etc/skel/.config/autostart"
 sudo cp branding/welcome/autostart.desktop "$CHROOT_DIR/etc/skel/.config/autostart/"
 
 ###############################################################################
-# STRIP BLOAT (NEW IN v9)
+# SQUASHFS
 ###############################################################################
-log "Stripping unnecessary packages to reduce ISO size..."
-
-in_chroot "
-  apt-get purge -y \
-    nano-tiny info aspell* iamerican ibritish \
-    manpages man-db \
-    dictionaries-common \
-    popularity-contest || true
-
-  apt-get autoremove -y
-  apt-get clean
-"
-
-###############################################################################
-# SQUASHFS (ZSTD — NEW IN v9)
-###############################################################################
-log "Building SquashFS (ZSTD compression)…"
+log "Building SquashFS (ZSTD)…"
 
 sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
   -e boot \
@@ -255,15 +243,13 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO (Unified Builder v9)
+# ISO OPTIONS (AUTO-MBR FIX APPLIED)
 ###############################################################################
-log "Building UNSIGNED ISO…"
-
 ISO_OPTS=(
   -volid "$VOLID"
   -iso-level 3
   -joliet-long
-  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin
+  -isohybrid-mbr auto        # FIX 2 — use xorriso internal MBR
   -isohybrid-gpt-basdat
   -partition_offset 16
   -no-pad
@@ -275,6 +261,11 @@ ISO_OPTS=(
   -e EFI/BOOT/BOOTX64.EFI
   -no-emul-boot
 )
+
+###############################################################################
+# BUILD UNSIGNED ISO
+###############################################################################
+log "Building UNSIGNED ISO…"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
@@ -289,13 +280,10 @@ log "Signing SecureBoot components…"
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
 GRUB_EFI=$(find "$SIGNED_DIR/EFI/BOOT" -name "BOOTX64.EFI" | head -n 1)
-sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" \
-  --output "$GRUB_EFI" "$GRUB_EFI"
+sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "$GRUB_EFI" "$GRUB_EFI"
 
 KERNEL_SIGN=$(find "$SIGNED_DIR/live" -name "vmlinuz*" | head -n 1)
-sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" \
-  --output "${KERNEL_SIGN}.signed" "$KERNEL_SIGN"
-
+sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL_SIGN}.signed" "$KERNEL_SIGN"
 sudo mv "${KERNEL_SIGN}.signed" "$KERNEL_SIGN"
 
 ###############################################################################
@@ -311,7 +299,7 @@ sudo xorriso -as mkisofs \
 ###############################################################################
 # COMPRESS + CHECKSUM
 ###############################################################################
-log "Compressing ISO (XZ)…"
+log "Compressing ISO…"
 
 sudo xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
