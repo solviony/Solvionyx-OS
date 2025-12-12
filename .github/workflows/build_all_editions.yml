@@ -32,35 +32,27 @@ jobs:
           sudo apt-get install -y \
             debootstrap \
             xorriso \
-            squashfs-tools \
-            syslinux isolinux syslinux-utils \
+            isolinux syslinux-common syslinux-utils \
             grub-pc-bin grub-efi-amd64-bin grub-common \
-            mtools \
-            dosfstools \
-            systemd-container \
-            libssl-dev \
-            sbsigntool \
             shim-signed \
+            mtools \
+            squashfs-tools \
+            dosfstools \
+            sbsigntool \
             efitools \
-            git \
-            wget curl unzip rsync \
-            plymouth plymouth-themes plymouth-label
+            zstd \
+            rsync wget curl
 
       # ---------------------------------------------------------
-      # RESTORE SECUREBOOT KEYS
+      # RESTORE SECUREBOOT KEYS (ONLY THIS BLOCK, FIXED)
       # ---------------------------------------------------------
-      - name: Restore SecureBoot Keys
-        run: |
-          mkdir -p secureboot
-          echo "${{ secrets.SECUREBOOT_DB_KEY }}" > secureboot/db.key
-          echo "${{ secrets.SECUREBOOT_DB_CRT }}" > secureboot/db.crt
-          chmod 600 secureboot/db.key
-          chmod 644 secureboot/db.crt
-      - name: Restore SecureBoot Keys
+      - name: Restore SecureBoot Keys (Base64 Decode)
         run: |
           mkdir -p secureboot
           echo "${{ secrets.SECUREBOOT_DB_KEY_B64 }}" | base64 -d > secureboot/db.key
           echo "${{ secrets.SECUREBOOT_DB_CRT_B64 }}" | base64 -d > secureboot/db.crt
+          chmod 600 secureboot/db.key
+          chmod 644 secureboot/db.crt
 
       # ---------------------------------------------------------
       # RUN BUILDER SCRIPT
@@ -72,7 +64,7 @@ jobs:
           sudo bash build/builder_v6_ultra.sh "${{ matrix.edition }}"
 
       # ---------------------------------------------------------
-      # LOCATE OUTPUT (signed + compressed)
+      # Locate built artifacts
       # ---------------------------------------------------------
       - name: Locate Output Artifact
         id: iso_path
@@ -82,7 +74,7 @@ jobs:
           echo "Found artifact: $OUT"
 
       # ---------------------------------------------------------
-      # Upload per-edition artifacts
+      # Upload artifacts
       # ---------------------------------------------------------
       - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4
@@ -125,13 +117,12 @@ jobs:
 
             ### Status:
             - SecureBoot: Fully Signed
-            - Installer: Calamares (Branded)
-            - Solvy AI: Integrated
-            - Welcome App: Integrated
-            - Aurora V6 Branding: Applied
+            - Installer: Calamares
+            - Solvy AI Included
+            - Welcome App Included
+            - Aurora v6 Branding Applied
 
-            ### Files:
-            All signed ISO images (.iso.xz) and checksum files are included below.
+            All signed ISO images (.iso.xz) and SHA256SUMS are attached.
           files: release_artifacts/**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
