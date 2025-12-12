@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — Ultra Debug Mode
+# Solvionyx OS Aurora Builder v6 Ultra — Ultra Debug Mode (SAFE MKISOFS)
 set -euo pipefail
 
 ###############################################################################
@@ -22,12 +22,9 @@ log "Profile: $PROFILE"
 log "Flavor: $OS_FLAVOR"
 
 ###############################################################################
-# ULTRA DEBUG MODE — NEW
+# ULTRA DEBUG MODE
 ###############################################################################
 log "Enabling ULTRA DEBUG MODE…"
-
-export XORRISO="xorriso"
-export XORRISO_DEBUG_OPTS="--report_about ALL -follow_links -for_backup -report_el_torito as_mkisofs -report_system_area as_mkisofs"
 
 log "Xorriso version:"
 xorriso -version || true
@@ -64,7 +61,6 @@ SIGNED_NAME="secureboot-${ISO_NAME}.iso"
 
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
-
 log "ISO Volume ID: $VOLID"
 
 ###############################################################################
@@ -254,19 +250,19 @@ menuentry "Start Solvionyx OS ($OS_FLAVOR)" {
 EOF
 
 ###############################################################################
-# DEBUG: DUMP ISO DIRECTORY
+# DEBUG: DUMP ISO DIRECTORY TREE
 ###############################################################################
 log "[DEBUG] ISO staging directory tree:"
 tree -a "$ISO_DIR" || ls -R "$ISO_DIR"
 
 ###############################################################################
-# DEBUG: PRINT SYSTEM AREA ANALYSIS
+# DEBUG: SYSTEM-AREA CHECK (SAFE MODE)
 ###############################################################################
-log "[DEBUG] System-area analysis before mkisofs:"
-xorriso -report_system_area as_mkisofs -as mkisofs -print-size "$ISO_DIR" || true
+log "[DEBUG] Xorriso system-area scan BEFORE mkisofs:"
+xorriso -indev /dev/null -report_system_area all || true
 
 ###############################################################################
-# ISO OPTIONS
+# ISO OPTIONS (STRICTLY MKISOFS-SAFE)
 ###############################################################################
 ISO_OPTS=(
   -volid "$VOLID"
@@ -279,27 +275,28 @@ ISO_OPTS=(
   -graft-points
   -c isolinux/boot.cat
   -b isolinux/isolinux.bin
-  -no-emul-boot -boot-load-size 4 -boot-info-table
+  -no-emul-boot
+  -boot-load-size 4
+  -boot-info-table
   -eltorito-alt-boot
   -e EFI/BOOT/BOOTX64.EFI
   -no-emul-boot
 )
 
 ###############################################################################
-# DEBUG: SHOW MKISOFS COMMAND
+# DEBUG: PRINT MKISOFS COMMAND
 ###############################################################################
-log "[DEBUG] mkisofs command line:"
-echo sudo xorriso -as mkisofs -o "$BUILD_DIR/${ISO_NAME}.iso" "${ISO_OPTS[@]}" $XORRISO_DEBUG_OPTS "$ISO_DIR"
+log "[DEBUG] mkisofs command:"
+echo xorriso -as mkisofs -o "$BUILD_DIR/${ISO_NAME}.iso" "${ISO_OPTS[@]}" "$ISO_DIR"
 
 ###############################################################################
-# BUILD UNSIGNED ISO
+# BUILD UNSIGNED ISO (CLEAN, SAFE)
 ###############################################################################
 log "Building UNSIGNED ISO…"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
   "${ISO_OPTS[@]}" \
-  $XORRISO_DEBUG_OPTS \
   "$ISO_DIR"
 
 ###############################################################################
@@ -310,29 +307,27 @@ log "Signing SecureBoot components…"
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
 GRUB_EFI=$(find "$SIGNED_DIR/EFI/BOOT" -name "BOOTX64.EFI" | head -n 1)
-sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "$GRUB_EFI" "$GRUB_EFI"
-
 KERNEL_SIGN=$(find "$SIGNED_DIR/live" -name "vmlinuz*" | head -n 1)
+
+sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "$GRUB_EFI" "$GRUB_EFI"
 sudo sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "${KERNEL_SIGN}.signed" "$KERNEL_SIGN"
 sudo mv "${KERNEL_SIGN}.signed" "$KERNEL_SIGN"
 
 ###############################################################################
 # BUILD SIGNED ISO
 ###############################################################################
-log "[DEBUG] mkisofs command for signed ISO:"
-echo sudo xorriso -as mkisofs -o "$BUILD_DIR/$SIGNED_NAME" "${ISO_OPTS[@]}" $XORRISO_DEBUG_OPTS "$SIGNED_DIR"
+log "[DEBUG] mkisofs signed ISO command:"
+echo xorriso -as mkisofs -o "$BUILD_DIR/$SIGNED_NAME" "${ISO_OPTS[@]}" "$SIGNED_DIR"
 
 sudo xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
   "${ISO_OPTS[@]}" \
-  $XORRISO_DEBUG_OPTS \
   "$SIGNED_DIR"
 
 ###############################################################################
-# COMPRESS & CHECKSUM
+# COMPRESS + CHECKSUM
 ###############################################################################
 log "Compressing ISO…"
-
 sudo xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
