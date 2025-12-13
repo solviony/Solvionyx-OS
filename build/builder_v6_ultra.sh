@@ -80,22 +80,25 @@ cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
 cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# UKI (DEBIAN-NATIVE USING UKIFY)
+# UKI (DEBIAN-NATIVE — STUB-BASED, MEASURED BOOT)
 ###############################################################################
-log "Building UKI via systemd-ukify"
+log "Building UKI (Debian-native)"
 
-sudo chroot "$CHROOT_DIR" bash -lc "
-ukify build \
-  --linux /boot/$(basename "$VMLINUX") \
-  --initrd /boot/$(basename "$INITRD") \
-  --cmdline 'boot=live quiet splash systemd.measure=yes' \
-  --os-release /usr/lib/os-release \
-  --pcr-policy \
-  --sbat 'Solvionyx,1,2025-12-13' \
-  --output /boot/solvionyx.efi
-"
+STUB="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+UKI_IMAGE="$UKI_DIR/solvionyx-uki.efi"
 
-sudo cp "$CHROOT_DIR/boot/solvionyx.efi" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
+if [ ! -f "$STUB" ]; then
+  fail "systemd EFI stub not found (linuxx64.efi.stub missing)"
+fi
+
+CMDLINE="boot=live quiet splash systemd.measure=yes systemd.pcrlock=yes"
+
+objcopy \
+  --add-section .osrel="$CHROOT_DIR/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
+  --add-section .cmdline=<(echo -n "$CMDLINE") --change-section-vma .cmdline=0x30000 \
+  --add-section .linux="$VMLINUX" --change-section-vma .linux=0x2000000 \
+  --add-section .initrd="$INITRD" --change-section-vma .initrd=0x3000000 \
+  "$STUB" "$UKI_IMAGE"
 
 ###############################################################################
 # EFI BOOTLOADER
