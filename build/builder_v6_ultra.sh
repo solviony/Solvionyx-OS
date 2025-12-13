@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — FINAL CORRECTED
+# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM HARDENED
 set -euo pipefail
 
 log() { echo "[BUILD] $*"; }
@@ -12,6 +12,14 @@ trap 'fail "Build failed at line $LINENO"' ERR
 EDITION="${1:-gnome}"
 
 ###############################################################################
+# BUILD CONTEXT (CI / RELEASE SAFE)
+###############################################################################
+IS_RELEASE="false"
+if [ -n "${GITHUB_REF:-}" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
+  IS_RELEASE="true"
+fi
+
+###############################################################################
 # DIRECTORIES
 ###############################################################################
 BUILD_DIR="solvionyx_build"
@@ -19,10 +27,12 @@ CHROOT_DIR="$BUILD_DIR/chroot"
 ISO_DIR="$BUILD_DIR/iso"
 LIVE_DIR="$ISO_DIR/live"
 SIGNED_DIR="$BUILD_DIR/signed-iso"
+UKI_DIR="$BUILD_DIR/uki"
 
 DATE="$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
+
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
 
@@ -31,7 +41,7 @@ VOLID="${VOLID:0:32}"
 ###############################################################################
 log "Cleaning workspace"
 sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT"
+mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR" "$UKI_DIR"
 
 ###############################################################################
 # BOOTSTRAP
@@ -40,18 +50,28 @@ log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 ###############################################################################
-# BASE SYSTEM
+# BASE SYSTEM + OEM + TPM + UKI TOOLS
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
-  sudo systemd-sysv \
+  sudo systemd-sysv systemd-boot \
   linux-image-amd64 \
   live-boot \
   grub-efi-amd64 \
   shim-signed \
+  systemd-ukify systemd-stub \
+  tpm2-tools \
+  cryptsetup \
+  calamares \
   task-gnome-desktop gdm3
 "
+
+###############################################################################
+# OEM INSTALLER ENABLEMENT
+###############################################################################
+sudo mkdir -p "$CHROOT_DIR/etc/calamares"
+echo "OEM_INSTALL=true" | sudo tee "$CHROOT_DIR/etc/calamares/oem.conf" >/dev/null
 
 ###############################################################################
 # SQUASHFS
@@ -60,13 +80,37 @@ log "Building SquashFS"
 sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot
 
 ###############################################################################
-# KERNEL
+# KERNEL + INITRD
 ###############################################################################
-cp "$CHROOT_DIR"/boot/vmlinuz-* "$LIVE_DIR/vmlinuz"
-cp "$CHROOT_DIR"/boot/initrd.img-* "$LIVE_DIR/initrd.img"
+VMLINUX="$(ls "$CHROOT_DIR"/boot/vmlinuz-*)"
+INITRD="$(ls "$CHROOT_DIR"/boot/initrd.img-*)"
+
+cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
+cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# ISOLINUX (BIOS)
+# UKI (UNIFIED KERNEL IMAGE)
+###############################################################################
+log "Building UKI"
+
+UKI_IMAGE="$UKI_DIR/solvionyx-uki.efi"
+
+sudo ukify build \
+  --linux="$VMLINUX" \
+  --initrd="$INITRD" \
+  --cmdline="boot=live quiet splash systemd.measure=yes" \
+  --os-release="$CHROOT_DIR/usr/lib/os-release" \
+  --output="$UKI_IMAGE"
+
+###############################################################################
+# EFI TREE
+###############################################################################
+mkdir -p "$ISO_DIR/EFI/BOOT"
+cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
+cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
+
+###############################################################################
+# ISOLINUX (UNSIGNED HYBRID ONLY)
 ###############################################################################
 mkdir -p "$ISO_DIR/isolinux"
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
@@ -78,14 +122,6 @@ LABEL live
   KERNEL /live/vmlinuz
   APPEND initrd=/live/initrd.img boot=live quiet splash
 EOF
-
-###############################################################################
-# EFI (UEFI)
-###############################################################################
-mkdir -p "$ISO_DIR/EFI/BOOT"
-cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
-cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed \
-   "$ISO_DIR/EFI/BOOT/grubx64.efi"
 
 ###############################################################################
 # BUILD UNSIGNED HYBRID ISO
@@ -110,6 +146,7 @@ xorriso -as mkisofs \
 # PREPARE SIGNED TREE
 ###############################################################################
 log "Preparing signed ISO tree"
+
 rm -rf "$SIGNED_DIR"
 mkdir -p "$SIGNED_DIR"
 
@@ -118,34 +155,29 @@ xorriso -osirrox on \
   -extract / "$SIGNED_DIR"
 
 ###############################################################################
-# SECUREBOOT SIGN (SAFE – PREVENT DOUBLE SIGN)
+# REMOVE BIOS ARTIFACTS (UEFI-ONLY)
 ###############################################################################
-if sbverify --list "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" >/dev/null 2>&1; then
-  log "EFI already signed — skipping re-sign"
-else
+rm -rf "$SIGNED_DIR/isolinux" || true
+
+###############################################################################
+# SECURE BOOT SIGNING (SINGLE-PASS)
+###############################################################################
+if [ "$IS_RELEASE" = "true" ]; then
+  log "Release build — Secure Boot signing"
+
   sbsign --key secureboot/db.key --cert secureboot/db.crt \
     --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
     "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
-fi
 
-if sbverify --list "$SIGNED_DIR/live/vmlinuz" >/dev/null 2>&1; then
-  log "Kernel already signed — skipping re-sign"
-else
   sbsign --key secureboot/db.key --cert secureboot/db.crt \
-    --output "$SIGNED_DIR/live/vmlinuz" \
-    "$SIGNED_DIR/live/vmlinuz"
+    --output "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
+    "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
+
+  sbverify --list "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
+    || fail "UKI Secure Boot validation failed"
+else
+  log "Non-release build — Secure Boot skipped"
 fi
-
-###############################################################################
-# SECUREBOOT SIGN
-###############################################################################
-sbsign --key secureboot/db.key --cert secureboot/db.crt \
-  --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
-  "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
-
-sbsign --key secureboot/db.key --cert secureboot/db.crt \
-  --output "$SIGNED_DIR/live/vmlinuz" \
-  "$SIGNED_DIR/live/vmlinuz"
 
 ###############################################################################
 # BUILD SIGNED UEFI-ONLY ISO
@@ -163,7 +195,19 @@ xorriso -as mkisofs \
     -no-emul-boot \
   "$SIGNED_DIR"
 
+###############################################################################
+# FINAL ARTIFACTS
+###############################################################################
 xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
+
+cat <<EOF > "$BUILD_DIR/BUILD-META.txt"
+Edition: $EDITION
+Date: $DATE
+SecureBoot: $IS_RELEASE
+UKI: enabled
+TPM2 Measured Boot: enabled
+OEM Installer: enabled
+EOF
 
 log "BUILD COMPLETE — $EDITION"
