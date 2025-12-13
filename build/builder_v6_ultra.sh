@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — FINAL STABLE (FULLY WIRED)
+# Solvionyx OS Aurora Builder v6 Ultra — FINAL STABLE (MKISOFS SAFE)
 set -euo pipefail
 
 ###############################################################################
@@ -16,7 +16,7 @@ EDITION="${1:-gnome}"
 OS_FLAVOR="Aurora"
 
 ###############################################################################
-# PATHS & ASSETS (ADDED — REQUIRED)
+# PATHS & ASSETS
 ###############################################################################
 BRANDING_DIR="branding"
 AURORA_WALL="$BRANDING_DIR/wallpapers/aurora-bg.jpg"
@@ -95,22 +95,14 @@ locale-gen
 log "Installing desktop: $EDITION"
 
 case "$EDITION" in
-  gnome)
-    in_chroot "apt-get install -y task-gnome-desktop gdm3"
-    ;;
-  kde)
-    in_chroot "apt-get install -y task-kde-desktop sddm"
-    ;;
-  xfce)
-    in_chroot "apt-get install -y task-xfce-desktop lightdm"
-    ;;
-  *)
-    fail "Unknown edition: $EDITION"
-    ;;
+  gnome) in_chroot "apt-get install -y task-gnome-desktop gdm3" ;;
+  kde)   in_chroot "apt-get install -y task-kde-desktop sddm" ;;
+  xfce)  in_chroot "apt-get install -y task-xfce-desktop lightdm" ;;
+  *) fail "Unknown edition: $EDITION" ;;
 esac
 
 ###############################################################################
-# BRANDING (SAFE)
+# BRANDING
 ###############################################################################
 log "Applying branding"
 
@@ -131,18 +123,13 @@ update-initramfs -c -k all || true
 "
 
 ###############################################################################
-# GRUB THEME (FIXED)
+# GRUB THEME
 ###############################################################################
 log "Applying GRUB theme"
-
-# Ensure target directory exists
 sudo mkdir -p "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora"
 
-# Copy theme only if source exists
-if [ -d "$GRUB_THEME" ]; then
-  sudo rsync -a "$GRUB_THEME/" \
-    "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
-fi
+[ -d "$GRUB_THEME" ] && sudo rsync -a "$GRUB_THEME/" \
+  "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
 
 in_chroot "
 echo 'GRUB_THEME=/boot/grub/themes/solvionyx-aurora/theme.txt' >> /etc/default/grub &&
@@ -153,7 +140,6 @@ update-grub || true
 # CALAMARES
 ###############################################################################
 log "Installing Calamares"
-
 sudo rsync -a branding/calamares/ "$CHROOT_DIR/etc/calamares/" || true
 
 in_chroot "
@@ -172,7 +158,7 @@ usermod -aG sudo solvionyx
 "
 
 ###############################################################################
-# SOLVY AI (SAFE)
+# SOLVY AI
 ###############################################################################
 if [ -f "$SOLVY_DEB" ]; then
   sudo cp "$SOLVY_DEB" "$CHROOT_DIR/tmp/solvy.deb"
@@ -231,7 +217,7 @@ menuentry "Start Solvionyx OS" {
 EOF
 
 ###############################################################################
-# BUILD ISO (NATIVE XORRISO — CORRECT)
+# BUILD UNSIGNED ISO (FIXED)
 ###############################################################################
 log "Building UNSIGNED ISO"
 
@@ -242,7 +228,7 @@ xorriso -as mkisofs \
   -full-iso9660-filenames \
   -joliet \
   -rock \
-  -padding 0 \
+  -pad \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -eltorito-boot isolinux/isolinux.bin \
     -no-emul-boot -boot-load-size 4 -boot-info-table \
@@ -252,7 +238,7 @@ xorriso -as mkisofs \
   "$ISO_DIR"
 
 ###############################################################################
-# SECUREBOOT SIGN
+# SECUREBOOT SIGN + FINAL ISO
 ###############################################################################
 if [ -f "$DB_KEY" ] && [ -f "$DB_CRT" ]; then
   xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
@@ -272,6 +258,7 @@ if [ -f "$DB_KEY" ] && [ -f "$DB_CRT" ]; then
     -full-iso9660-filenames \
     -joliet \
     -rock \
+    -pad \
     -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
     -eltorito-boot isolinux/isolinux.bin \
       -no-emul-boot -boot-load-size 4 -boot-info-table \
