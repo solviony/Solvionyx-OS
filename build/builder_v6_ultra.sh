@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — FINAL STABLE (MKISOFS SAFE)
+# Solvionyx OS Aurora Builder v6 Ultra — FINAL STABLE (SECUREBOOT SAFE)
 set -euo pipefail
 
 ###############################################################################
@@ -16,7 +16,7 @@ EDITION="${1:-gnome}"
 OS_FLAVOR="Aurora"
 
 ###############################################################################
-# PATHS & ASSETS
+# PATHS
 ###############################################################################
 BRANDING_DIR="branding"
 AURORA_WALL="$BRANDING_DIR/wallpapers/aurora-bg.jpg"
@@ -137,18 +137,6 @@ update-grub || true
 "
 
 ###############################################################################
-# CALAMARES
-###############################################################################
-log "Installing Calamares"
-sudo rsync -a branding/calamares/ "$CHROOT_DIR/etc/calamares/" || true
-
-in_chroot "
-apt-get install -y calamares network-manager \
-qml-module-qtquick-controls qml-module-qtquick-controls2 \
-qml-module-qtquick-layouts qml-module-qtgraphicaleffects libyaml-cpp0.7
-"
-
-###############################################################################
 # LIVE USER
 ###############################################################################
 in_chroot "
@@ -156,24 +144,6 @@ useradd -m -s /bin/bash solvionyx || true
 echo 'solvionyx:solvionyx' | chpasswd
 usermod -aG sudo solvionyx
 "
-
-###############################################################################
-# SOLVY AI
-###############################################################################
-if [ -f "$SOLVY_DEB" ]; then
-  sudo cp "$SOLVY_DEB" "$CHROOT_DIR/tmp/solvy.deb"
-  in_chroot "dpkg -i /tmp/solvy.deb || apt-get install -f -y"
-fi
-
-in_chroot "ln -sf /bin/true /usr/sbin/systemctl"
-
-###############################################################################
-# WELCOME APP
-###############################################################################
-sudo mkdir -p "$CHROOT_DIR/etc/skel/.config/autostart"
-[ -f branding/welcome/autostart.desktop ] && \
-  sudo cp branding/welcome/autostart.desktop \
-  "$CHROOT_DIR/etc/skel/.config/autostart/"
 
 ###############################################################################
 # SQUASHFS
@@ -187,7 +157,7 @@ cp "$CHROOT_DIR"/boot/vmlinuz-* "$LIVE_DIR/vmlinuz"
 cp "$CHROOT_DIR"/boot/initrd.img-* "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# ISOLINUX
+# ISOLINUX + EFI
 ###############################################################################
 mkdir -p "$ISO_DIR/isolinux"
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
@@ -200,9 +170,6 @@ LABEL live
   APPEND initrd=/live/initrd.img boot=live quiet splash
 EOF
 
-###############################################################################
-# EFI
-###############################################################################
 cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed \
    "$ISO_DIR/EFI/BOOT/grubx64.efi"
@@ -217,7 +184,7 @@ menuentry "Start Solvionyx OS" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO (FIXED)
+# BUILD UNSIGNED ISO (HYBRID + PAD)
 ###############################################################################
 log "Building UNSIGNED ISO"
 
@@ -226,8 +193,7 @@ xorriso -as mkisofs \
   -V "$VOLID" \
   -iso-level 3 \
   -full-iso9660-filenames \
-  -joliet \
-  -rock \
+  -joliet -rock \
   -pad \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -eltorito-boot isolinux/isolinux.bin \
@@ -238,7 +204,7 @@ xorriso -as mkisofs \
   "$ISO_DIR"
 
 ###############################################################################
-# SECUREBOOT SIGN + FINAL ISO
+# SECUREBOOT SIGN (NO PAD — CRITICAL)
 ###############################################################################
 if [ -f "$DB_KEY" ] && [ -f "$DB_CRT" ]; then
   xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
@@ -256,10 +222,8 @@ if [ -f "$DB_KEY" ] && [ -f "$DB_CRT" ]; then
     -V "$VOLID" \
     -iso-level 3 \
     -full-iso9660-filenames \
-    -joliet \
-    -rock \
-    -pad \
-    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -joliet -rock \
+    -no-pad \
     -eltorito-boot isolinux/isolinux.bin \
       -no-emul-boot -boot-load-size 4 -boot-info-table \
     -eltorito-alt-boot \
