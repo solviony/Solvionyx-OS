@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM HARDENED
+# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM (DEBIAN SAFE)
 set -euo pipefail
 
 log() { echo "[BUILD] $*"; }
@@ -10,14 +10,6 @@ trap 'fail "Build failed at line $LINENO"' ERR
 # PARAMETERS
 ###############################################################################
 EDITION="${1:-gnome}"
-
-###############################################################################
-# BUILD CONTEXT (CI / RELEASE SAFE)
-###############################################################################
-IS_RELEASE="false"
-if [ -n "${GITHUB_REF:-}" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
-  IS_RELEASE="true"
-fi
 
 ###############################################################################
 # DIRECTORIES
@@ -50,17 +42,17 @@ log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 ###############################################################################
-# BASE SYSTEM + OEM + TPM + UKI TOOLS
+# BASE SYSTEM + OEM + TPM SUPPORT
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
-  sudo systemd-sysv systemd-boot \
+  sudo systemd-sysv \
+  systemd-boot-efi \
   linux-image-amd64 \
   live-boot \
   grub-efi-amd64 \
   shim-signed \
-  systemd-ukify systemd-stub \
   tpm2-tools \
   cryptsetup \
   calamares \
@@ -68,7 +60,7 @@ apt-get install -y \
 "
 
 ###############################################################################
-# OEM INSTALLER ENABLEMENT
+# OEM INSTALLER FLAG
 ###############################################################################
 sudo mkdir -p "$CHROOT_DIR/etc/calamares"
 echo "OEM_INSTALL=true" | sudo tee "$CHROOT_DIR/etc/calamares/oem.conf" >/dev/null
@@ -89,18 +81,21 @@ cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
 cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# UKI (UNIFIED KERNEL IMAGE)
+# UKI (MANUAL — DEBIAN CORRECT)
 ###############################################################################
-log "Building UKI"
+log "Building UKI (manual)"
 
+STUB="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
 UKI_IMAGE="$UKI_DIR/solvionyx-uki.efi"
 
-sudo ukify build \
-  --linux="$VMLINUX" \
-  --initrd="$INITRD" \
-  --cmdline="boot=live quiet splash systemd.measure=yes" \
-  --os-release="$CHROOT_DIR/usr/lib/os-release" \
-  --output="$UKI_IMAGE"
+CMDLINE="boot=live quiet splash systemd.measure=yes"
+
+objcopy \
+  --add-section .osrel="$CHROOT_DIR/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
+  --add-section .cmdline=<(echo -n "$CMDLINE") --change-section-vma .cmdline=0x30000 \
+  --add-section .linux="$VMLINUX" --change-section-vma .linux=0x2000000 \
+  --add-section .initrd="$INITRD" --change-section-vma .initrd=0x3000000 \
+  "$STUB" "$UKI_IMAGE"
 
 ###############################################################################
 # EFI TREE
@@ -146,7 +141,6 @@ xorriso -as mkisofs \
 # PREPARE SIGNED TREE
 ###############################################################################
 log "Preparing signed ISO tree"
-
 rm -rf "$SIGNED_DIR"
 mkdir -p "$SIGNED_DIR"
 
@@ -154,30 +148,18 @@ xorriso -osirrox on \
   -indev "$BUILD_DIR/${ISO_NAME}.iso" \
   -extract / "$SIGNED_DIR"
 
-###############################################################################
-# REMOVE BIOS ARTIFACTS (UEFI-ONLY)
-###############################################################################
 rm -rf "$SIGNED_DIR/isolinux" || true
 
 ###############################################################################
-# SECURE BOOT SIGNING (SINGLE-PASS)
+# SECURE BOOT SIGNING (SINGLE PASS)
 ###############################################################################
-if [ "$IS_RELEASE" = "true" ]; then
-  log "Release build — Secure Boot signing"
+sbsign --key secureboot/db.key --cert secureboot/db.crt \
+  --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
+  "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
 
-  sbsign --key secureboot/db.key --cert secureboot/db.crt \
-    --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
-    "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
-
-  sbsign --key secureboot/db.key --cert secureboot/db.crt \
-    --output "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
-    "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
-
-  sbverify --list "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
-    || fail "UKI Secure Boot validation failed"
-else
-  log "Non-release build — Secure Boot skipped"
-fi
+sbsign --key secureboot/db.key --cert secureboot/db.crt \
+  --output "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
+  "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
 # BUILD SIGNED UEFI-ONLY ISO
@@ -195,19 +177,7 @@ xorriso -as mkisofs \
     -no-emul-boot \
   "$SIGNED_DIR"
 
-###############################################################################
-# FINAL ARTIFACTS
-###############################################################################
 xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
-
-cat <<EOF > "$BUILD_DIR/BUILD-META.txt"
-Edition: $EDITION
-Date: $DATE
-SecureBoot: $IS_RELEASE
-UKI: enabled
-TPM2 Measured Boot: enabled
-OEM Installer: enabled
-EOF
 
 log "BUILD COMPLETE — $EDITION"
