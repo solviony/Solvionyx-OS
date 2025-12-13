@@ -92,13 +92,21 @@ locale-gen
 ###############################################################################
 # DESKTOP
 ###############################################################################
-log \"Installing desktop: $EDITION\"
+log "Installing desktop: $EDITION"
 
-case \"$EDITION\" in
-  gnome) in_chroot \"apt-get install -y task-gnome-desktop gdm3\" ;;
-  kde)   in_chroot \"apt-get install -y task-kde-desktop sddm\" ;;
-  xfce)  in_chroot \"apt-get install -y task-xfce-desktop lightdm\" ;;
-  *) fail \"Unknown edition: $EDITION\" ;;
+case "$EDITION" in
+  gnome)
+    in_chroot "apt-get install -y task-gnome-desktop gdm3"
+    ;;
+  kde)
+    in_chroot "apt-get install -y task-kde-desktop sddm"
+    ;;
+  xfce)
+    in_chroot "apt-get install -y task-xfce-desktop lightdm"
+    ;;
+  *)
+    fail "Unknown edition: $EDITION"
+    ;;
 esac
 
 ###############################################################################
