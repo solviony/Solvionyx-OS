@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM (DEBIAN SAFE)
+# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + SBAT (DEBIAN CORRECT)
 set -euo pipefail
 
 log() { echo "[BUILD] $*"; }
@@ -24,7 +24,6 @@ UKI_DIR="$BUILD_DIR/uki"
 DATE="$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
-
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
 
@@ -42,13 +41,13 @@ log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 ###############################################################################
-# BASE SYSTEM + OEM + TPM SUPPORT
+# BASE SYSTEM + OEM + TPM + UKI SUPPORT
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
-  sudo systemd-sysv \
-  systemd-boot-efi \
+  sudo systemd systemd-sysv \
+  systemd-boot-efi systemd-ukify \
   linux-image-amd64 \
   live-boot \
   grub-efi-amd64 \
@@ -60,7 +59,7 @@ apt-get install -y \
 "
 
 ###############################################################################
-# OEM INSTALLER FLAG
+# OEM INSTALL MODE
 ###############################################################################
 sudo mkdir -p "$CHROOT_DIR/etc/calamares"
 echo "OEM_INSTALL=true" | sudo tee "$CHROOT_DIR/etc/calamares/oem.conf" >/dev/null
@@ -81,31 +80,30 @@ cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
 cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# UKI (MANUAL — DEBIAN CORRECT)
+# UKI (DEBIAN-NATIVE USING UKIFY)
 ###############################################################################
-log "Building UKI (manual)"
+log "Building UKI via systemd-ukify"
 
-STUB="/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
-UKI_IMAGE="$UKI_DIR/solvionyx-uki.efi"
+sudo chroot "$CHROOT_DIR" bash -lc "
+ukify build \
+  --linux /boot/$(basename "$VMLINUX") \
+  --initrd /boot/$(basename "$INITRD") \
+  --cmdline 'boot=live quiet splash systemd.measure=yes' \
+  --os-release /usr/lib/os-release \
+  --pcr-policy \
+  --sbat 'Solvionyx,1,2025-12-13' \
+  --output /boot/solvionyx.efi
+"
 
-CMDLINE="boot=live quiet splash systemd.measure=yes"
-
-objcopy \
-  --add-section .osrel="$CHROOT_DIR/usr/lib/os-release" --change-section-vma .osrel=0x20000 \
-  --add-section .cmdline=<(echo -n "$CMDLINE") --change-section-vma .cmdline=0x30000 \
-  --add-section .linux="$VMLINUX" --change-section-vma .linux=0x2000000 \
-  --add-section .initrd="$INITRD" --change-section-vma .initrd=0x3000000 \
-  "$STUB" "$UKI_IMAGE"
+sudo cp "$CHROOT_DIR/boot/solvionyx.efi" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
-# EFI TREE
+# EFI BOOTLOADER
 ###############################################################################
-mkdir -p "$ISO_DIR/EFI/BOOT"
 cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
-cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
-# ISOLINUX (UNSIGNED HYBRID ONLY)
+# ISOLINUX (BIOS — UNSIGNED)
 ###############################################################################
 mkdir -p "$ISO_DIR/isolinux"
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
@@ -127,7 +125,6 @@ xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
   -V "$VOLID" \
   -iso-level 3 \
-  -full-iso9660-filenames \
   -joliet -rock \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -eltorito-boot isolinux/isolinux.bin \
@@ -170,7 +167,6 @@ xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
   -V "$VOLID" \
   -iso-level 3 \
-  -full-iso9660-filenames \
   -joliet -rock \
   -eltorito-alt-boot \
     -e EFI/BOOT/BOOTX64.EFI \
@@ -181,3 +177,4 @@ xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
 log "BUILD COMPLETE — $EDITION"
+
