@@ -131,12 +131,18 @@ update-initramfs -c -k all || true
 "
 
 ###############################################################################
-# GRUB THEME (SAFE)
+# GRUB THEME (FIXED)
 ###############################################################################
 log "Applying GRUB theme"
 
-[ -d "$GRUB_THEME" ] && sudo rsync -a "$GRUB_THEME/" \
-  "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
+# Ensure target directory exists
+sudo mkdir -p "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora"
+
+# Copy theme only if source exists
+if [ -d "$GRUB_THEME" ]; then
+  sudo rsync -a "$GRUB_THEME/" \
+    "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
+fi
 
 in_chroot "
 echo 'GRUB_THEME=/boot/grub/themes/solvionyx-aurora/theme.txt' >> /etc/default/grub &&
