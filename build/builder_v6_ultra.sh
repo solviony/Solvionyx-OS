@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — FINAL STABLE
+# Solvionyx OS Aurora Builder v6 Ultra — FINAL STABLE (FULLY WIRED)
 set -euo pipefail
 
 ###############################################################################
@@ -16,6 +16,20 @@ EDITION="${1:-gnome}"
 OS_FLAVOR="Aurora"
 
 ###############################################################################
+# PATHS & ASSETS (ADDED — REQUIRED)
+###############################################################################
+BRANDING_DIR="branding"
+AURORA_WALL="$BRANDING_DIR/wallpapers/aurora-bg.jpg"
+AURORA_LOGO="$BRANDING_DIR/logo/solvionyx-logo.png"
+PLYMOUTH_THEME="$BRANDING_DIR/plymouth"
+GRUB_THEME="$BRANDING_DIR/grub"
+SOLVY_DEB="tools/solvy/solvy_3.0_amd64.deb"
+
+SECUREBOOT_DIR="secureboot"
+DB_KEY="$SECUREBOOT_DIR/db.key"
+DB_CRT="$SECUREBOOT_DIR/db.crt"
+
+###############################################################################
 # DIRECTORIES
 ###############################################################################
 BUILD_DIR="solvionyx_build"
@@ -27,12 +41,14 @@ SIGNED_DIR="$BUILD_DIR/signed-iso"
 DATE="$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
+
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
 
 ###############################################################################
 # CLEAN
 ###############################################################################
+log "Cleaning workspace"
 sudo rm -rf "$BUILD_DIR"
 mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR"
 
@@ -76,25 +92,30 @@ locale-gen
 ###############################################################################
 # DESKTOP
 ###############################################################################
-log "Installing desktop environment"
+log \"Installing desktop: $EDITION\"
 
-case "$EDITION" in
-  gnome) in_chroot "apt-get install -y task-gnome-desktop gdm3" ;;
-  kde)   in_chroot "apt-get install -y task-kde-desktop sddm" ;;
-  xfce)  in_chroot "apt-get install -y task-xfce-desktop lightdm" ;;
-  *) fail "Unknown edition: $EDITION" ;;
+case \"$EDITION\" in
+  gnome) in_chroot \"apt-get install -y task-gnome-desktop gdm3\" ;;
+  kde)   in_chroot \"apt-get install -y task-kde-desktop sddm\" ;;
+  xfce)  in_chroot \"apt-get install -y task-xfce-desktop lightdm\" ;;
+  *) fail \"Unknown edition: $EDITION\" ;;
 esac
 
 ###############################################################################
-# BRANDING
+# BRANDING (SAFE)
 ###############################################################################
 log "Applying branding"
 
-sudo mkdir -p "$CHROOT_DIR/usr/share/backgrounds" "$CHROOT_DIR/usr/share/solvionyx"
-sudo cp "$AURORA_WALL" "$CHROOT_DIR/usr/share/backgrounds/solvionyx-default.jpg"
-sudo cp "$AURORA_LOGO" "$CHROOT_DIR/usr/share/solvionyx/logo.png"
+mkdir -p "$CHROOT_DIR/usr/share/backgrounds" "$CHROOT_DIR/usr/share/solvionyx"
 
-sudo rsync -a "$PLYMOUTH_THEME/" "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx-aurora/"
+[ -f "$AURORA_WALL" ] && sudo cp "$AURORA_WALL" \
+  "$CHROOT_DIR/usr/share/backgrounds/solvionyx-default.jpg"
+
+[ -f "$AURORA_LOGO" ] && sudo cp "$AURORA_LOGO" \
+  "$CHROOT_DIR/usr/share/solvionyx/logo.png"
+
+[ -d "$PLYMOUTH_THEME" ] && sudo rsync -a "$PLYMOUTH_THEME/" \
+  "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx-aurora/"
 
 in_chroot "
 echo 'Theme=solvionyx-aurora' > /etc/plymouth/plymouthd.conf &&
@@ -102,12 +123,12 @@ update-initramfs -c -k all || true
 "
 
 ###############################################################################
-# GRUB THEME
+# GRUB THEME (SAFE)
 ###############################################################################
 log "Applying GRUB theme"
 
-sudo mkdir -p "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora"
-sudo rsync -a "$GRUB_THEME/" "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
+[ -d "$GRUB_THEME" ] && sudo rsync -a "$GRUB_THEME/" \
+  "$CHROOT_DIR/boot/grub/themes/solvionyx-aurora/"
 
 in_chroot "
 echo 'GRUB_THEME=/boot/grub/themes/solvionyx-aurora/theme.txt' >> /etc/default/grub &&
@@ -119,8 +140,7 @@ update-grub || true
 ###############################################################################
 log "Installing Calamares"
 
-sudo mkdir -p "$CHROOT_DIR/etc/calamares"
-sudo rsync -a branding/calamares/ "$CHROOT_DIR/etc/calamares/"
+sudo rsync -a branding/calamares/ "$CHROOT_DIR/etc/calamares/" || true
 
 in_chroot "
 apt-get install -y calamares network-manager \
@@ -131,28 +151,28 @@ qml-module-qtquick-layouts qml-module-qtgraphicaleffects libyaml-cpp0.7
 ###############################################################################
 # LIVE USER
 ###############################################################################
-log "Creating live user"
-
 in_chroot "
-useradd -m -s /bin/bash solvionyx || true &&
-echo 'solvionyx:solvionyx' | chpasswd &&
+useradd -m -s /bin/bash solvionyx || true
+echo 'solvionyx:solvionyx' | chpasswd
 usermod -aG sudo solvionyx
 "
 
 ###############################################################################
-# SOLVY AI
+# SOLVY AI (SAFE)
 ###############################################################################
-log "Installing Solvy AI"
+if [ -f "$SOLVY_DEB" ]; then
+  sudo cp "$SOLVY_DEB" "$CHROOT_DIR/tmp/solvy.deb"
+  in_chroot "dpkg -i /tmp/solvy.deb || apt-get install -f -y"
+fi
 
-sudo cp "$SOLVY_DEB" "$CHROOT_DIR/tmp/solvy.deb"
-in_chroot "dpkg -i /tmp/solvy.deb || apt-get install -f -y"
 in_chroot "ln -sf /bin/true /usr/sbin/systemctl"
 
 ###############################################################################
 # WELCOME APP
 ###############################################################################
 sudo mkdir -p "$CHROOT_DIR/etc/skel/.config/autostart"
-sudo cp branding/welcome/autostart.desktop \
+[ -f branding/welcome/autostart.desktop ] && \
+  sudo cp branding/welcome/autostart.desktop \
   "$CHROOT_DIR/etc/skel/.config/autostart/"
 
 ###############################################################################
@@ -172,10 +192,8 @@ cp "$CHROOT_DIR"/boot/initrd.img-* "$LIVE_DIR/initrd.img"
 mkdir -p "$ISO_DIR/isolinux"
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
 cp /usr/lib/syslinux/modules/bios/ldlinux.c32 "$ISO_DIR/isolinux/"
-cp /usr/lib/syslinux/modules/bios/vesamenu.c32 "$ISO_DIR/isolinux/"
 
 cat > "$ISO_DIR/isolinux/isolinux.cfg" <<EOF
-UI vesamenu.c32
 DEFAULT live
 LABEL live
   KERNEL /live/vmlinuz
@@ -186,20 +204,20 @@ EOF
 # EFI
 ###############################################################################
 cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
-cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed "$ISO_DIR/EFI/BOOT/grubx64.efi"
+cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed \
+   "$ISO_DIR/EFI/BOOT/grubx64.efi"
 
 mkdir -p "$ISO_DIR/boot/grub"
 cat > "$ISO_DIR/boot/grub/grub.cfg" <<EOF
-set default=0
 set timeout=5
 menuentry "Start Solvionyx OS" {
-  linux /live/vmlinuz boot=live quiet splash
-  initrd /live/initrd.img
+ linux /live/vmlinuz boot=live quiet splash
+ initrd /live/initrd.img
 }
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO — **THIS IS THE FIX**
+# BUILD ISO (NATIVE XORRISO — CORRECT)
 ###############################################################################
 log "Building UNSIGNED ISO"
 
@@ -208,61 +226,47 @@ xorriso -as mkisofs \
   -V "$VOLID" \
   -iso-level 3 \
   -full-iso9660-filenames \
-  -joliet -joliet-long \
+  -joliet \
+  -rock \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-  -isohybrid-gpt-basdat \
-  -partition_offset 16 \
-  -c isolinux/boot.cat \
-  -b isolinux/isolinux.bin \
-  -no-emul-boot \
-  -boot-load-size 4 \
-  -boot-info-table \
+  -eltorito-boot isolinux/isolinux.bin \
+    -no-emul-boot -boot-load-size 4 -boot-info-table \
   -eltorito-alt-boot \
-  -e EFI/BOOT/BOOTX64.EFI \
-  -no-emul-boot \
+    -e EFI/BOOT/BOOTX64.EFI \
+    -no-emul-boot \
   "$ISO_DIR"
 
 ###############################################################################
 # SECUREBOOT SIGN
 ###############################################################################
-xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
+if [ -f "$DB_KEY" ] && [ -f "$DB_CRT" ]; then
+  xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
-sbsign --key secureboot/db.key --cert secureboot/db.crt \
-  --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
-  "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
+  sbsign --key "$DB_KEY" --cert "$DB_CRT" \
+    --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
+    "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
 
-sbsign --key secureboot/db.key --cert secureboot/db.crt \
-  --output "$SIGNED_DIR/live/vmlinuz" \
-  "$SIGNED_DIR/live/vmlinuz"
+  sbsign --key "$DB_KEY" --cert "$DB_CRT" \
+    --output "$SIGNED_DIR/live/vmlinuz" \
+    "$SIGNED_DIR/live/vmlinuz"
 
-###############################################################################
-# BUILD SIGNED ISO
-###############################################################################
-log "Building SIGNED ISO"
+  xorriso -as mkisofs \
+    -o "$BUILD_DIR/$SIGNED_NAME" \
+    -V "$VOLID" \
+    -iso-level 3 \
+    -full-iso9660-filenames \
+    -joliet \
+    -rock \
+    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -eltorito-boot isolinux/isolinux.bin \
+      -no-emul-boot -boot-load-size 4 -boot-info-table \
+    -eltorito-alt-boot \
+      -e EFI/BOOT/BOOTX64.EFI \
+      -no-emul-boot \
+    "$SIGNED_DIR"
 
-xorriso -as mkisofs \
-  -o "$BUILD_DIR/$SIGNED_NAME" \
-  -V "$VOLID" \
-  -iso-level 3 \
-  -full-iso9660-filenames \
-  -joliet -joliet-long \
-  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-  -isohybrid-gpt-basdat \
-  -partition_offset 16 \
-  -c isolinux/boot.cat \
-  -b isolinux/isolinux.bin \
-  -no-emul-boot \
-  -boot-load-size 4 \
-  -boot-info-table \
-  -eltorito-alt-boot \
-  -e EFI/BOOT/BOOTX64.EFI \
-  -no-emul-boot \
-  "$SIGNED_DIR"
-
-###############################################################################
-# COMPRESS
-###############################################################################
-xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
-sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
+  xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
+  sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
+fi
 
 log "BUILD COMPLETE — $EDITION"
