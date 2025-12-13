@@ -184,24 +184,22 @@ menuentry "Start Solvionyx OS" {
 EOF
 
 ###############################################################################
-# BUILD UNSIGNED ISO (HYBRID + PAD)
+# BUILD SIGNED ISO (UEFI-ONLY — NO HYBRID, NO MBR)
 ###############################################################################
-log "Building UNSIGNED ISO"
+
+log "Building SIGNED ISO (UEFI-only, no hybrid)"
 
 xorriso -as mkisofs \
-  -o "$BUILD_DIR/${ISO_NAME}.iso" \
+  -o "$BUILD_DIR/$SIGNED_NAME" \
   -V "$VOLID" \
   -iso-level 3 \
   -full-iso9660-filenames \
   -joliet -rock \
-  -pad \
-  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-  -eltorito-boot isolinux/isolinux.bin \
-    -no-emul-boot -boot-load-size 4 -boot-info-table \
+  -no-pad \
   -eltorito-alt-boot \
     -e EFI/BOOT/BOOTX64.EFI \
     -no-emul-boot \
-  "$ISO_DIR"
+  "$SIGNED_DIR"
 
 ###############################################################################
 # SECUREBOOT SIGN (NO PAD — CRITICAL)
