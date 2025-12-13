@@ -118,11 +118,23 @@ xorriso -osirrox on \
   -extract / "$SIGNED_DIR"
 
 ###############################################################################
-# RESTORE EFI (CRITICAL)
+# SECUREBOOT SIGN (SAFE – PREVENT DOUBLE SIGN)
 ###############################################################################
-mkdir -p "$SIGNED_DIR/EFI/BOOT"
-cp "$ISO_DIR/EFI/BOOT/BOOTX64.EFI" "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
-cp "$ISO_DIR/EFI/BOOT/grubx64.efi" "$SIGNED_DIR/EFI/BOOT/grubx64.efi"
+if sbverify --list "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" >/dev/null 2>&1; then
+  log "EFI already signed — skipping re-sign"
+else
+  sbsign --key secureboot/db.key --cert secureboot/db.crt \
+    --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
+    "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
+fi
+
+if sbverify --list "$SIGNED_DIR/live/vmlinuz" >/dev/null 2>&1; then
+  log "Kernel already signed — skipping re-sign"
+else
+  sbsign --key secureboot/db.key --cert secureboot/db.crt \
+    --output "$SIGNED_DIR/live/vmlinuz" \
+    "$SIGNED_DIR/live/vmlinuz"
+fi
 
 ###############################################################################
 # SECUREBOOT SIGN
