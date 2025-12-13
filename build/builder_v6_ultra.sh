@@ -202,6 +202,22 @@ xorriso -as mkisofs \
   "$SIGNED_DIR"
 
 ###############################################################################
+# ENSURE EFI PATH EXISTS IN SIGNED TREE (CRITICAL FIX)
+###############################################################################
+
+sudo mkdir -p "$SIGNED_DIR/EFI/BOOT"
+
+# If EFI files are missing after extraction, restore them from unsigned ISO tree
+if [ ! -f "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" ]; then
+  log "Restoring EFI boot files into signed tree"
+  cp "$ISO_DIR/EFI/BOOT/BOOTX64.EFI" "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
+fi
+
+if [ -f "$ISO_DIR/EFI/BOOT/grubx64.efi" ] && [ ! -f "$SIGNED_DIR/EFI/BOOT/grubx64.efi" ]; then
+  cp "$ISO_DIR/EFI/BOOT/grubx64.efi" "$SIGNED_DIR/EFI/BOOT/grubx64.efi"
+fi
+
+###############################################################################
 # SECUREBOOT SIGN (NO PAD — CRITICAL)
 ###############################################################################
 if [ -f "$DB_KEY" ] && [ -f "$DB_CRT" ]; then
