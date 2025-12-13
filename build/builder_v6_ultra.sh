@@ -242,6 +242,7 @@ xorriso -as mkisofs \
   -full-iso9660-filenames \
   -joliet \
   -rock \
+  -padding 0 \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -eltorito-boot isolinux/isolinux.bin \
     -no-emul-boot -boot-load-size 4 -boot-info-table \
