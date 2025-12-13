@@ -24,6 +24,7 @@ UKI_DIR="$BUILD_DIR/uki"
 DATE="$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
+
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
 
@@ -41,13 +42,12 @@ log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 ###############################################################################
-# BASE SYSTEM + OEM + TPM + UKI SUPPORT
+# BASE SYSTEM + OEM + TPM (DEBIAN SAFE)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
   sudo systemd systemd-sysv \
-  systemd-boot-efi systemd-ukify \
   linux-image-amd64 \
   live-boot \
   grub-efi-amd64 \
@@ -103,7 +103,9 @@ objcopy \
 ###############################################################################
 # EFI BOOTLOADER
 ###############################################################################
+log "Preparing EFI boot files"
 cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
+cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
 # ISOLINUX (BIOS — UNSIGNED)
@@ -151,8 +153,10 @@ xorriso -osirrox on \
 rm -rf "$SIGNED_DIR/isolinux" || true
 
 ###############################################################################
-# SECURE BOOT SIGNING (SINGLE PASS)
+# SECURE BOOT SIGNING (SINGLE PASS, SBAT SAFE)
 ###############################################################################
+log "Signing EFI binaries"
+
 sbsign --key secureboot/db.key --cert secureboot/db.crt \
   --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
   "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
@@ -180,4 +184,3 @@ xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
 log "BUILD COMPLETE — $EDITION"
-
