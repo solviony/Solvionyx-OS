@@ -24,8 +24,20 @@ UKI_DIR="$BUILD_DIR/uki"
 DATE="$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
 SIGNED_NAME="secureboot-${ISO_NAME}.iso"
+
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
+
+###############################################################################
+# CI DISK CLEANUP (CRITICAL FIX)
+###############################################################################
+log "Freeing disk space (CI-safe)"
+
+sudo rm -rf /usr/share/dotnet || true
+sudo rm -rf /opt/ghc || true
+sudo rm -rf /usr/local/lib/android || true
+sudo apt-get clean || true
+sudo rm -rf /var/lib/apt/lists/* || true
 
 ###############################################################################
 # CLEAN
@@ -41,7 +53,7 @@ log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 ###############################################################################
-# BASE SYSTEM + OEM + TPM (DEBIAN SAFE)
+# BASE SYSTEM + OEM + TPM
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
@@ -60,7 +72,7 @@ apt-get install -y \
 "
 
 ###############################################################################
-# SOLVIONYX OS IDENTITY (CRITICAL)
+# SOLVIONYX OS IDENTITY
 ###############################################################################
 log "Applying Solvionyx OS identity"
 
@@ -80,43 +92,19 @@ EOF
 ###############################################################################
 # OEM INSTALL MODE
 ###############################################################################
-sudo mkdir -p "$CHROOT_DIR/etc/calamares"
+mkdir -p "$CHROOT_DIR/etc/calamares"
 echo "OEM_INSTALL=true" | sudo tee "$CHROOT_DIR/etc/calamares/oem.conf" >/dev/null
 
 ###############################################################################
-# CALAMARES BRANDING + TPM/LUKS SUPPORT
+# CALAMARES BRANDING
 ###############################################################################
 log "Applying Solvionyx Calamares branding"
 
 mkdir -p "$CHROOT_DIR/etc/calamares/branding/solvionyx"
-cp -r branding/calamares/* \
-  "$CHROOT_DIR/etc/calamares/branding/solvionyx/" || true
-
-cat > "$CHROOT_DIR/etc/calamares/settings.conf" <<EOF
-branding: solvionyx
-modules-search-path: [ /usr/lib/calamares/modules ]
-sequence:
-  - show:
-      - welcome
-      - locale
-      - keyboard
-      - partition
-      - users
-      - summary
-  - exec:
-      - partition
-      - mount
-      - unpackfs
-      - users
-      - bootloader
-      - luksbootkeyfile
-      - umount
-  - show:
-      - finished
-EOF
+cp -r branding/calamares/* "$CHROOT_DIR/etc/calamares/branding/solvionyx/" || true
 
 ###############################################################################
-# PLYMOUTH BOOT SPLASH (SECURE BOOT SAFE)
+# PLYMOUTH BRANDING
 ###############################################################################
 log "Installing Solvionyx Plymouth theme"
 
@@ -157,20 +145,20 @@ cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
 cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# EXTRACT EFI STUB FROM CHROOT (CRITICAL FIX)
+# EFI STUB EXTRACTION
 ###############################################################################
-log "Extracting systemd EFI stub from chroot"
+log "Extracting systemd EFI stub"
 
 STUB_SRC="$CHROOT_DIR/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
 STUB_DST="$UKI_DIR/linuxx64.efi.stub"
 
-[ -f "$STUB_SRC" ] || fail "EFI stub missing inside chroot"
+[ -f "$STUB_SRC" ] || fail "EFI stub missing"
 cp "$STUB_SRC" "$STUB_DST"
 
 ###############################################################################
-# UKI (MEASURED BOOT + PCR LOCK)
+# UKI BUILD
 ###############################################################################
-log "Building UKI (Debian-native)"
+log "Building UKI"
 
 UKI_IMAGE="$UKI_DIR/solvionyx-uki.efi"
 CMDLINE="boot=live quiet splash systemd.measure=yes systemd.pcrlock=yes"
@@ -183,39 +171,22 @@ objcopy \
   "$STUB_DST" "$UKI_IMAGE"
 
 ###############################################################################
-# EFI BOOTLOADER
+# EFI BOOT FILES
 ###############################################################################
 cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
-# SBAT METADATA
-###############################################################################
-log "Adding SBAT metadata"
-
-cat > "$ISO_DIR/EFI/BOOT/sbat.csv" <<EOF
-sbat,1,SBAT Version
-solvionyx,1,Solvionyx OS,2025,aurora
-EOF
-
-###############################################################################
-# ISOLINUX (BIOS)
+# ISOLINUX
 ###############################################################################
 mkdir -p "$ISO_DIR/isolinux"
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
 cp /usr/lib/syslinux/modules/bios/ldlinux.c32 "$ISO_DIR/isolinux/"
 
-cat > "$ISO_DIR/isolinux/isolinux.cfg" <<EOF
-DEFAULT live
-LABEL live
-  KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd.img boot=live quiet splash
-EOF
-
 ###############################################################################
-# BUILD UNSIGNED HYBRID ISO
+# BUILD ISO
 ###############################################################################
-log "Building unsigned hybrid ISO"
+log "Building ISO"
 
 xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
@@ -224,16 +195,16 @@ xorriso -as mkisofs \
   -joliet -rock \
   -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
   -eltorito-boot isolinux/isolinux.bin \
-    -no-emul-boot -boot-load-size 4 -boot-info-table \
   -eltorito-alt-boot \
-    -e EFI/BOOT/BOOTX64.EFI \
-    -no-emul-boot \
+  -e EFI/BOOT/BOOTX64.EFI \
+  -no-emul-boot \
   "$ISO_DIR"
 
 ###############################################################################
-# PREPARE SIGNED TREE
+# SIGNED TREE
 ###############################################################################
-log "Preparing signed ISO tree"
+log "Preparing signed tree"
+
 rm -rf "$SIGNED_DIR"
 mkdir -p "$SIGNED_DIR"
 
@@ -241,7 +212,7 @@ xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 rm -rf "$SIGNED_DIR/isolinux" || true
 
 ###############################################################################
-# SECURE BOOT SIGNING
+# SIGN EFI
 ###############################################################################
 log "Signing EFI binaries"
 
@@ -254,9 +225,9 @@ sbsign --key secureboot/db.key --cert secureboot/db.crt \
   "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
-# BUILD SIGNED UEFI-ONLY ISO
+# FINAL ISO
 ###############################################################################
-log "Building signed UEFI-only ISO"
+log "Building final ISO"
 
 xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
@@ -264,11 +235,24 @@ xorriso -as mkisofs \
   -iso-level 3 \
   -joliet -rock \
   -eltorito-alt-boot \
-    -e EFI/BOOT/BOOTX64.EFI \
-    -no-emul-boot \
+  -e EFI/BOOT/BOOTX64.EFI \
+  -no-emul-boot \
   "$SIGNED_DIR"
 
-xz -T0 -9e "$BUILD_DIR/$SIGNED_NAME"
+###############################################################################
+# FINAL CLEANUP + SAFE COMPRESSION
+###############################################################################
+log "Removing intermediate artifacts"
+
+rm -rf "$BUILD_DIR/chroot" "$BUILD_DIR/iso" "$BUILD_DIR/signed-iso"
+
+if [ "${CI:-}" = "true" ]; then
+  log "CI detected — safe compression"
+  XZ_OPT="-T2 -6" xz "$BUILD_DIR/$SIGNED_NAME"
+else
+  XZ_OPT="-T0 -9e" xz "$BUILD_DIR/$SIGNED_NAME"
+fi
+
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
 log "BUILD COMPLETE — $EDITION"
