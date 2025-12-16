@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + SBAT (DEBIAN CORRECT)
+# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot (FIXED)
 set -euo pipefail
 
 log() { echo "[BUILD] $*"; }
@@ -29,13 +29,10 @@ VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
 
 ###############################################################################
-# CI DISK CLEANUP (CRITICAL FIX)
+# CI DISK CLEANUP
 ###############################################################################
 log "Freeing disk space (CI-safe)"
-
-sudo rm -rf /usr/share/dotnet || true
-sudo rm -rf /opt/ghc || true
-sudo rm -rf /usr/local/lib/android || true
+sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android || true
 sudo apt-get clean || true
 sudo rm -rf /var/lib/apt/lists/* || true
 
@@ -53,7 +50,7 @@ log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 ###############################################################################
-# BASE SYSTEM + OEM + TPM
+# BASE SYSTEM
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
@@ -64,8 +61,7 @@ apt-get install -y \
   live-boot \
   grub-efi-amd64 \
   shim-signed \
-  tpm2-tools \
-  cryptsetup \
+  tpm2-tools cryptsetup \
   plymouth plymouth-themes \
   calamares \
   task-gnome-desktop gdm3
@@ -74,8 +70,6 @@ apt-get install -y \
 ###############################################################################
 # SOLVIONYX OS IDENTITY
 ###############################################################################
-log "Applying Solvionyx OS identity"
-
 cat > "$CHROOT_DIR/etc/os-release" <<EOF
 NAME="Solvionyx OS"
 PRETTY_NAME="Solvionyx OS Aurora"
@@ -90,23 +84,16 @@ LOGO=solvionyx
 EOF
 
 ###############################################################################
-# OEM INSTALL MODE
+# OEM MODE
 ###############################################################################
 mkdir -p "$CHROOT_DIR/etc/calamares"
-echo "OEM_INSTALL=true" | sudo tee "$CHROOT_DIR/etc/calamares/oem.conf" >/dev/null
+echo "OEM_INSTALL=true" > "$CHROOT_DIR/etc/calamares/oem.conf"
 
 ###############################################################################
-# CALAMARES BRANDING
+# BRANDING (Calamares, Plymouth, Desktop)
 ###############################################################################
-log "Applying Solvionyx Calamares branding"
-
 mkdir -p "$CHROOT_DIR/etc/calamares/branding/solvionyx"
 cp -r branding/calamares/* "$CHROOT_DIR/etc/calamares/branding/solvionyx/" || true
-
-###############################################################################
-# PLYMOUTH BRANDING
-###############################################################################
-log "Installing Solvionyx Plymouth theme"
 
 mkdir -p "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
 cp branding/plymouth/* "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/" || true
@@ -118,16 +105,11 @@ EOF
 
 sudo chroot "$CHROOT_DIR" update-initramfs -u || true
 
-###############################################################################
-# DESKTOP BRANDING
-###############################################################################
-log "Installing Solvionyx desktop branding"
-
 mkdir -p "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
 cp branding/wallpapers/* "$CHROOT_DIR/usr/share/backgrounds/solvionyx/" || true
 
 mkdir -p "$CHROOT_DIR/usr/share/pixmaps"
-cp branding/logo/solvionyx.png "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png" || true
+cp branding/logo/solvionyx.png "$CHROOT_DIR/usr/share/pixmaps/" || true
 
 ###############################################################################
 # SQUASHFS
@@ -138,30 +120,22 @@ sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot
 ###############################################################################
 # KERNEL + INITRD
 ###############################################################################
-VMLINUX="$(ls "$CHROOT_DIR"/boot/vmlinuz-*)"
-INITRD="$(ls "$CHROOT_DIR"/boot/initrd.img-*)"
+VMLINUX=$(ls "$CHROOT_DIR"/boot/vmlinuz-*)
+INITRD=$(ls "$CHROOT_DIR"/boot/initrd.img-*)
 
 cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
 cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# EFI STUB EXTRACTION
+# EFI STUB + UKI
 ###############################################################################
-log "Extracting systemd EFI stub"
-
 STUB_SRC="$CHROOT_DIR/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
 STUB_DST="$UKI_DIR/linuxx64.efi.stub"
-
 [ -f "$STUB_SRC" ] || fail "EFI stub missing"
 cp "$STUB_SRC" "$STUB_DST"
 
-###############################################################################
-# UKI BUILD
-###############################################################################
-log "Building UKI"
-
-UKI_IMAGE="$UKI_DIR/solvionyx-uki.efi"
 CMDLINE="boot=live quiet splash systemd.measure=yes systemd.pcrlock=yes"
+UKI_IMAGE="$UKI_DIR/solvionyx-uki.efi"
 
 objcopy \
   --add-section .osrel="$CHROOT_DIR/etc/os-release" --change-section-vma .osrel=0x20000 \
@@ -171,50 +145,42 @@ objcopy \
   "$STUB_DST" "$UKI_IMAGE"
 
 ###############################################################################
-# EFI BOOT FILES
+# EFI FILES
 ###############################################################################
 cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
-# ISOLINUX
+# BIOS BOOT (OPTIONAL)
 ###############################################################################
 mkdir -p "$ISO_DIR/isolinux"
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
 cp /usr/lib/syslinux/modules/bios/ldlinux.c32 "$ISO_DIR/isolinux/"
 
 ###############################################################################
-# BUILD ISO
+# BUILD ISO (FIXED)
 ###############################################################################
-log "Building ISO"
+log "Building ISO (UEFI-correct)"
 
 xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
   -V "$VOLID" \
   -iso-level 3 \
+  -full-iso9660-filenames \
   -joliet -rock \
-  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
-  -eltorito-boot isolinux/isolinux.bin \
-  -eltorito-alt-boot \
-  -e EFI/BOOT/BOOTX64.EFI \
-  -no-emul-boot \
+  -isohybrid-gpt-basdat \
+  --efi-boot EFI/BOOT/BOOTX64.EFI \
+  --efi-boot-part \
+  --efi-boot-image \
   "$ISO_DIR"
 
 ###############################################################################
-# SIGNED TREE
+# SIGNED ISO
 ###############################################################################
-log "Preparing signed tree"
-
 rm -rf "$SIGNED_DIR"
 mkdir -p "$SIGNED_DIR"
-
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 rm -rf "$SIGNED_DIR/isolinux" || true
-
-###############################################################################
-# SIGN EFI
-###############################################################################
-log "Signing EFI binaries"
 
 sbsign --key secureboot/db.key --cert secureboot/db.crt \
   --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
@@ -224,35 +190,24 @@ sbsign --key secureboot/db.key --cert secureboot/db.crt \
   --output "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
   "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
 
-###############################################################################
-# FINAL ISO
-###############################################################################
-log "Building final ISO"
-
 xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
   -V "$VOLID" \
   -iso-level 3 \
+  -full-iso9660-filenames \
   -joliet -rock \
-  -eltorito-alt-boot \
-  -e EFI/BOOT/BOOTX64.EFI \
-  -no-emul-boot \
+  -isohybrid-gpt-basdat \
+  --efi-boot EFI/BOOT/BOOTX64.EFI \
+  --efi-boot-part \
+  --efi-boot-image \
   "$SIGNED_DIR"
 
 ###############################################################################
-# FINAL CLEANUP + SAFE COMPRESSION
+# FINAL
 ###############################################################################
-log "Removing intermediate artifacts"
-
 rm -rf "$BUILD_DIR/chroot" "$BUILD_DIR/iso" "$BUILD_DIR/signed-iso"
 
-if [ "${CI:-}" = "true" ]; then
-  log "CI detected — safe compression"
-  XZ_OPT="-T2 -6" xz "$BUILD_DIR/$SIGNED_NAME"
-else
-  XZ_OPT="-T0 -9e" xz "$BUILD_DIR/$SIGNED_NAME"
-fi
-
+XZ_OPT="-T2 -6" xz "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
 log "BUILD COMPLETE — $EDITION"
