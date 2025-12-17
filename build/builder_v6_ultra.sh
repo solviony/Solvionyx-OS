@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot (FIXED)
+# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot (VirtualBox FIXED)
 set -euo pipefail
 
 log() { echo "[BUILD] $*"; }
@@ -20,6 +20,7 @@ ISO_DIR="$BUILD_DIR/iso"
 LIVE_DIR="$ISO_DIR/live"
 SIGNED_DIR="$BUILD_DIR/signed-iso"
 UKI_DIR="$BUILD_DIR/uki"
+ESP_IMG="$BUILD_DIR/efi.img"
 
 DATE="$(date +%Y.%m.%d)"
 ISO_NAME="Solvionyx-Aurora-${EDITION}-${DATE}"
@@ -90,7 +91,7 @@ mkdir -p "$CHROOT_DIR/etc/calamares"
 echo "OEM_INSTALL=true" > "$CHROOT_DIR/etc/calamares/oem.conf"
 
 ###############################################################################
-# BRANDING (Calamares, Plymouth, Desktop)
+# BRANDING
 ###############################################################################
 mkdir -p "$CHROOT_DIR/etc/calamares/branding/solvionyx"
 cp -r branding/calamares/* "$CHROOT_DIR/etc/calamares/branding/solvionyx/" || true
@@ -151,16 +152,24 @@ cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
-# BIOS BOOT (OPTIONAL)
+# CREATE REAL EFI SYSTEM PARTITION (VirtualBox REQUIRED)
 ###############################################################################
-mkdir -p "$ISO_DIR/isolinux"
-cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/isolinux/"
-cp /usr/lib/syslinux/modules/bios/ldlinux.c32 "$ISO_DIR/isolinux/"
+log "Creating EFI System Partition image"
+
+dd if=/dev/zero of="$ESP_IMG" bs=1M count=20
+mkfs.vfat "$ESP_IMG"
+
+mkdir -p /tmp/esp
+sudo mount "$ESP_IMG" /tmp/esp
+sudo mkdir -p /tmp/esp/EFI/BOOT
+sudo cp -r "$ISO_DIR/EFI/BOOT/"* /tmp/esp/EFI/BOOT/
+sudo umount /tmp/esp
+rmdir /tmp/esp
 
 ###############################################################################
-# BUILD ISO (FIXED)
+# BUILD ISO (CORRECT UEFI + VIRTUALBOX)
 ###############################################################################
-log "Building ISO (UEFI-correct)"
+log "Building ISO (UEFI + VirtualBox compatible)"
 
 xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
@@ -169,9 +178,7 @@ xorriso -as mkisofs \
   -full-iso9660-filenames \
   -joliet -rock \
   -isohybrid-gpt-basdat \
-  --efi-boot EFI/BOOT/BOOTX64.EFI \
-  --efi-boot-part \
-  --efi-boot-image \
+  -efi-boot-part --efi-boot-image "$ESP_IMG" \
   "$ISO_DIR"
 
 ###############################################################################
@@ -180,7 +187,6 @@ xorriso -as mkisofs \
 rm -rf "$SIGNED_DIR"
 mkdir -p "$SIGNED_DIR"
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
-rm -rf "$SIGNED_DIR/isolinux" || true
 
 sbsign --key secureboot/db.key --cert secureboot/db.crt \
   --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
@@ -197,9 +203,7 @@ xorriso -as mkisofs \
   -full-iso9660-filenames \
   -joliet -rock \
   -isohybrid-gpt-basdat \
-  --efi-boot EFI/BOOT/BOOTX64.EFI \
-  --efi-boot-part \
-  --efi-boot-image \
+  -efi-boot-part --efi-boot-image "$ESP_IMG" \
   "$SIGNED_DIR"
 
 ###############################################################################
