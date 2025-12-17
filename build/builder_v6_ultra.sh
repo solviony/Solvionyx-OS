@@ -179,8 +179,11 @@ xorriso -as mkisofs \
   -iso-level 3 \
   -full-iso9660-filenames \
   -joliet -rock \
+  -append_partition 2 0xef "$ESP_IMG" \
+  -eltorito-alt-boot \
+  -e '--interval:appended_partition_2:::' \
+  -no-emul-boot \
   -isohybrid-gpt-basdat \
-  -efi-boot-part --efi-boot-image "$ESP_IMG" \
   "$ISO_DIR"
 
 ###############################################################################
@@ -204,8 +207,11 @@ xorriso -as mkisofs \
   -iso-level 3 \
   -full-iso9660-filenames \
   -joliet -rock \
+  -append_partition 2 0xef "$ESP_IMG" \
+  -eltorito-alt-boot \
+  -e '--interval:appended_partition_2:::' \
+  -no-emul-boot \
   -isohybrid-gpt-basdat \
-  -efi-boot-part --efi-boot-image "$ESP_IMG" \
   "$SIGNED_DIR"
 
 ###############################################################################
