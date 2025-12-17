@@ -156,8 +156,10 @@ cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 ###############################################################################
 log "Creating EFI System Partition image"
 
-dd if=/dev/zero of="$ESP_IMG" bs=1M count=20
-mkfs.vfat "$ESP_IMG"
+# Create a sufficiently large EFI System Partition (256 MiB)
+ESP_SIZE_MB=256
+dd if=/dev/zero of="$ESP_IMG" bs=1M count=$ESP_SIZE_MB
+mkfs.fat -F32 "$ESP_IMG"
 
 mkdir -p /tmp/esp
 sudo mount "$ESP_IMG" /tmp/esp
