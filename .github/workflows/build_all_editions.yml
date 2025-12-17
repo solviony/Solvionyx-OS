@@ -10,6 +10,9 @@ permissions:
   id-token: write
 
 jobs:
+  # =========================================================
+  # BUILD JOB (UNCHANGED)
+  # =========================================================
   build:
     name: Build Solvionyx OS Aurora — ${{ matrix.edition }}
     runs-on: ubuntu-24.04
@@ -21,11 +24,9 @@ jobs:
         edition: [gnome, kde, xfce]
 
     steps:
-      # ---------------------------------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------------
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
@@ -43,9 +44,6 @@ jobs:
             zstd \
             rsync wget curl
 
-      # ---------------------------------------------------------
-      # RESTORE SECUREBOOT KEYS (ONLY THIS BLOCK, FIXED)
-      # ---------------------------------------------------------
       - name: Restore SecureBoot Keys (Base64 Decode)
         run: |
           mkdir -p secureboot
@@ -54,28 +52,17 @@ jobs:
           chmod 600 secureboot/db.key
           chmod 644 secureboot/db.crt
 
-      # ---------------------------------------------------------
-      # RUN BUILDER SCRIPT
-      # ---------------------------------------------------------
       - name: 🛠 Run Solvionyx Builder — ${{ matrix.edition }}
         shell: bash
         run: |
           chmod +x build/builder_v6_ultra.sh
           sudo bash build/builder_v6_ultra.sh "${{ matrix.edition }}"
 
-      # ---------------------------------------------------------
-      # Locate built artifacts
-      # ---------------------------------------------------------
       - name: Locate Output Artifact
-        id: iso_path
         run: |
           OUT=$(ls solvionyx_build/*.xz | head -n 1)
-          echo "ISO_OUT=$OUT" >> $GITHUB_ENV
           echo "Found artifact: $OUT"
 
-      # ---------------------------------------------------------
-      # Upload artifacts
-      # ---------------------------------------------------------
       - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -84,15 +71,16 @@ jobs:
             solvionyx_build/*.xz
             solvionyx_build/SHA256SUMS.txt
 
-  # ---------------------------------------------------------
-  # UNIFIED RELEASE JOB
-  # ---------------------------------------------------------
+  # =========================================================
+  # RELEASE JOB (FIXED + RECOMMENDED)
+  # =========================================================
   release:
     name: Publish Unified Solvionyx Aurora Release
     runs-on: ubuntu-24.04
     needs: build
     permissions:
       contents: write
+      id-token: write
 
     steps:
       - name: Checkout Repository
@@ -103,26 +91,75 @@ jobs:
         with:
           path: release_artifacts
 
+      # ---------------------------------------------------------
+      # RECOMMENDED: AUTHENTICATE TO GOOGLE CLOUD (OIDC)
+      # ---------------------------------------------------------
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      # ---------------------------------------------------------
+      # FIX: UPLOAD LARGE FILES TO GCS
+      # ---------------------------------------------------------
+      - name: Upload ISOs to Google Cloud Storage
+        run: |
+          BUCKET="${{ secrets.GCS_BUCKET }}"
+          VERSION="Aurora-v6-${{ github.run_number }}"
+
+          gsutil -m cp \
+            release_artifacts/**/**/*.xz \
+            release_artifacts/**/SHA256SUMS.txt \
+            gs://$BUCKET/$VERSION/
+
+      # ---------------------------------------------------------
+      # GENERATE RELEASE NOTES WITH LINKS
+      # ---------------------------------------------------------
+      - name: Generate Release Body
+        run: |
+          BUCKET="${{ secrets.GCS_BUCKET }}"
+          VERSION="Aurora-v6-${{ github.run_number }}"
+
+          cat <<EOF > release_body.md
+          ## Solvionyx OS — Aurora v6 Ultra
+
+          ### Editions Included
+          - GNOME
+          - KDE
+          - XFCE
+
+          ### Status
+          - SecureBoot: Fully Signed
+          - Installer: Calamares
+          - Solvy AI Included
+          - Welcome App Included
+          - Aurora v6 Branding Applied
+
+          ### Downloads (Google Cloud Storage)
+          EOF
+
+          for f in release_artifacts/**/**/*.xz; do
+            NAME=$(basename "$f")
+            echo "- https://storage.googleapis.com/$BUCKET/$VERSION/$NAME" >> release_body.md
+          done
+
+          echo "" >> release_body.md
+          echo "SHA256 checksums are included in the same directory." >> release_body.md
+
+      # ---------------------------------------------------------
+      # PUBLISH GITHUB RELEASE (NO LARGE FILE ATTACHMENTS)
+      # ---------------------------------------------------------
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: "Aurora-v6-${{ github.run_number }}"
           name: "Solvionyx OS — Aurora v6 Ultra"
-          body: |
-            ## Solvionyx OS — Aurora v6 Ultra
-            ### Editions Included:
-            - GNOME
-            - KDE
-            - XFCE
-
-            ### Status:
-            - SecureBoot: Fully Signed
-            - Installer: Calamares
-            - Solvy AI Included
-            - Welcome App Included
-            - Aurora v6 Branding Applied
-
-            All signed ISO images (.iso.xz) and SHA256SUMS are attached.
-          files: release_artifacts/**
+          body_path: release_body.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
