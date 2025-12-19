@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   # =========================================================
@@ -58,11 +57,6 @@ jobs:
           chmod +x build/builder_v6_ultra.sh
           sudo bash build/builder_v6_ultra.sh "${{ matrix.edition }}"
 
-      - name: Locate Output Artifact
-        run: |
-          OUT=$(ls solvionyx_build/*.xz | head -n 1)
-          echo "Found artifact: $OUT"
-
       - name: Upload ISO Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -72,7 +66,7 @@ jobs:
             solvionyx_build/SHA256SUMS.txt
 
   # =========================================================
-  # RELEASE JOB (FIXED + RECOMMENDED)
+  # RELEASE JOB (GCS UPLOAD – SIMPLE & RELIABLE)
   # =========================================================
   release:
     name: Publish Unified Solvionyx Aurora Release
@@ -80,7 +74,6 @@ jobs:
     needs: build
     permissions:
       contents: write
-      id-token: write
 
     steps:
       - name: Checkout Repository
@@ -92,13 +85,12 @@ jobs:
           path: release_artifacts
 
       # ---------------------------------------------------------
-      # RECOMMENDED: AUTHENTICATE TO GOOGLE CLOUD (OIDC)
+      # AUTHENTICATE TO GOOGLE CLOUD (SERVICE ACCOUNT JSON)
       # ---------------------------------------------------------
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -106,7 +98,7 @@ jobs:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       # ---------------------------------------------------------
-      # FIX: UPLOAD LARGE FILES TO GCS
+      # UPLOAD LARGE FILES TO GCS
       # ---------------------------------------------------------
       - name: Upload ISOs to Google Cloud Storage
         run: |
@@ -117,9 +109,46 @@ jobs:
             release_artifacts/**/**/*.xz \
             release_artifacts/**/SHA256SUMS.txt \
             gs://$BUCKET/$VERSION/
+      # ---------------------------------------------------------
+      # ADD: Generate Signed URLs for Downloads (TEMPORARY ACCESS)
+      # ---------------------------------------------------------
+      - name: Generate Signed Download URLs
+        run: |
+          BUCKET="${{ secrets.GCS_BUCKET }}"
+          VERSION="Aurora-v6-${{ github.run_number }}"
+          EXPIRE_SECONDS=604800  # 7 days
+
+          echo "## Solvionyx OS — Aurora v6 Ultra" > release_body.md
+          echo "" >> release_body.md
+          echo "### Secure Downloads (Signed URLs — valid 7 days)" >> release_body.md
+          echo "" >> release_body.md
+
+          for f in release_artifacts/**/**/*.xz; do
+            NAME=$(basename "$f")
+            URL=$(gsutil signurl \
+              -d ${EXPIRE_SECONDS}s \
+              <(echo '${{ secrets.GCP_SA_KEY }}') \
+              gs://$BUCKET/$VERSION/$NAME | tail -n 1 | awk '{print $5}')
+            echo "- [$NAME]($URL)" >> release_body.md
+          done
+
+          echo "" >> release_body.md
+          echo "SHA256 checksums are included in the same directory." >> release_body.md
+      # ---------------------------------------------------------
+      # ADD: Cleanup Old GCS Builds (Keep Latest 5)
+      # ---------------------------------------------------------
+      - name: Cleanup Old GCS Builds
+        run: |
+          BUCKET="${{ secrets.GCS_BUCKET }}"
+          KEEP=5
+
+          gsutil ls gs://$BUCKET/ | sed 's|gs://||' | sort -r | tail -n +$((KEEP+1)) | while read OLD; do
+            echo "Deleting old build: gs://$OLD"
+            gsutil -m rm -r gs://$OLD || true
+          done
 
       # ---------------------------------------------------------
-      # GENERATE RELEASE NOTES WITH LINKS
+      # GENERATE RELEASE NOTES (LINKS ONLY)
       # ---------------------------------------------------------
       - name: Generate Release Body
         run: |
@@ -137,8 +166,6 @@ jobs:
           ### Status
           - SecureBoot: Fully Signed
           - Installer: Calamares
-          - Solvy AI Included
-          - Welcome App Included
           - Aurora v6 Branding Applied
 
           ### Downloads (Google Cloud Storage)
@@ -153,7 +180,7 @@ jobs:
           echo "SHA256 checksums are included in the same directory." >> release_body.md
 
       # ---------------------------------------------------------
-      # PUBLISH GITHUB RELEASE (NO LARGE FILE ATTACHMENTS)
+      # GITHUB RELEASE (NO LARGE FILES)
       # ---------------------------------------------------------
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v1
