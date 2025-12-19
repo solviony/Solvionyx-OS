@@ -85,6 +85,17 @@ jobs:
           path: release_artifacts
 
       # ---------------------------------------------------------
+      # ADD: UPDATE LATEST ALIAS
+      # ---------------------------------------------------------
+      - name: Update latest GCS alias
+        run: |
+          BUCKET="${{ secrets.GCS_BUCKET }}"
+          VERSION="Aurora-v6-${{ github.run_number }}"
+
+          gsutil -m rm -r gs://$BUCKET/latest || true
+          gsutil -m cp -r gs://$BUCKET/$VERSION gs://$BUCKET/latest
+
+      # ---------------------------------------------------------
       # AUTHENTICATE TO GOOGLE CLOUD (SERVICE ACCOUNT JSON)
       # ---------------------------------------------------------
       - name: Authenticate to Google Cloud
@@ -136,6 +147,48 @@ jobs:
 
           echo "" >> release_body.md
           echo "SHA256 checksums are included in the same directory." >> release_body.md
+
+      # ---------------------------------------------------------
+      # ADD: GENERATE STATIC DOWNLOAD PAGE
+      # ---------------------------------------------------------
+      - name: Generate static download page
+        run: |
+          BUCKET="${{ secrets.GCS_BUCKET }}"
+          VERSION="Aurora-v6-${{ github.run_number }}"
+
+          cat <<EOF > index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Solvionyx OS — Aurora</title>
+            <style>
+              body { font-family: system-ui; background:#0b1220; color:#fff; padding:40px }
+              a { color:#4fc3ff; text-decoration:none }
+              .card { background:#111827; padding:20px; border-radius:12px; max-width:700px }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>Solvionyx OS — Aurora v6 Ultra</h1>
+              <p>Official downloads</p>
+              <ul>
+          EOF
+
+          gsutil ls gs://$BUCKET/latest/*.xz | while read f; do
+            NAME=$(basename "$f")
+            echo "<li><a href=\"$f\">$NAME</a></li>" >> index.html
+          done
+
+          cat <<EOF >> index.html
+              </ul>
+            </div>
+          </body>
+          </html>
+          EOF
+
+          gsutil cp index.html gs://$BUCKET/index.html
+
       # ---------------------------------------------------------
       # ADD: Cleanup Old GCS Builds (Keep Latest 5)
       # ---------------------------------------------------------
