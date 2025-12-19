@@ -105,10 +105,12 @@ jobs:
           BUCKET="${{ secrets.GCS_BUCKET }}"
           VERSION="Aurora-v6-${{ github.run_number }}"
 
-          gsutil -m cp \
-            release_artifacts/**/**/*.xz \
-            release_artifacts/**/SHA256SUMS.txt \
-            gs://$BUCKET/$VERSION/
+          find release_artifacts -name "*.xz" -print0 | \
+            xargs -0 -I{} gsutil cp {} gs://$BUCKET/$VERSION/
+
+          find release_artifacts -name "SHA256SUMS.txt" -print0 | \
+            xargs -0 -I{} gsutil cp {} gs://$BUCKET/$VERSION/
+
       # ---------------------------------------------------------
       # ADD: Generate Signed URLs for Downloads (TEMPORARY ACCESS)
       # ---------------------------------------------------------
