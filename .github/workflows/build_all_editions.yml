@@ -66,7 +66,7 @@ jobs:
             solvionyx_build/SHA256SUMS.txt
 
   # =========================================================
-  # RELEASE JOB (GCS UPLOAD – SIMPLE & RELIABLE)
+  # RELEASE JOB (GCS UPLOAD – FIXED & RELIABLE)
   # =========================================================
   release:
     name: Publish Unified Solvionyx Aurora Release
@@ -85,18 +85,7 @@ jobs:
           path: release_artifacts
 
       # ---------------------------------------------------------
-      # ADD: UPDATE LATEST ALIAS
-      # ---------------------------------------------------------
-      - name: Update latest GCS alias
-        run: |
-          BUCKET="${{ secrets.GCS_BUCKET }}"
-          VERSION="Aurora-v6-${{ github.run_number }}"
-
-          gsutil -m rm -r gs://$BUCKET/latest || true
-          gsutil -m cp -r gs://$BUCKET/$VERSION gs://$BUCKET/latest
-
-      # ---------------------------------------------------------
-      # AUTHENTICATE TO GOOGLE CLOUD (SERVICE ACCOUNT JSON)
+      # AUTHENTICATE TO GOOGLE CLOUD (FIXED ORDER)
       # ---------------------------------------------------------
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -123,13 +112,26 @@ jobs:
             xargs -0 -I{} gsutil cp {} gs://$BUCKET/$VERSION/
 
       # ---------------------------------------------------------
-      # ADD: Generate Signed URLs for Downloads (TEMPORARY ACCESS)
+      # UPDATE LATEST ALIAS (FIXED POSITION)
+      # ---------------------------------------------------------
+      - name: Update latest GCS alias
+        run: |
+          BUCKET="${{ secrets.GCS_BUCKET }}"
+          VERSION="Aurora-v6-${{ github.run_number }}"
+
+          gsutil -m rm -r gs://$BUCKET/latest || true
+          gsutil -m cp -r gs://$BUCKET/$VERSION gs://$BUCKET/latest
+
+      # ---------------------------------------------------------
+      # GENERATE SIGNED DOWNLOAD URLS (FIXED)
       # ---------------------------------------------------------
       - name: Generate Signed Download URLs
         run: |
           BUCKET="${{ secrets.GCS_BUCKET }}"
           VERSION="Aurora-v6-${{ github.run_number }}"
-          EXPIRE_SECONDS=604800  # 7 days
+          EXPIRE_SECONDS=604800
+
+          echo '${{ secrets.GCP_SA_KEY }}' > sa.json
 
           echo "## Solvionyx OS — Aurora v6 Ultra" > release_body.md
           echo "" >> release_body.md
@@ -138,23 +140,22 @@ jobs:
 
           for f in release_artifacts/**/**/*.xz; do
             NAME=$(basename "$f")
-            URL=$(gsutil signurl \
-              -d ${EXPIRE_SECONDS}s \
-              <(echo '${{ secrets.GCP_SA_KEY }}') \
+            URL=$(gsutil signurl -d ${EXPIRE_SECONDS}s sa.json \
               gs://$BUCKET/$VERSION/$NAME | tail -n 1 | awk '{print $5}')
             echo "- [$NAME]($URL)" >> release_body.md
           done
+
+          rm -f sa.json
 
           echo "" >> release_body.md
           echo "SHA256 checksums are included in the same directory." >> release_body.md
 
       # ---------------------------------------------------------
-      # ADD: GENERATE STATIC DOWNLOAD PAGE
+      # GENERATE STATIC DOWNLOAD PAGE
       # ---------------------------------------------------------
       - name: Generate static download page
         run: |
           BUCKET="${{ secrets.GCS_BUCKET }}"
-          VERSION="Aurora-v6-${{ github.run_number }}"
 
           cat <<EOF > index.html
           <!DOCTYPE html>
@@ -190,7 +191,7 @@ jobs:
           gsutil cp index.html gs://$BUCKET/index.html
 
       # ---------------------------------------------------------
-      # ADD: Cleanup Old GCS Builds (Keep Latest 5)
+      # CLEANUP OLD BUILDS (KEEP LATEST 5)
       # ---------------------------------------------------------
       - name: Cleanup Old GCS Builds
         run: |
@@ -203,39 +204,7 @@ jobs:
           done
 
       # ---------------------------------------------------------
-      # GENERATE RELEASE NOTES (LINKS ONLY)
-      # ---------------------------------------------------------
-      - name: Generate Release Body
-        run: |
-          BUCKET="${{ secrets.GCS_BUCKET }}"
-          VERSION="Aurora-v6-${{ github.run_number }}"
-
-          cat <<EOF > release_body.md
-          ## Solvionyx OS — Aurora v6 Ultra
-
-          ### Editions Included
-          - GNOME
-          - KDE
-          - XFCE
-
-          ### Status
-          - SecureBoot: Fully Signed
-          - Installer: Calamares
-          - Aurora v6 Branding Applied
-
-          ### Downloads (Google Cloud Storage)
-          EOF
-
-          for f in release_artifacts/**/**/*.xz; do
-            NAME=$(basename "$f")
-            echo "- https://storage.googleapis.com/$BUCKET/$VERSION/$NAME" >> release_body.md
-          done
-
-          echo "" >> release_body.md
-          echo "SHA256 checksums are included in the same directory." >> release_body.md
-
-      # ---------------------------------------------------------
-      # GITHUB RELEASE (NO LARGE FILES)
+      # PUBLISH GITHUB RELEASE
       # ---------------------------------------------------------
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v1
