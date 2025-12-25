@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Solvionyx Control Center
+Comment=System hub for Solvionyx OS
+Exec=/usr/share/solvionyx/control-center/solvionyx-control-center.py
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;

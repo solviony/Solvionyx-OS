@@ -1,0 +1,10 @@
+[Unit]
+Description=Solvionyx OEM Cleanup (remove OEM user after first customer setup)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/solvionyx/oem/solvionyx-oem-cleanup.sh
+
+[Install]
+WantedBy=multi-user.target

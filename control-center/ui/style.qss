@@ -1,0 +1,33 @@
+QMainWindow {
+  background: #07162a;
+}
+QLabel {
+  color: #d7e9ff;
+  font-size: 14px;
+}
+QLabel#headerLabel {
+  font-size: 20px;
+  font-weight: 700;
+  padding: 14px;
+}
+QGroupBox {
+  color: #cfefff;
+  border: 1px solid rgba(207, 239, 255, 0.25);
+  border-radius: 10px;
+  margin-top: 12px;
+}
+QGroupBox::title {
+  subcontrol-origin: margin;
+  left: 10px;
+  padding: 0 6px 0 6px;
+}
+QPushButton {
+  background: rgba(207, 239, 255, 0.10);
+  color: #d7e9ff;
+  border: 1px solid rgba(207, 239, 255, 0.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+QPushButton:hover {
+  background: rgba(207, 239, 255, 0.16);
+}

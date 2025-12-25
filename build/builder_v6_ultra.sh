@@ -158,6 +158,32 @@ sudo cp -a "$BRANDING_SRC/desktop-capabilities/." \
   "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/"
 
 ###############################################################################
+# SOLVIONYX CONTROL CENTER (Phase 4)
+###############################################################################
+log "Installing Solvionyx Control Center"
+sudo install -d "$CHROOT_DIR/usr/share/solvionyx/control-center"
+sudo cp -a "$REPO_ROOT/control-center/." "$CHROOT_DIR/usr/share/solvionyx/control-center/" || true
+sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/control-center/solvionyx-control-center.py" || true
+
+sudo install -d "$CHROOT_DIR/usr/share/applications"
+sudo install -m 0644 "$REPO_ROOT/control-center/solvionyx-control-center.desktop" \
+  "$CHROOT_DIR/usr/share/applications/solvionyx-control-center.desktop" || true
+
+###############################################################################
+# OEM / Factory Workflow (Phase 4) — installed but inactive unless enabled
+###############################################################################
+log "Installing OEM workflow (inactive unless /etc/solvionyx/oem-enabled exists)"
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/oem"
+sudo cp -a "$REPO_ROOT/oem/solvionyx-oem-cleanup.sh" "$CHROOT_DIR/usr/lib/solvionyx/oem/" || true
+sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/oem/solvionyx-oem-cleanup.sh" || true
+
+sudo install -d "$CHROOT_DIR/etc/systemd/system"
+sudo install -m 0644 "$REPO_ROOT/oem/solvionyx-oem-cleanup.service" \
+  "$CHROOT_DIR/etc/systemd/system/solvionyx-oem-cleanup.service" || true
+
+sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-oem-cleanup.service >/dev/null 2>&1 || true
+
+###############################################################################
 # PLYMOUTH (CORRECT ORDER)
 ###############################################################################
 sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
