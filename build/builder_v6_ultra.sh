@@ -70,7 +70,7 @@ mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR" "$UKI_DIR"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 ###############################################################################
-# DESKTOP SELECTION
+# DESKTOP SELECTION (Phase 1)
 ###############################################################################
 LIVE_AUTOLOGIN_USER="liveuser"
 
@@ -93,7 +93,7 @@ case "$EDITION" in
 esac
 
 ###############################################################################
-# BASE SYSTEM
+# BASE SYSTEM (Phase 2)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
@@ -114,11 +114,11 @@ apt-get install -y \
   unattended-upgrades \
   apt-listchanges \
   fwupd \
-  firmware-linux
-  firmware-linux-nonfree
-  firmware-iwlwifi
-  mesa-vulkan-drivers
-  mesa-utils
+  firmware-linux \
+  firmware-linux-nonfree \
+  firmware-iwlwifi \
+  mesa-vulkan-drivers \
+  mesa-utils \
   ${DESKTOP_PKGS[*]}
 "
 
@@ -153,7 +153,7 @@ fi
 fi
 
 ###############################################################################
-# OS IDENTITY
+# OS IDENTITY (Phase 3)
 ###############################################################################
 cat > "$CHROOT_DIR/etc/os-release" <<EOF
 NAME="Solvionyx OS"
@@ -169,7 +169,7 @@ LOGO=solvionyx
 EOF
 
 ###############################################################################
-# LIVE USER + AUTOLOGIN
+# LIVE USER + AUTOLOGIN (Phase 4)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
 useradd -m -s /bin/bash -G sudo,adm,audio,video,netdev $LIVE_AUTOLOGIN_USER || true
@@ -178,7 +178,7 @@ chmod 0440 /etc/sudoers.d/99-liveuser
 "
 
 ###############################################################################
-# CALAMARES CONFIG + BRANDING
+# CALAMARES CONFIG + BRANDING (Phase 5)
 ###############################################################################
 sudo install -d "$CHROOT_DIR/etc/calamares/modules/shellprocess"
 sudo install -m 0644 "$CALAMARES_SRC/settings.conf" "$CHROOT_DIR/etc/calamares/settings.conf"
@@ -191,7 +191,7 @@ sudo install -m 0644 "$CALAMARES_SRC/branding.desc" \
   "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc"
 
 ###############################################################################
-# WELCOME APP + DESKTOP CAPABILITIES
+# WELCOME APP + DESKTOP CAPABILITIES (Phase 6)
 ###############################################################################
 sudo install -d "$CHROOT_DIR/usr/share/solvionyx/welcome-app"
 sudo cp -a "$WELCOME_SRC/." "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"
@@ -203,7 +203,7 @@ sudo cp -a "$BRANDING_SRC/desktop-capabilities/." \
   "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/"
 
 ###############################################################################
-# SOLVIONYX CONTROL CENTER (Phase 4)
+# SOLVIONYX CONTROL CENTER (Phase 7)
 ###############################################################################
 log "Installing Solvionyx Control Center"
 sudo install -d "$CHROOT_DIR/usr/share/solvionyx/control-center"
@@ -215,7 +215,7 @@ sudo install -m 0644 "$REPO_ROOT/control-center/solvionyx-control-center.desktop
   "$CHROOT_DIR/usr/share/applications/solvionyx-control-center.desktop" || true
 
 ###############################################################################
-# OEM / Factory Workflow (Phase 4) — installed but inactive unless enabled
+# OEM / Factory Workflow (Phase 8) — installed but inactive unless enabled
 ###############################################################################
 log "Installing OEM workflow (inactive unless /etc/solvionyx/oem-enabled exists)"
 sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/oem"
