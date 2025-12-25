@@ -1,5 +1,5 @@
 #!/bin/bash
-# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot (VirtualBox FIXED)
+# Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot (VirtualBox + Hardware FIXED)
 set -euo pipefail
 
 log() { echo "[BUILD] $*"; }
@@ -61,6 +61,7 @@ apt-get install -y \
   linux-image-amd64 \
   live-boot \
   grub-efi-amd64 \
+  grub-efi-amd64-bin \
   shim-signed \
   tpm2-tools cryptsetup \
   plymouth plymouth-themes \
@@ -135,7 +136,7 @@ STUB_DST="$UKI_DIR/linuxx64.efi.stub"
 [ -f "$STUB_SRC" ] || fail "EFI stub missing"
 cp "$STUB_SRC" "$STUB_DST"
 
-CMDLINE="boot=live quiet splash systemd.measure=yes systemd.pcrlock=yes"
+CMDLINE="boot=live quiet splash"
 UKI_IMAGE="$UKI_DIR/solvionyx-uki.efi"
 
 objcopy \
@@ -146,17 +147,50 @@ objcopy \
   "$STUB_DST" "$UKI_IMAGE"
 
 ###############################################################################
-# EFI FILES
+# EFI FILES (Shim + UKI)
 ###############################################################################
 cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
-# CREATE REAL EFI SYSTEM PARTITION (VirtualBox REQUIRED)
+# ADD: GRUB EFI LOADER + CFG (MAKES SHIM ACTUALLY BOOT)
+###############################################################################
+log "Adding GRUB EFI loader + grub.cfg"
+
+GRUB_EFI_CANDIDATES=(
+  "$CHROOT_DIR/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed"
+  "$CHROOT_DIR/usr/lib/grub/x86_64-efi/grubx64.efi"
+  "/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed"
+  "/usr/lib/grub/x86_64-efi/grubx64.efi"
+)
+
+GRUB_EFI=""
+for c in "${GRUB_EFI_CANDIDATES[@]}"; do
+  if [ -f "$c" ]; then
+    GRUB_EFI="$c"
+    break
+  fi
+done
+[ -n "$GRUB_EFI" ] || fail "GRUB EFI binary not found (grubx64.efi)"
+
+# Put GRUB where shim expects it
+cp "$GRUB_EFI" "$ISO_DIR/EFI/BOOT/grubx64.efi"
+
+# Minimal grub.cfg that boots the UKI directly
+cat > "$ISO_DIR/EFI/BOOT/grub.cfg" <<'EOF'
+set timeout=3
+set default=0
+
+menuentry "Solvionyx OS Aurora (Live)" {
+  chainloader /EFI/BOOT/solvionyx.efi
+}
+EOF
+
+###############################################################################
+# EFI SYSTEM PARTITION (EL TORITO – REQUIRED FOR VIRTUALBOX)
 ###############################################################################
 log "Creating EFI System Partition image"
 
-# Create a sufficiently large EFI System Partition (256 MiB)
 ESP_SIZE_MB=256
 dd if=/dev/zero of="$ESP_IMG" bs=1M count=$ESP_SIZE_MB
 mkfs.fat -F32 "$ESP_IMG"
@@ -168,10 +202,13 @@ sudo cp -r "$ISO_DIR/EFI/BOOT/"* /tmp/esp/EFI/BOOT/
 sudo umount /tmp/esp
 rmdir /tmp/esp
 
+# Place EFI image INSIDE ISO tree (critical)
+cp "$ESP_IMG" "$ISO_DIR/efi.img"
+
 ###############################################################################
-# BUILD ISO (CORRECT UEFI + VIRTUALBOX)
+# BUILD ISO (UEFI — VIRTUALBOX + HARDWARE)
 ###############################################################################
-log "Building ISO (UEFI + VirtualBox compatible)"
+log "Building ISO (UEFI bootable)"
 
 xorriso -as mkisofs \
   -o "$BUILD_DIR/${ISO_NAME}.iso" \
@@ -179,11 +216,9 @@ xorriso -as mkisofs \
   -iso-level 3 \
   -full-iso9660-filenames \
   -joliet -rock \
-  -append_partition 2 0xef "$ESP_IMG" \
   -eltorito-alt-boot \
-  -e '--interval:appended_partition_2:::' \
+  -e efi.img \
   -no-emul-boot \
-  -isohybrid-gpt-basdat \
   "$ISO_DIR"
 
 ###############################################################################
@@ -193,6 +228,7 @@ rm -rf "$SIGNED_DIR"
 mkdir -p "$SIGNED_DIR"
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
+# Sign shim + UKI (keep your current behavior)
 sbsign --key secureboot/db.key --cert secureboot/db.crt \
   --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
   "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
@@ -201,17 +237,38 @@ sbsign --key secureboot/db.key --cert secureboot/db.crt \
   --output "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
   "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
 
+# OPTIONAL: sign GRUB too (harmless, improves real Secure Boot compatibility)
+if [ -f "$SIGNED_DIR/EFI/BOOT/grubx64.efi" ]; then
+  sbsign --key secureboot/db.key --cert secureboot/db.crt \
+    --output "$SIGNED_DIR/EFI/BOOT/grubx64.efi" \
+    "$SIGNED_DIR/EFI/BOOT/grubx64.efi" || true
+fi
+
+# Recreate ESP inside SIGNED_DIR so the El Torito EFI image includes signed binaries
+log "Rebuilding EFI image inside signed ISO tree"
+
+ESP_IMG_SIGNED="$BUILD_DIR/efi.signed.img"
+dd if=/dev/zero of="$ESP_IMG_SIGNED" bs=1M count=$ESP_SIZE_MB
+mkfs.fat -F32 "$ESP_IMG_SIGNED"
+
+mkdir -p /tmp/esp
+sudo mount "$ESP_IMG_SIGNED" /tmp/esp
+sudo mkdir -p /tmp/esp/EFI/BOOT
+sudo cp -r "$SIGNED_DIR/EFI/BOOT/"* /tmp/esp/EFI/BOOT/
+sudo umount /tmp/esp
+rmdir /tmp/esp
+
+cp "$ESP_IMG_SIGNED" "$SIGNED_DIR/efi.img"
+
 xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
   -V "$VOLID" \
   -iso-level 3 \
   -full-iso9660-filenames \
   -joliet -rock \
-  -append_partition 2 0xef "$ESP_IMG" \
   -eltorito-alt-boot \
-  -e '--interval:appended_partition_2:::' \
+  -e efi.img \
   -no-emul-boot \
-  -isohybrid-gpt-basdat \
   "$SIGNED_DIR"
 
 ###############################################################################
