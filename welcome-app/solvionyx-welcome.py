@@ -5,7 +5,6 @@ import subprocess
 from PyQt5 import QtWidgets, uic
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-FIRSTBOOT_MARKER = "/var/lib/solvionyx/firstboot"
 
 
 def _try_popen(cmd, silent=False):
@@ -13,65 +12,133 @@ def _try_popen(cmd, silent=False):
         if silent:
             return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return subprocess.Popen(cmd)
-    except FileNotFoundError:
-        return None
     except Exception:
         return None
+
+
+def _read_kv_file(path):
+    data = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                data[k.strip()] = v.strip()
+    except Exception:
+        pass
+    return data
+
+
+def _detect_desktop():
+    return (os.environ.get("XDG_CURRENT_DESKTOP", "") or "").lower()
+
+
+def _load_capabilities():
+    base_dir = "/usr/lib/solvionyx/desktop-capabilities.d"
+    caps = {}
+    caps.update(_read_kv_file(os.path.join(base_dir, "default.conf")))
+
+    d = _detect_desktop()
+    if "gnome" in d:
+        caps.update(_read_kv_file(os.path.join(base_dir, "gnome.conf")))
+    elif "kde" in d or "plasma" in d:
+        caps.update(_read_kv_file(os.path.join(base_dir, "kde.conf")))
+    elif "xfce" in d:
+        caps.update(_read_kv_file(os.path.join(base_dir, "xfce.conf")))
+    return caps
 
 
 class WelcomeApp(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-
         uic.loadUi(os.path.join(BASE, "ui/welcome_window.ui"), self)
 
-        # Apply Aurora style
+        # Style
         qss_path = os.path.join(BASE, "ui/style.qss")
         if os.path.exists(qss_path):
             with open(qss_path, "r", encoding="utf-8") as f:
                 self.setStyleSheet(f.read())
 
-        # Button bindings
+        self.caps = _load_capabilities()
+
+        # Phase 3 copy polish (only if widgets exist)
+        if hasattr(self, "titleLabel"):
+            self.titleLabel.setText("Welcome to Solvionyx OS — Aurora")
+        if hasattr(self, "subtitleLabel"):
+            self.subtitleLabel.setText("Finish setup, connect services, and get your system ready.")
+
+        # Bindings (existing)
         self.openSolvyButton.clicked.connect(self.open_solvy)
         self.connectWifiButton.clicked.connect(self.open_wifi)
         self.systemUpdateButton.clicked.connect(self.check_updates)
         self.storeButton.clicked.connect(self.open_store)
         self.supportButton.clicked.connect(self.open_support)
 
-    # ================================
-    # Button Actions
-    # ================================
+        # Add a “Finish Setup” button dynamically if UI doesn't have it
+        self._inject_finish_setup()
+
+    def _inject_finish_setup(self):
+        """
+        Adds a Finish Setup button without modifying the .ui file.
+        It will appear at the bottom of the main layout if a suitable container exists.
+        """
+        btn = QtWidgets.QPushButton("Finish Setup")
+        btn.clicked.connect(self.open_settings_and_exit)
+        btn.setMinimumHeight(40)
+
+        # Try common container names
+        for name in ("buttonsLayout", "mainLayout", "verticalLayout", "contentLayout"):
+            layout = getattr(self, name, None)
+            if layout is not None:
+                try:
+                    layout.addWidget(btn)
+                    return
+                except Exception:
+                    pass
+
+        # Fallback: add to central widget layout if possible
+        try:
+            cw = self.centralWidget()
+            if cw and cw.layout():
+                cw.layout().addWidget(btn)
+        except Exception:
+            pass
+
+    def open_settings_and_exit(self):
+        # Desktop-aware settings opener
+        settings_cmd = (self.caps.get("SETTINGS_UI") or "").strip()
+        if settings_cmd:
+            if _try_popen(settings_cmd.split(), silent=True) is not None:
+                self.close()
+                return
+
+        # GNOME fallback
+        if _try_popen(["gnome-control-center"], silent=True) is not None:
+            self.close()
+            return
+
+        self.close()
+
     def open_solvy(self):
-        if _try_popen(["solvy"], silent=True) is None:
-            QtWidgets.QMessageBox.information(
-                self,
-                "Solvy",
-                "Solvy is not installed or not available in PATH yet."
-            )
+        cmd = (self.caps.get("SOLVY_CMD", "solvy") or "solvy").split()
+        if _try_popen(cmd, silent=True) is None:
+            QtWidgets.QMessageBox.information(self, "Solvy", "Solvy is not installed yet.")
 
     def open_wifi(self):
-        # Prefer NM editor, then GNOME Settings Wi-Fi panel, then generic settings
+        wifi_cmd = (self.caps.get("NETWORK_UI") or "").strip()
+        if wifi_cmd and _try_popen(wifi_cmd.split()) is not None:
+            return
         if _try_popen(["nm-connection-editor"]) is not None:
             return
-        if _try_popen(["gnome-control-center", "wifi"]) is not None:
-            return
-        if _try_popen(["gnome-control-center"]) is not None:
-            return
-
-        QtWidgets.QMessageBox.information(
-            self,
-            "Network",
-            "Network settings tool was not found."
-        )
+        _try_popen(["gnome-control-center", "wifi"]) or _try_popen(["gnome-control-center"])
 
     def check_updates(self):
-        # GNOME Software is the simplest UX for first-boot updates
-        if _try_popen(["gnome-software"], silent=True) is None:
-            QtWidgets.QMessageBox.information(
-                self,
-                "Updates",
-                "GNOME Software is not installed or not available."
-            )
+        upd_cmd = (self.caps.get("UPDATES_UI") or "").strip()
+        if upd_cmd and _try_popen(upd_cmd.split(), silent=True) is not None:
+            return
+        _try_popen(["gnome-software"], silent=True)
 
     def open_store(self):
         _try_popen(["xdg-open", "https://store.solviony.com"], silent=True)
@@ -81,20 +148,9 @@ class WelcomeApp(QtWidgets.QMainWindow):
 
 
 def main():
-    # Only run on first boot of installed system
-    if not os.path.exists(FIRSTBOOT_MARKER):
-        return 0
-
     app = QtWidgets.QApplication(sys.argv)
     win = WelcomeApp()
     win.show()
-
-    # Remove marker immediately so it doesn't loop forever if user logs out/in
-    try:
-        os.remove(FIRSTBOOT_MARKER)
-    except Exception:
-        pass
-
     return app.exec_()
 
 

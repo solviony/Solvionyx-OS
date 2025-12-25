@@ -309,6 +309,24 @@ sudo cp -a "$BRANDING_SRC/wallpapers/." "$CHROOT_DIR/usr/share/backgrounds/solvi
 sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
 [ -f "$BRANDING_SRC/logo/solvionyx.png" ] && sudo cp -a "$BRANDING_SRC/logo/solvionyx.png" "$CHROOT_DIR/usr/share/pixmaps/" || true
 
+cat > "$CHROOT_DIR/etc/plymouth/plymouthd.conf" <<EOF
+[Daemon]
+Theme=solvionyx
+EOF
+
+# >>> PHASE 3: Ensure Solvionyx Plymouth is the system default <<<
+sudo chroot "$CHROOT_DIR" bash -lc "
+set -e
+if command -v update-alternatives >/dev/null 2>&1; then
+  update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth \
+    /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth 200 || true
+  update-alternatives --set default.plymouth \
+    /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth || true
+fi
+"
+
+sudo chroot "$CHROOT_DIR" update-initramfs -u || true
+
 ###############################################################################
 # GNOME DEFAULT WALLPAPER OVERRIDE (GNOME edition only)
 ###############################################################################
@@ -318,6 +336,45 @@ if [ "$EDITION" = "gnome" ] && [ -f "$BRANDING_SRC/gnome/00-solvionyx-wallpaper.
   sudo install -m 0644 "$BRANDING_SRC/gnome/00-solvionyx-wallpaper.gschema.override" \
     "$CHROOT_DIR/usr/share/glib-2.0/schemas/00-solvionyx-wallpaper.gschema.override"
   sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas || true
+fi
+
+###############################################################################
+# GNOME DEFAULT WALLPAPER OVERRIDE (GNOME edition only)
+###############################################################################
+if [ "$EDITION" = "gnome" ] && [ -f "$BRANDING_SRC/gnome/00-solvionyx-wallpaper.gschema.override" ]; then
+  log "Applying GNOME wallpaper defaults"
+  sudo install -d "$CHROOT_DIR/usr/share/glib-2.0/schemas"
+  sudo install -m 0644 "$BRANDING_SRC/gnome/00-solvionyx-wallpaper.gschema.override" \
+    "$CHROOT_DIR/usr/share/glib-2.0/schemas/00-solvionyx-wallpaper.gschema.override"
+  sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas || true
+fi
+
+###############################################################################
+# GNOME UX PRESET (Aurora defaults)
+###############################################################################
+if [ "$EDITION" = "gnome" ] && [ -f "$BRANDING_SRC/gnome/01-solvionyx-ux.gschema.override" ]; then
+  log "Applying GNOME UX defaults"
+  sudo install -m 0644 "$BRANDING_SRC/gnome/01-solvionyx-ux.gschema.override" \
+    "$CHROOT_DIR/usr/share/glib-2.0/schemas/01-solvionyx-ux.gschema.override"
+  sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas || true
+fi
+
+###############################################################################
+# GRUB THEME (Solvionyx)
+###############################################################################
+if [ -d "$BRANDING_SRC/grub" ]; then
+  log "Installing GRUB theme"
+  sudo install -d "$CHROOT_DIR/boot/grub/themes/solvionyx"
+  sudo cp -a "$BRANDING_SRC/grub/." "$CHROOT_DIR/boot/grub/themes/solvionyx/" || true
+
+  # Enable theme via /etc/default/grub (non-destructive)
+  sudo chroot "$CHROOT_DIR" bash -lc "
+set -e
+DEF=/etc/default/grub
+touch \$DEF
+grep -q '^GRUB_THEME=' \$DEF && sed -i 's|^GRUB_THEME=.*|GRUB_THEME=/boot/grub/themes/solvionyx/theme.txt|' \$DEF \
+  || echo 'GRUB_THEME=/boot/grub/themes/solvionyx/theme.txt' >> \$DEF
+"
 fi
 
 ###############################################################################

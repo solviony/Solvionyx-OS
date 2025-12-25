@@ -1,0 +1,27 @@
+# Solvionyx OS Aurora GNOME UX defaults
+
+[org.gnome.desktop.interface]
+color-scheme='prefer-dark'
+enable-animations=true
+clock-show-date=true
+
+[org.gnome.desktop.peripherals.touchpad]
+tap-to-click=true
+natural-scroll=true
+
+[org.gnome.desktop.wm.preferences]
+button-layout='appmenu:minimize,maximize,close'
+
+[org.gnome.settings-daemon.plugins.color]
+night-light-enabled=true
+night-light-temperature=3700
+
+# Dock behavior via Dash-to-Dock (if installed)
+[org.gnome.shell.extensions.dash-to-dock]
+dock-position='LEFT'
+autohide=true
+dash-max-icon-size=40
+click-action='minimize'
+show-trash=true
+show-mounts=true
+extend-height=false

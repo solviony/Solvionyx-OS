@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Solvionyx
+Description=Solvionyx OS Aurora boot splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/solvionyx
+ScriptFile=/usr/share/plymouth/themes/solvionyx/solvionyx.script

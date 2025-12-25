@@ -1,3 +1,41 @@
-wallpaper_image = Image("solvionyx-logo.png");
-wallpaper_image.Scale(1.0, 1.0);
-Sprite(wallpaper_image);
+// Solvionyx OS Aurora Plymouth Script
+// Simple: centered logo + spinner; works across resolutions.
+
+logo = Image("logo.png");
+spinner = Image("spinner.png");
+
+screenW = Window.GetWidth();
+screenH = Window.GetHeight();
+
+logoW = logo.GetWidth();
+logoH = logo.GetHeight();
+
+spinW = spinner.GetWidth();
+spinH = spinner.GetHeight();
+
+centerX = (screenW - logoW) / 2;
+centerY = (screenH - logoH) / 2 - (screenH * 0.06);
+
+spinX = (screenW - spinW) / 2;
+spinY = centerY + logoH + (screenH * 0.03);
+
+logoSprite = Sprite(logo);
+logoSprite.SetPosition(centerX, centerY);
+logoSprite.SetOpacity(1);
+
+spinnerSprite = Sprite(spinner);
+spinnerSprite.SetPosition(spinX, spinY);
+spinnerSprite.SetOpacity(0.95);
+
+angle = 0;
+
+fun rotateSpinner() {
+  angle = angle + 10;
+  if (angle >= 360) angle = 0;
+  spinnerSprite.SetRotation(angle);
+}
+
+Plymouth.SetBackgroundTopColor(0.03, 0.09, 0.18);
+Plymouth.SetBackgroundBottomColor(0.02, 0.06, 0.14);
+
+Timer.Create(0.05, rotateSpinner);
