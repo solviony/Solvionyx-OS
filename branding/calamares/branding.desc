@@ -1,9 +1,25 @@
 ---
-name: solvionyx
-version: "v6 Aurora"
-welcome: "Install Solvionyx OS Aurora"
-product: "Solvionyx OS"
-shortVersion: "Aurora"
-longVersion: "Solvionyx OS — Aurora Edition"
-logo: "branding/calamares/branding/logo.png"
-productLogo: "branding/calamares/branding/product.png"
+componentName: solvionyx
+
+welcomeStyle: side
+showReleaseNotes: false
+
+strings:
+  productName: "Solvionyx OS — Aurora"
+  shortProductName: "Solvionyx OS"
+  version: "Aurora v6 Ultra"
+  shortVersion: "Aurora"
+  versionedName: "Solvionyx OS — Aurora v6 Ultra"
+  shortVersionedName: "Solvionyx OS Aurora"
+  bootloaderEntryName: "Solvionyx OS"
+  productUrl: "https://solviony.com"
+  supportUrl: "https://solviony.com/support"
+  knownIssuesUrl: "https://github.com/solviony/Solvionyx-OS/issues"
+
+images:
+  productLogo: "branding/logo.png"
+  productIcon: "branding/product.png"
+
+# Use a QML slideshow (we add show.qml + ImageSlide.qml below)
+slideshow: "show.qml"
+slideshowAPI: 2

@@ -2,8 +2,8 @@
 Type=Application
 Name=Solvionyx Welcome
 Comment=First run welcome experience
-Exec=/usr/share/solvionyx/welcome-app/solvionyx-welcome.py
-Icon=solvy
+Exec=/usr/share/solvionyx/welcome-app/solvionyx-firstboot.sh
+Icon=applications-system
 Terminal=false
 Categories=Utility;System;
 X-GNOME-Autostart-enabled=true

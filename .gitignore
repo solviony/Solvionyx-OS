@@ -1,1 +1,5 @@
 build/builder_v6_ultra_backup.sh
+
+solvionyx_build/
+*.bak
+*.p

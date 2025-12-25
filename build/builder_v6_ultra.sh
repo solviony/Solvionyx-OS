@@ -12,6 +12,17 @@ trap 'fail "Build failed at line $LINENO"' ERR
 EDITION="${1:-gnome}"
 
 ###############################################################################
+# PATHS (repo-relative, no one-off hardcoding)
+###############################################################################
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+BRANDING_SRC="$REPO_ROOT/branding"
+CALAMARES_SRC="$REPO_ROOT/branding/calamares"
+WELCOME_SRC="$REPO_ROOT/welcome-app"
+SECUREBOOT_DIR="$REPO_ROOT/secureboot"
+
+###############################################################################
 # DIRECTORIES
 ###############################################################################
 BUILD_DIR="solvionyx_build"
@@ -28,6 +39,27 @@ SIGNED_NAME="secureboot-${ISO_NAME}.iso"
 
 VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
+
+###############################################################################
+# HOST DEPENDENCIES
+###############################################################################
+need_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+ensure_host_deps() {
+  local missing=()
+  for c in sudo debootstrap mksquashfs xorriso objcopy sbsign mkfs.fat dd sha256sum xz; do
+    need_cmd "$c" || missing+=("$c")
+  done
+
+  if (( ${#missing[@]} > 0 )); then
+    log "Installing missing host dependencies: ${missing[*]}"
+    sudo apt-get update
+    sudo apt-get install -y \
+      debootstrap squashfs-tools xorriso binutils sbsigntool dosfstools coreutils xz-utils
+  fi
+}
+
+ensure_host_deps
 
 ###############################################################################
 # CI DISK CLEANUP
@@ -51,27 +83,59 @@ log "Bootstrapping Debian"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 ###############################################################################
+# EDITION PACKAGES + DISPLAY MANAGER
+###############################################################################
+DESKTOP_PKGS=()
+DM_PKG=""
+DM_SERVICE=""
+LIVE_AUTOLOGIN_USER="liveuser"
+
+case "$EDITION" in
+  gnome)
+    DESKTOP_PKGS=(task-gnome-desktop gdm3 gnome-initial-setup gnome-software)
+    DM_PKG="gdm3"
+    DM_SERVICE="gdm3"
+    ;;
+  kde|plasma)
+    DESKTOP_PKGS=(task-kde-desktop sddm plasma-discover)
+    DM_PKG="sddm"
+    DM_SERVICE="sddm"
+    ;;
+  xfce)
+    DESKTOP_PKGS=(task-xfce-desktop lightdm lightdm-gtk-greeter)
+    DM_PKG="lightdm"
+    DM_SERVICE="lightdm"
+    ;;
+  *)
+    fail "Unknown edition: $EDITION (use: gnome | kde | xfce)"
+    ;;
+esac
+
+###############################################################################
 # BASE SYSTEM
 ###############################################################################
+log "Installing base packages inside chroot"
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
   sudo systemd systemd-sysv \
-  systemd-boot-efi \
   linux-image-amd64 \
   live-boot \
-  grub-efi-amd64 \
-  grub-efi-amd64-bin \
+  grub-efi-amd64 grub-efi-amd64-bin \
   shim-signed \
   tpm2-tools cryptsetup \
   plymouth plymouth-themes \
   calamares \
-  task-gnome-desktop gdm3
+  network-manager \
+  xdg-utils \
+  python3 python3-pyqt5 \
+  ${DESKTOP_PKGS[*]}
 "
 
 ###############################################################################
 # SOLVIONYX OS IDENTITY
 ###############################################################################
+log "Writing /etc/os-release"
 cat > "$CHROOT_DIR/etc/os-release" <<EOF
 NAME="Solvionyx OS"
 PRETTY_NAME="Solvionyx OS Aurora"
@@ -86,19 +150,151 @@ LOGO=solvionyx
 EOF
 
 ###############################################################################
-# OEM MODE
+# LIVE USER
+###############################################################################
+log "Creating live user ($LIVE_AUTOLOGIN_USER) + passwordless sudo"
+sudo chroot "$CHROOT_DIR" bash -lc "
+set -e
+id -u $LIVE_AUTOLOGIN_USER >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo,adm,audio,video,netdev $LIVE_AUTOLOGIN_USER
+printf '$LIVE_AUTOLOGIN_USER ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/99-liveuser-nopasswd
+chmod 0440 /etc/sudoers.d/99-liveuser-nopasswd
+"
+
+###############################################################################
+# LIVE AUTOLOGIN (per DM)
+###############################################################################
+log "Configuring autologin for $DM_SERVICE"
+case "$DM_SERVICE" in
+  gdm3)
+    sudo chroot "$CHROOT_DIR" bash -lc "
+set -e
+CONF=/etc/gdm3/daemon.conf
+mkdir -p /etc/gdm3
+if [ -f \"\$CONF\" ]; then
+  sed -i 's/^#\\?AutomaticLoginEnable=.*/AutomaticLoginEnable=true/' \"\$CONF\" || true
+  sed -i 's/^#\\?AutomaticLogin=.*/AutomaticLogin=$LIVE_AUTOLOGIN_USER/' \"\$CONF\" || true
+else
+  cat > \"\$CONF\" <<EOF
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=$LIVE_AUTOLOGIN_USER
+EOF
+fi
+"
+    ;;
+  sddm)
+    sudo chroot "$CHROOT_DIR" bash -lc "
+set -e
+mkdir -p /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/10-solvionyx-autologin.conf <<EOF
+[Autologin]
+User=$LIVE_AUTOLOGIN_USER
+Session=plasma
+Relogin=true
+EOF
+"
+    ;;
+  lightdm)
+    sudo chroot "$CHROOT_DIR" bash -lc "
+set -e
+mkdir -p /etc/lightdm/lightdm.conf.d
+cat > /etc/lightdm/lightdm.conf.d/10-solvionyx-autologin.conf <<EOF
+[Seat:*]
+autologin-user=$LIVE_AUTOLOGIN_USER
+autologin-user-timeout=0
+EOF
+"
+    ;;
+esac
+
+###############################################################################
+# OEM MODE (Calamares reads this if you use OEM behavior later)
 ###############################################################################
 mkdir -p "$CHROOT_DIR/etc/calamares"
 echo "OEM_INSTALL=true" > "$CHROOT_DIR/etc/calamares/oem.conf"
 
 ###############################################################################
-# BRANDING
+# CALAMARES CONFIG + BRANDING (canonical layout)
 ###############################################################################
-mkdir -p "$CHROOT_DIR/etc/calamares/branding/solvionyx"
-cp -r branding/calamares/* "$CHROOT_DIR/etc/calamares/branding/solvionyx/" || true
+log "Installing Calamares configuration + branding"
 
-mkdir -p "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
-cp branding/plymouth/* "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/" || true
+sudo install -d "$CHROOT_DIR/etc/calamares"
+sudo install -m 0644 "$CALAMARES_SRC/settings.conf" "$CHROOT_DIR/etc/calamares/settings.conf"
+
+sudo install -d "$CHROOT_DIR/etc/calamares/modules"
+if [ -d "$CALAMARES_SRC/modules" ]; then
+  for f in "$CALAMARES_SRC/modules"/*.conf; do
+    [ -f "$f" ] && sudo install -m 0644 "$f" "$CHROOT_DIR/etc/calamares/modules/$(basename "$f")"
+  done
+fi
+
+# shellprocess instance (run_on_install@shellprocess)
+sudo install -d "$CHROOT_DIR/etc/calamares/modules/shellprocess"
+if [ -f "$CALAMARES_SRC/modules/run_on_install.conf" ]; then
+  sudo install -m 0644 "$CALAMARES_SRC/modules/run_on_install.conf" \
+    "$CHROOT_DIR/etc/calamares/modules/shellprocess/run_on_install.conf"
+fi
+
+sudo install -d "$CHROOT_DIR/usr/share/calamares/branding/solvionyx"
+sudo cp -a "$CALAMARES_SRC/branding/." "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/"
+sudo install -m 0644 "$CALAMARES_SRC/branding.desc" "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc"
+
+###############################################################################
+# LIVE: AUTO-LAUNCH INSTALLER (all desktops)
+###############################################################################
+log "Configuring Calamares autostart in live session"
+
+sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+cat > "$CHROOT_DIR/etc/xdg/autostart/solvionyx-installer.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Install Solvionyx OS
+Comment=Install Solvionyx OS to disk
+Exec=pkexec /usr/bin/calamares
+Icon=system-software-install
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+
+sudo install -d "$CHROOT_DIR/etc/polkit-1/rules.d"
+cat > "$CHROOT_DIR/etc/polkit-1/rules.d/49-solvionyx-calamares.rules" <<'EOF'
+polkit.addRule(function(action, subject) {
+    if (action.id == "com.github.calamares.calamares" && subject.isInGroup("sudo") && subject.active) {
+        return polkit.Result.YES;
+    }
+});
+EOF
+
+###############################################################################
+# WELCOME APP + FIRSTBOOT WRAPPER
+###############################################################################
+log "Installing Solvionyx Welcome app"
+sudo install -d "$CHROOT_DIR/usr/share/solvionyx/welcome-app"
+sudo cp -a "$WELCOME_SRC/." "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"
+sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/solvionyx-welcome.py" || true
+sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/solvionyx-firstboot.sh" || true
+
+###############################################################################
+# DESKTOP CAPABILITIES LAYER
+###############################################################################
+log "Installing desktop capability layer"
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d"
+sudo install -m 0644 "$BRANDING_SRC/desktop-capabilities/default.conf" "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/default.conf"
+sudo install -m 0644 "$BRANDING_SRC/desktop-capabilities/gnome.conf"   "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/gnome.conf" || true
+sudo install -m 0644 "$BRANDING_SRC/desktop-capabilities/kde.conf"     "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/kde.conf" || true
+sudo install -m 0644 "$BRANDING_SRC/desktop-capabilities/xfce.conf"    "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/xfce.conf" || true
+
+###############################################################################
+# POST-INSTALL AUTOSTART (via Calamares run_on_install)
+# Note: your shellprocess config should copy solvionyx-welcome.desktop to /etc/skel
+###############################################################################
+
+###############################################################################
+# PLYMOUTH + WALLPAPER BRANDING
+###############################################################################
+log "Installing Plymouth theme + wallpapers"
+sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
+sudo cp -a "$BRANDING_SRC/plymouth/." "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/" || true
 
 cat > "$CHROOT_DIR/etc/plymouth/plymouthd.conf" <<EOF
 [Daemon]
@@ -107,11 +303,22 @@ EOF
 
 sudo chroot "$CHROOT_DIR" update-initramfs -u || true
 
-mkdir -p "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
-cp branding/wallpapers/* "$CHROOT_DIR/usr/share/backgrounds/solvionyx/" || true
+sudo install -d "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
+sudo cp -a "$BRANDING_SRC/wallpapers/." "$CHROOT_DIR/usr/share/backgrounds/solvionyx/" || true
 
-mkdir -p "$CHROOT_DIR/usr/share/pixmaps"
-cp branding/logo/solvionyx.png "$CHROOT_DIR/usr/share/pixmaps/" || true
+sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+[ -f "$BRANDING_SRC/logo/solvionyx.png" ] && sudo cp -a "$BRANDING_SRC/logo/solvionyx.png" "$CHROOT_DIR/usr/share/pixmaps/" || true
+
+###############################################################################
+# GNOME DEFAULT WALLPAPER OVERRIDE (GNOME edition only)
+###############################################################################
+if [ "$EDITION" = "gnome" ] && [ -f "$BRANDING_SRC/gnome/00-solvionyx-wallpaper.gschema.override" ]; then
+  log "Applying GNOME wallpaper defaults"
+  sudo install -d "$CHROOT_DIR/usr/share/glib-2.0/schemas"
+  sudo install -m 0644 "$BRANDING_SRC/gnome/00-solvionyx-wallpaper.gschema.override" \
+    "$CHROOT_DIR/usr/share/glib-2.0/schemas/00-solvionyx-wallpaper.gschema.override"
+  sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas || true
+fi
 
 ###############################################################################
 # SQUASHFS
@@ -149,11 +356,29 @@ objcopy \
 ###############################################################################
 # EFI FILES (Shim + UKI)
 ###############################################################################
-cp /usr/lib/shim/shimx64.efi.signed "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
+log "Placing EFI bootloaders"
+
+SHIM_CANDIDATES=(
+  "$CHROOT_DIR/usr/lib/shim/shimx64.efi.signed"
+  "$CHROOT_DIR/usr/lib/shim/shimx64.efi"
+  "/usr/lib/shim/shimx64.efi.signed"
+  "/usr/lib/shim/shimx64.efi"
+)
+
+SHIM_EFI=""
+for c in "${SHIM_CANDIDATES[@]}"; do
+  if [ -f "$c" ]; then
+    SHIM_EFI="$c"
+    break
+  fi
+done
+[ -n "$SHIM_EFI" ] || fail "shimx64.efi(.signed) not found"
+
+cp "$SHIM_EFI" "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
 cp "$UKI_IMAGE" "$ISO_DIR/EFI/BOOT/solvionyx.efi"
 
 ###############################################################################
-# ADD: GRUB EFI LOADER + CFG (MAKES SHIM ACTUALLY BOOT)
+# GRUB EFI + CFG
 ###############################################################################
 log "Adding GRUB EFI loader + grub.cfg"
 
@@ -173,10 +398,8 @@ for c in "${GRUB_EFI_CANDIDATES[@]}"; do
 done
 [ -n "$GRUB_EFI" ] || fail "GRUB EFI binary not found (grubx64.efi)"
 
-# Put GRUB where shim expects it
 cp "$GRUB_EFI" "$ISO_DIR/EFI/BOOT/grubx64.efi"
 
-# Minimal grub.cfg that boots the UKI directly
 cat > "$ISO_DIR/EFI/BOOT/grub.cfg" <<'EOF'
 set timeout=3
 set default=0
@@ -187,7 +410,7 @@ menuentry "Solvionyx OS Aurora (Live)" {
 EOF
 
 ###############################################################################
-# EFI SYSTEM PARTITION (EL TORITO – REQUIRED FOR VIRTUALBOX)
+# EFI SYSTEM PARTITION IMAGE
 ###############################################################################
 log "Creating EFI System Partition image"
 
@@ -202,11 +425,10 @@ sudo cp -r "$ISO_DIR/EFI/BOOT/"* /tmp/esp/EFI/BOOT/
 sudo umount /tmp/esp
 rmdir /tmp/esp
 
-# Place EFI image INSIDE ISO tree (critical)
 cp "$ESP_IMG" "$ISO_DIR/efi.img"
 
 ###############################################################################
-# BUILD ISO (UEFI — VIRTUALBOX + HARDWARE)
+# BUILD ISO
 ###############################################################################
 log "Building ISO (UEFI bootable)"
 
@@ -224,27 +446,31 @@ xorriso -as mkisofs \
 ###############################################################################
 # SIGNED ISO
 ###############################################################################
+log "Signing ISO payload"
+
 rm -rf "$SIGNED_DIR"
 mkdir -p "$SIGNED_DIR"
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
-# Sign shim + UKI (keep your current behavior)
-sbsign --key secureboot/db.key --cert secureboot/db.crt \
+DB_KEY="$SECUREBOOT_DIR/db.key"
+DB_CRT="$SECUREBOOT_DIR/db.crt"
+[ -f "$DB_KEY" ] || fail "Missing Secure Boot key: $DB_KEY"
+[ -f "$DB_CRT" ] || fail "Missing Secure Boot cert: $DB_CRT"
+
+sbsign --key "$DB_KEY" --cert "$DB_CRT" \
   --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
   "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
 
-sbsign --key secureboot/db.key --cert secureboot/db.crt \
+sbsign --key "$DB_KEY" --cert "$DB_CRT" \
   --output "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
   "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
 
-# OPTIONAL: sign GRUB too (harmless, improves real Secure Boot compatibility)
 if [ -f "$SIGNED_DIR/EFI/BOOT/grubx64.efi" ]; then
-  sbsign --key secureboot/db.key --cert secureboot/db.crt \
+  sbsign --key "$DB_KEY" --cert "$DB_CRT" \
     --output "$SIGNED_DIR/EFI/BOOT/grubx64.efi" \
     "$SIGNED_DIR/EFI/BOOT/grubx64.efi" || true
 fi
 
-# Recreate ESP inside SIGNED_DIR so the El Torito EFI image includes signed binaries
 log "Rebuilding EFI image inside signed ISO tree"
 
 ESP_IMG_SIGNED="$BUILD_DIR/efi.signed.img"
