@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Security
+Comment=System security and update status
+Exec=gnome-control-center privacy
+Icon=security-high
+Terminal=false
+Categories=System;Settings;
+StartupNotify=true

@@ -1,0 +1,10 @@
+[Unit]
+Description=Solvionyx OEM Cleanup
+After=graphical.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/solvionyx/oem-cleanup.sh
+
+[Install]
+WantedBy=multi-user.target

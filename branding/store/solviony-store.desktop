@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Solviony Store
+GenericName=App Store
+Comment=Apps, updates, and software for Solvionyx OS
+Exec=gnome-software
+Icon=software-store
+Terminal=false
+Categories=System;PackageManager;
+StartupNotify=true

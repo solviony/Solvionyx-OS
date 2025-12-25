@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=System Restore
+GenericName=System Recovery
+Comment=Restore Solvionyx OS to a previous snapshot
+Exec=pkexec timeshift-launcher
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;
+StartupNotify=true

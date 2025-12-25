@@ -98,14 +98,59 @@ esac
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
-  sudo systemd systemd-sysv linux-image-amd64 live-boot \
-  grub-efi-amd64 grub-efi-amd64-bin shim-signed \
+  sudo systemd systemd-sysv \
+  linux-image-amd64 \
+  live-boot \
+  grub-efi-amd64 grub-efi-amd64-bin \
+  shim-signed \
   tpm2-tools cryptsetup \
   plymouth plymouth-themes \
-  calamares network-manager xdg-utils \
+  calamares \
+  network-manager \
+  xdg-utils \
   python3 python3-pyqt5 \
+  timeshift \
+  power-profiles-daemon \
+  unattended-upgrades \
+  apt-listchanges \
+  fwupd \
+  firmware-linux
+  firmware-linux-nonfree
+  firmware-iwlwifi
+  mesa-vulkan-drivers
+  mesa-utils
   ${DESKTOP_PKGS[*]}
 "
+
+###############################################################################
+# PHASE 6 — ENABLE AUTOMATIC SECURITY UPDATES
+###############################################################################
+log "Enabling unattended security upgrades"
+
+sudo chroot "$CHROOT_DIR" bash -lc "
+sed -i 's|//\\s*\"\\${distro_id}:\\${distro_codename}-security\";|\"\\${distro_id}:\\${distro_codename}-security\";|' \
+  /etc/apt/apt.conf.d/50unattended-upgrades || true
+
+systemctl enable unattended-upgrades || true
+"
+
+###############################################################################
+# PHASE 5 — ENABLE PERFORMANCE PROFILES
+###############################################################################
+sudo chroot "$CHROOT_DIR" systemctl enable power-profiles-daemon || true
+
+###############################################################################
+# PHASE 5 — SOLVIONY STORE (GNOME SOFTWARE REBRAND)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Rebranding GNOME Software as Solviony Store (hide original launcher)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc "
+if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
+  sed -i 's/^NoDisplay=.*/NoDisplay=true/' /usr/share/applications/org.gnome.Software.desktop || true
+fi
+"
+fi
 
 ###############################################################################
 # OS IDENTITY
@@ -217,6 +262,86 @@ if [ "$EDITION" = "gnome" ]; then
     "$CHROOT_DIR/usr/share/glib-2.0/schemas/" || true
   sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas
 fi
+###############################################################################
+# PHASE 5 — ENABLE PERFORMANCE PROFILES
+###############################################################################
+log "Enabling power-profiles-daemon"
+
+sudo chroot "$CHROOT_DIR" systemctl enable power-profiles-daemon || true
+
+###############################################################################
+# PHASE 5 — SOLVIONY STORE (GNOME SOFTWARE)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Rebranding GNOME Software as Solviony Store"
+
+  sudo install -d "$CHROOT_DIR/usr/share/applications"
+  sudo install -m 0644 "$BRANDING_SRC/store/solviony-store.desktop" \
+    "$CHROOT_DIR/usr/share/applications/solviony-store.desktop"
+
+  sudo chroot "$CHROOT_DIR" bash -lc "
+if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
+  sed -i 's/^NoDisplay=.*/NoDisplay=true/' /usr/share/applications/org.gnome.Software.desktop || true
+fi
+"
+fi
+
+###############################################################################
+# PHASE 5 — SYSTEM RESTORE (TIMESHIFT, BRANDED)
+###############################################################################
+log "Installing Solvionyx System Restore launcher"
+
+sudo install -d "$CHROOT_DIR/usr/share/applications"
+sudo install -m 0644 "$BRANDING_SRC/restore/solvionyx-system-restore.desktop" \
+  "$CHROOT_DIR/usr/share/applications/solvionyx-system-restore.desktop"
+
+###############################################################################
+# PHASE 5 — PERFORMANCE PROFILES (BRANDED LAUNCHER)
+###############################################################################
+log "Installing Solvionyx Performance Profiles launcher"
+
+sudo install -d "$CHROOT_DIR/usr/share/applications"
+sudo install -m 0644 "$BRANDING_SRC/performance/solvionyx-performance.desktop" \
+  "$CHROOT_DIR/usr/share/applications/solvionyx-performance.desktop"
+
+###############################################################################
+# PHASE 5 — SOLVY PERMISSIONS DEFAULTS
+###############################################################################
+log "Installing Solvy permissions defaults"
+
+sudo install -d "$CHROOT_DIR/etc/solvionyx"
+sudo install -m 0644 "$BRANDING_SRC/solvy/permissions.conf" \
+  "$CHROOT_DIR/etc/solvionyx/solvy-permissions.conf"
+
+###############################################################################
+# PHASE 6 — SYSTEM HARDENING
+###############################################################################
+log "Applying Solvionyx security hardening"
+
+sudo install -d "$CHROOT_DIR/etc/sysctl.d"
+sudo install -m 0644 "$BRANDING_SRC/security/99-solvionyx-hardening.conf" \
+  "$CHROOT_DIR/etc/sysctl.d/99-solvionyx-hardening.conf"
+
+###############################################################################
+# PHASE 6 — SECURITY CENTER
+###############################################################################
+sudo install -m 0644 "$BRANDING_SRC/security/solvionyx-security.desktop" \
+  "$CHROOT_DIR/usr/share/applications/solvionyx-security.desktop"
+
+###############################################################################
+# PHASE 7 — OEM CLEANUP
+###############################################################################
+log "Installing OEM cleanup service"
+
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx"
+sudo install -m 0755 "$BRANDING_SRC/oem/oem-cleanup.sh" \
+  "$CHROOT_DIR/usr/lib/solvionyx/oem-cleanup.sh"
+
+sudo install -d "$CHROOT_DIR/etc/systemd/system"
+sudo install -m 0644 "$BRANDING_SRC/oem/solvionyx-oem-cleanup.service" \
+  "$CHROOT_DIR/etc/systemd/system/solvionyx-oem-cleanup.service"
+
+sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-oem-cleanup.service || true
 
 ###############################################################################
 # SQUASHFS

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Performance Profiles
+GenericName=Power Management
+Comment=Manage power and performance modes
+Exec=gnome-control-center power
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;
+StartupNotify=true
