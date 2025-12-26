@@ -70,8 +70,9 @@ mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR" "$UKI_DIR"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 # Ensure non-free packages and firmware are installed correctly
+# Add non-free-firmware repository
 sudo chroot "$CHROOT_DIR" bash -lc "
-echo 'deb http://deb.debian.org/debian/ bookworm main contrib non-free' > /etc/apt/sources.list
+echo 'deb http://deb.debian.org/debian/ bookworm main contrib non-free non-free-firmware' > /etc/apt/sources.list
 apt-get update
 apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
 "
@@ -102,13 +103,6 @@ esac
 ###############################################################################
 # BASE SYSTEM (Phase 2)
 ###############################################################################
-# Add non-free repository for firmware packages
-sudo chroot "$CHROOT_DIR" bash -lc "
-echo 'deb http://deb.debian.org/debian/ bookworm main contrib non-free' > /etc/apt/sources.list
-apt-get update
-apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
-"
-
 # Install GNOME desktop and required dependencies
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
@@ -296,6 +290,20 @@ update-alternatives --set default.plymouth \
 "
 
 sudo chroot "$CHROOT_DIR" update-initramfs -u
+
+###############################################################################
+# WALLPAPERS + GNOME UX (ONCE)
+###############################################################################
+sudo install -d "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
+sudo cp -a "$BRANDING_SRC/wallpapers/." \
+  "$CHROOT_DIR/usr/share/backgrounds/solvionyx/"
+
+if [ "$EDITION" = "gnome" ]; then
+  sudo install -d "$CHROOT_DIR/usr/share/glib-2.0/schemas"
+  sudo cp "$BRANDING_SRC/gnome/"*.override \
+    "$CHROOT_DIR/usr/share/glib-2.0/schemas/" || true
+  sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas
+fi
 
 ###############################################################################
 # WALLPAPERS + GNOME UX (ONCE)
