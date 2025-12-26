@@ -138,24 +138,28 @@ mount_chroot_fs
 sudo chroot "$CHROOT_DIR" bash -lc '
 set -e
 
-# 1️ Prevent services from starting inside chroot
+# 1️ Prevent services from starting
 cat > /usr/sbin/policy-rc.d <<EOF
 #!/bin/sh
 exit 101
 EOF
 chmod +x /usr/sbin/policy-rc.d
 
-# 2️ Make dpkg resilient to kernel postinst failures
+# 2️ Disable initramfs generation (CRITICAL FIX)
+dpkg-divert --add --rename --divert /usr/sbin/update-initramfs.disabled /usr/sbin/update-initramfs
+ln -s /bin/true /usr/sbin/update-initramfs
+
+# 3️ Make dpkg tolerant
 echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/force-unsafe-io
 
 apt-get update
 
-# 3️ GNOME extension availability check (non-fatal)
+# 4️ GNOME extension check (non-fatal)
 if ! apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1; then
   echo "[BUILD] dashtodock package not found; continuing without it"
 fi
 
-# 4️ Install base system + kernel
+# 5️ Install base system + kernel
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   sudo systemd systemd-sysv \
   linux-image-amd64 \
@@ -180,11 +184,15 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
   mesa-utils \
   '"${DESKTOP_PKGS[*]}"'
 
-# 5️ Repair dpkg state explicitly (CRITICAL)
+# 6️ Repair dpkg state
 dpkg --configure -a || true
 apt-get -f install -y || true
 
-# 6️ Cleanup policy override
+# 7️ Restore initramfs tool
+rm -f /usr/sbin/update-initramfs
+dpkg-divert --remove --rename /usr/sbin/update-initramfs
+
+# 8️ Cleanup
 rm -f /usr/sbin/policy-rc.d
 '
 
