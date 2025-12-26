@@ -113,7 +113,6 @@ apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
-  sudo chroot "$CHROOT_DIR" bash -lc "apt-get clean && apt-get update"
   sudo systemd systemd-sysv \
   linux-image-amd64 \
   live-boot \
