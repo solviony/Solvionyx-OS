@@ -135,35 +135,45 @@ esac
 ###############################################################################
 mount_chroot_fs
 
-sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
+# Pass desktop packages safely into chroot
+DESKTOP_PKGS_STR="${DESKTOP_PKGS[*]}"
 
-# 1️ Prevent services from starting
-cat > /usr/sbin/policy-rc.d <<EOF
+sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
+  HOME=/root \
+  TERM="${TERM:-xterm}" \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  DESKTOP_PKGS_STR="$DESKTOP_PKGS_STR" \
+  bash -lc "
+set -euo pipefail
+
+# 1) Prevent services from starting in CI chroot
+cat > /usr/sbin/policy-rc.d <<'EOF'
 #!/bin/sh
 exit 101
 EOF
 chmod +x /usr/sbin/policy-rc.d
 
-# 2️ Disable initramfs generation (CRITICAL FIX)
-dpkg-divert --add --rename --divert /usr/sbin/update-initramfs.disabled /usr/sbin/update-initramfs
-ln -s /bin/true /usr/sbin/update-initramfs
+# 2) Make dpkg faster / less fsync-heavy
+echo 'force-unsafe-io' > /etc/dpkg/dpkg.cfg.d/force-unsafe-io
 
-# 3️ Make dpkg tolerant
-echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/force-unsafe-io
+# 3) Disable initramfs generation during package installs (CI-safe)
+if [ ! -e /usr/sbin/update-initramfs.disabled ]; then
+  dpkg-divert --add --rename --divert /usr/sbin/update-initramfs.disabled /usr/sbin/update-initramfs
+fi
+ln -sf /bin/true /usr/sbin/update-initramfs
 
 apt-get update
 
-# 4️ GNOME extension check (non-fatal)
+# 4) GNOME extension check (non-fatal) - correct package name on Debian
+# Debian uses: gnome-shell-extension-dashtodock (NOT ...-dash-to-dock)
 if ! apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1; then
-  echo "[BUILD] dashtodock package not found; continuing without it"
+  echo '[BUILD] dashtodock package not found; continuing without it'
 fi
 
-# 5️ Install base system + kernel
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+# 5) Install base system FIRST (exclude live-boot/live-tools for now)
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   sudo systemd systemd-sysv \
   linux-image-amd64 \
-  live-boot \
   grub-efi-amd64 grub-efi-amd64-bin \
   shim-signed \
   tpm2-tools cryptsetup \
@@ -182,19 +192,22 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
   firmware-iwlwifi \
   mesa-vulkan-drivers \
   mesa-utils \
-  '"${DESKTOP_PKGS[*]}"'
+  \$DESKTOP_PKGS_STR
 
-# 6️ Repair dpkg state
-dpkg --configure -a || true
-apt-get -f install -y || true
+# 6) Install live components LAST (best-effort in CI chroot)
+set +e
+DEBIAN_FRONTEND=noninteractive apt-get install -y live-boot live-tools
+dpkg --configure -a
+apt-get -f install -y
+set -e
 
-# 7️ Restore initramfs tool
+# 7) Restore initramfs tool
 rm -f /usr/sbin/update-initramfs
-dpkg-divert --remove --rename /usr/sbin/update-initramfs
+dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
 
-# 8️ Cleanup
+# 8) Cleanup
 rm -f /usr/sbin/policy-rc.d
-'
+"
 
 ###############################################################################
 # PHASE 2A — ENABLE NON-FREE-FIRMWARE (Debian Bookworm)
