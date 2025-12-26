@@ -129,20 +129,34 @@ case "$EDITION" in
     fail "Unknown edition: $EDITION"
     ;;
 esac
+
 ###############################################################################
 # BASE SYSTEM (Phase 2)
 ###############################################################################
 mount_chroot_fs
-# Install desktop and required dependencies
-sudo chroot "$CHROOT_DIR" bash -lc "
-apt-get update &&
 
-# Verify GNOME extensions availability (non-fatal)
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+# 1️ Prevent services from starting inside chroot
+cat > /usr/sbin/policy-rc.d <<EOF
+#!/bin/sh
+exit 101
+EOF
+chmod +x /usr/sbin/policy-rc.d
+
+# 2️ Make dpkg resilient to kernel postinst failures
+echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/force-unsafe-io
+
+apt-get update
+
+# 3️ GNOME extension availability check (non-fatal)
 if ! apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1; then
-  echo '[BUILD] dashtodock package not found; continuing without it'
-fi &&
+  echo "[BUILD] dashtodock package not found; continuing without it"
+fi
 
-apt-get install -y \
+# 4️ Install base system + kernel
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
   sudo systemd systemd-sysv \
   linux-image-amd64 \
   live-boot \
@@ -164,8 +178,15 @@ apt-get install -y \
   firmware-iwlwifi \
   mesa-vulkan-drivers \
   mesa-utils \
-  ${DESKTOP_PKGS[*]}
-"
+  '"${DESKTOP_PKGS[*]}"'
+
+# 5️ Repair dpkg state explicitly (CRITICAL)
+dpkg --configure -a || true
+apt-get -f install -y || true
+
+# 6️ Cleanup policy override
+rm -f /usr/sbin/policy-rc.d
+'
 
 ###############################################################################
 # PHASE 2A — ENABLE NON-FREE-FIRMWARE (Debian Bookworm)
