@@ -131,6 +131,39 @@ apt-get install -y \
 "
 
 ###############################################################################
+# PHASE 2A — ENABLE NON-FREE-FIRMWARE (Debian Bookworm)
+###############################################################################
+log "Enabling Debian non-free-firmware repositories"
+
+sudo chroot "$CHROOT_DIR" bash -lc "
+cat > /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+EOF
+
+apt-get update
+"
+
+###############################################################################
+# PHASE 2B — OPTIONAL FIRMWARE & GRAPHICS (NON-FATAL)
+###############################################################################
+log "Installing optional firmware and graphics packages (best-effort)"
+
+sudo chroot "$CHROOT_DIR" bash -lc "
+set +e
+
+apt-get install -y \
+  firmware-linux \
+  firmware-linux-nonfree \
+  firmware-iwlwifi \
+  mesa-vulkan-drivers \
+  mesa-utils
+
+exit 0
+"
+
+###############################################################################
 # PHASE 6 — ENABLE AUTOMATIC SECURITY UPDATES
 ###############################################################################
 log "Enabling unattended security upgrades"
