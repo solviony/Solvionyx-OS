@@ -95,6 +95,14 @@ esac
 ###############################################################################
 # BASE SYSTEM (Phase 2)
 ###############################################################################
+# Add non-free repository for firmware packages
+sudo chroot "$CHROOT_DIR" bash -lc "
+echo 'deb http://deb.debian.org/debian/ bookworm main contrib non-free' > /etc/apt/sources.list
+apt-get update
+apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
+"
+
+# Install GNOME desktop and required dependencies
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
