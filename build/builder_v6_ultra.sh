@@ -133,13 +133,15 @@ esac
 ###############################################################################
 # BASE SYSTEM (Phase 2)
 ###############################################################################
-# Install GNOME desktop and required dependencies
+# Install desktop and required dependencies
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
+
 # Verify GNOME extensions availability (non-fatal)
 if ! apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1; then
-  echo "[BUILD] dashtodock package not found; continuing without it"
-fi
+  echo '[BUILD] dashtodock package not found; continuing without it'
+fi &&
+
 apt-get install -y \
   sudo systemd systemd-sysv \
   linux-image-amd64 \
