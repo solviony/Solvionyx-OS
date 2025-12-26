@@ -69,6 +69,13 @@ mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR" "$UKI_DIR"
 ###############################################################################
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
+# Ensure non-free packages and firmware are installed correctly
+sudo chroot "$CHROOT_DIR" bash -lc "
+echo 'deb http://deb.debian.org/debian/ bookworm main contrib non-free' > /etc/apt/sources.list
+apt-get update
+apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
+"
+
 ###############################################################################
 # DESKTOP SELECTION (Phase 1)
 ###############################################################################
@@ -106,6 +113,7 @@ apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 apt-get install -y \
+  sudo chroot "$CHROOT_DIR" bash -lc "apt-get clean && apt-get update"
   sudo systemd systemd-sysv \
   linux-image-amd64 \
   live-boot \
