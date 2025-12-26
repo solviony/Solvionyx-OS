@@ -70,7 +70,7 @@ mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR" "$UKI_DIR"
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
 # Ensure non-free packages and firmware are installed correctly
-# Add non-free-firmware repository
+# Add non-free-firmware repository to chroot environment
 sudo chroot "$CHROOT_DIR" bash -lc "
 echo 'deb http://deb.debian.org/debian/ bookworm main contrib non-free non-free-firmware' > /etc/apt/sources.list
 apt-get update
@@ -83,10 +83,18 @@ apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
 LIVE_AUTOLOGIN_USER="liveuser"
 
 case "$EDITION" in
-  gnome)
-    DESKTOP_PKGS=(task-gnome-desktop gdm3 gnome-initial-setup gnome-software gnome-tweaks gnome-shell-extension-dash-to-dock gnome-shell-extension-appindicator)
-    DM_SERVICE="gdm3"
-    ;;
+ gnome)
+  DESKTOP_PKGS=(
+    task-gnome-desktop
+    gdm3
+    gnome-initial-setup
+    gnome-software
+    gnome-tweaks
+    gnome-shell-extension-dashtodock
+    gnome-shell-extension-appindicator
+  )
+  DM_SERVICE="gdm3"
+  ;;
   kde|plasma)
     DESKTOP_PKGS=(task-kde-desktop sddm plasma-discover)
     DM_SERVICE="sddm"
@@ -106,6 +114,9 @@ esac
 # Install GNOME desktop and required dependencies
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
+# Verify GNOME extensions availability (non-fatal)
+apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1 || \
+  sed -i 's/gnome-shell-extension-dashtodock//' /tmp/desktop-pkgs || true
 apt-get install -y \
   sudo systemd systemd-sysv \
   linux-image-amd64 \
@@ -305,19 +316,6 @@ if [ "$EDITION" = "gnome" ]; then
   sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas
 fi
 
-###############################################################################
-# WALLPAPERS + GNOME UX (ONCE)
-###############################################################################
-sudo install -d "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
-sudo cp -a "$BRANDING_SRC/wallpapers/." \
-  "$CHROOT_DIR/usr/share/backgrounds/solvionyx/"
-
-if [ "$EDITION" = "gnome" ]; then
-  sudo install -d "$CHROOT_DIR/usr/share/glib-2.0/schemas"
-  sudo cp "$BRANDING_SRC/gnome/"*.override \
-    "$CHROOT_DIR/usr/share/glib-2.0/schemas/" || true
-  sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas
-fi
 ###############################################################################
 # PHASE 5 — ENABLE PERFORMANCE PROFILES
 ###############################################################################
