@@ -4,7 +4,8 @@ set -euo pipefail
 
 log() { echo "[BUILD] $*"; }
 fail() { echo "[ERROR] $*" >&2; exit 1; }
-trap 'fail "Build failed at line $LINENO"' ERR
+trap 'umount_chroot_fs; fail "Build failed at line $LINENO"' ERR
+trap 'umount_chroot_fs' EXIT
 
 ###############################################################################
 # PARAMETERS
@@ -41,6 +42,24 @@ VOLID="Solvionyx-${EDITION}-${DATE//./}"
 VOLID="${VOLID:0:32}"
 
 ###############################################################################
+# CHROOT MOUNTS (required for kernel postinst / initramfs)
+###############################################################################
+mount_chroot_fs() {
+  sudo mountpoint -q "$CHROOT_DIR/dev"  || sudo mount --bind /dev "$CHROOT_DIR/dev"
+  sudo mountpoint -q "$CHROOT_DIR/dev/pts" || sudo mount -t devpts devpts "$CHROOT_DIR/dev/pts"
+  sudo mountpoint -q "$CHROOT_DIR/proc" || sudo mount -t proc proc "$CHROOT_DIR/proc"
+  sudo mountpoint -q "$CHROOT_DIR/sys"  || sudo mount -t sysfs sysfs "$CHROOT_DIR/sys"
+}
+
+umount_chroot_fs() {
+  # best-effort teardown (do not fail build if already unmounted)
+  sudo umount -lf "$CHROOT_DIR/sys" 2>/dev/null || true
+  sudo umount -lf "$CHROOT_DIR/proc" 2>/dev/null || true
+  sudo umount -lf "$CHROOT_DIR/dev/pts" 2>/dev/null || true
+  sudo umount -lf "$CHROOT_DIR/dev" 2>/dev/null || true
+}
+
+###############################################################################
 # HOST DEPENDENCIES
 ###############################################################################
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -53,7 +72,7 @@ ensure_host_deps() {
   if (( ${#missing[@]} > 0 )); then
     sudo apt-get update
     sudo apt-get install -y \
-      debootstrap squashfs-tools xorriso binutils sbsigntool dosfstools coreutils xz-utils
+    debootstrap squashfs-tools xorriso binutils sbsigntool dosfstools coreutils xz-utils
   fi
 }
 ensure_host_deps
@@ -68,6 +87,9 @@ mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR" "$UKI_DIR"
 # BOOTSTRAP
 ###############################################################################
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
+# Create mountpoints required by mount_chroot_fs()
+sudo mkdir -p "$CHROOT_DIR"/{dev,dev/pts,proc,sys}
+mount_chroot_fs
 
 # Ensure non-free packages and firmware are installed correctly
 # Add non-free-firmware repository to chroot environment
@@ -115,8 +137,9 @@ esac
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
 # Verify GNOME extensions availability (non-fatal)
-apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1 || \
-  sed -i 's/gnome-shell-extension-dashtodock//' /tmp/desktop-pkgs || true
+if ! apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1; then
+  echo "[BUILD] dashtodock package not found; continuing without it"
+fi
 apt-get install -y \
   sudo systemd systemd-sysv \
   linux-image-amd64 \
