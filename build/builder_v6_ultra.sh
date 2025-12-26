@@ -247,12 +247,19 @@ exit 0
 ###############################################################################
 log "Enabling unattended security upgrades"
 
-sudo chroot "$CHROOT_DIR" bash -lc "
-sed -i 's|//\\s*\"\\${distro_id}:\\${distro_codename}-security\";|\"\\${distro_id}:\\${distro_codename}-security\";|' \
-  /etc/apt/apt.conf.d/50unattended-upgrades || true
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+CONF=/etc/apt/apt.conf.d/50unattended-upgrades
+
+if [ -f "$CONF" ]; then
+  sed -i \
+    -e "s|// *\".*-security\";|\"origin=Debian,codename=bookworm-security\";|" \
+    "$CONF"
+fi
 
 systemctl enable unattended-upgrades || true
-"
+'
 
 ###############################################################################
 # PHASE 5 — ENABLE PERFORMANCE PROFILES
