@@ -129,10 +129,10 @@ case "$EDITION" in
     fail "Unknown edition: $EDITION"
     ;;
 esac
-
 ###############################################################################
 # BASE SYSTEM (Phase 2)
 ###############################################################################
+mount_chroot_fs
 # Install desktop and required dependencies
 sudo chroot "$CHROOT_DIR" bash -lc "
 apt-get update &&
