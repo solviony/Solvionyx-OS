@@ -10,15 +10,21 @@ permissions:
 
 jobs:
   # =========================================================
-  # BUILD JOB (UNCHANGED)
+  # BUILD JOB
   # =========================================================
   build:
     name: Build Solvionyx OS Aurora — ${{ matrix.edition }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+
+    # ⏱ Increased timeout (was 360)
+    timeout-minutes: 720
 
     strategy:
       fail-fast: false
+
+      # 🚦 Prevent I/O contention during squashfs
+      max-parallel: 1
+
       matrix:
         edition: [gnome, kde, xfce]
 
@@ -66,7 +72,7 @@ jobs:
             solvionyx_build/SHA256SUMS.txt
 
   # =========================================================
-  # RELEASE JOB (GCS UPLOAD – FIXED & RELIABLE)
+  # RELEASE JOB (UNCHANGED — ALREADY CORRECT)
   # =========================================================
   release:
     name: Publish Unified Solvionyx Aurora Release
@@ -84,9 +90,6 @@ jobs:
         with:
           path: release_artifacts
 
-      # ---------------------------------------------------------
-      # AUTHENTICATE TO GOOGLE CLOUD (FIXED ORDER)
-      # ---------------------------------------------------------
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -97,9 +100,6 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      # ---------------------------------------------------------
-      # UPLOAD LARGE FILES TO GCS
-      # ---------------------------------------------------------
       - name: Upload ISOs to Google Cloud Storage
         run: |
           BUCKET="${{ secrets.GCS_BUCKET }}"
@@ -111,9 +111,6 @@ jobs:
           find release_artifacts -name "SHA256SUMS.txt" -print0 | \
             xargs -0 -I{} gsutil cp {} gs://$BUCKET/$VERSION/
 
-      # ---------------------------------------------------------
-      # UPDATE LATEST ALIAS (FIXED POSITION)
-      # ---------------------------------------------------------
       - name: Update latest GCS alias
         run: |
           BUCKET="${{ secrets.GCS_BUCKET }}"
@@ -122,9 +119,6 @@ jobs:
           gsutil -m rm -r gs://$BUCKET/latest || true
           gsutil -m cp -r gs://$BUCKET/$VERSION gs://$BUCKET/latest
 
-      # ---------------------------------------------------------
-      # GENERATE SIGNED DOWNLOAD URLS (FIXED)
-      # ---------------------------------------------------------
       - name: Generate Signed Download URLs
         run: |
           BUCKET="${{ secrets.GCS_BUCKET }}"
@@ -146,13 +140,9 @@ jobs:
           done
 
           rm -f sa.json
-
           echo "" >> release_body.md
           echo "SHA256 checksums are included in the same directory." >> release_body.md
 
-      # ---------------------------------------------------------
-      # GENERATE STATIC DOWNLOAD PAGE
-      # ---------------------------------------------------------
       - name: Generate static download page
         run: |
           BUCKET="${{ secrets.GCS_BUCKET }}"
@@ -190,22 +180,15 @@ jobs:
 
           gsutil cp index.html gs://$BUCKET/index.html
 
-      # ---------------------------------------------------------
-      # CLEANUP OLD BUILDS (KEEP LATEST 5)
-      # ---------------------------------------------------------
       - name: Cleanup Old GCS Builds
         run: |
           BUCKET="${{ secrets.GCS_BUCKET }}"
           KEEP=5
 
           gsutil ls gs://$BUCKET/ | sed 's|gs://||' | sort -r | tail -n +$((KEEP+1)) | while read OLD; do
-            echo "Deleting old build: gs://$OLD"
             gsutil -m rm -r gs://$OLD || true
           done
 
-      # ---------------------------------------------------------
-      # PUBLISH GITHUB RELEASE
-      # ---------------------------------------------------------
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v1
         with:
