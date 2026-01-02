@@ -390,6 +390,21 @@ fi
 '
 
 ###############################################################################
+# D5b — Lock Solvionyx branding against overrides (NON-CI ONLY)
+###############################################################################
+if [ -z "${GITHUB_ACTIONS:-}" ]; then
+  log "Locking Solvionyx branding files (non-CI environment)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+  chattr +i /etc/lsb-release || true
+  chattr +i /etc/os-release || true
+  '
+
+else
+  log "Skipping branding immutability (CI environment detected)"
+fi
+
+###############################################################################
 # D6 — SOLVIONYX LOGO IN GNOME ABOUT (ROBUST)
 ###############################################################################
 log "Installing Solvionyx logo for GNOME About"
