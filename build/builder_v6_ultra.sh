@@ -19,6 +19,13 @@ trap 'umount_chroot_fs' EXIT
 EDITION="${1:-gnome}"
 
 ###############################################################################
+# KERNEL VARIABLES (must exist for set -u)
+###############################################################################
+KERNEL_VER=""
+VMLINUX=""
+INITRD=""
+
+###############################################################################
 # PATHS (repo-relative)
 ###############################################################################
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -212,19 +219,19 @@ rm -f /usr/sbin/update-initramfs
 dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
 
 # 7b) FORCE initrd creation (CI-safe, set -u compatible)
-KERNEL_VER=""
-if ls /boot/vmlinuz-* >/dev/null 2>&1; then
-  KERNEL_VER="$(ls /boot/vmlinuz-* | sed 's#.*/vmlinuz-##' | head -n1)"
-fi
+VMLINUX="$(ls /boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
 
-if [ -n "$KERNEL_VER" ]; then
+if [ -n "$VMLINUX" ]; then
+  KERNEL_VER="${VMLINUX##*/vmlinuz-}"
   echo "[BUILD] Creating initramfs for kernel: $KERNEL_VER"
-  update-initramfs -c -k "$KERNEL_VER" || update-initramfs -c -k all
+
+  # Force initramfs only for detected kernel
+  update-initramfs -c -k "$KERNEL_VER" || true
 else
   echo "[BUILD] WARNING: No kernel found yet, skipping initramfs creation"
 fi
 
-# Log for CI visibility
+# Log for CI visibility (non-fatal)
 ls -lah /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
 
 # 8) Cleanup
@@ -494,13 +501,22 @@ sudo install -m 0644 "$BRANDING_SRC/oem/solvionyx-oem-cleanup.service" \
 sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-oem-cleanup.service || true
 
 ###############################################################################
-# KERNEL + INITRD (COPY BEFORE UNMOUNT — SAFE)
+# KERNEL + INITRD 
 ###############################################################################
-VMLINUX=$(ls "$CHROOT_DIR"/boot/vmlinuz-* | head -n1)
-INITRD=$(ls "$CHROOT_DIR"/boot/initrd.img-* | head -n1)
 
-[ -f "$VMLINUX" ] || fail "Kernel image not found"
-[ -f "$INITRD" ] || fail "Initrd image not found"
+VMLINUX="$(ls "$CHROOT_DIR"/boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
+INITRD="$(ls "$CHROOT_DIR"/boot/initrd.img-* 2>/dev/null | head -n1 || true)"
+
+if [ -z "$VMLINUX" ]; then
+  fail "Kernel image not found in chroot"
+fi
+
+if [ -z "$INITRD" ]; then
+  fail "Initrd image not found in chroot"
+fi
+
+KERNEL_VER="${VMLINUX##*/vmlinuz-}"
+log "Detected kernel version: $KERNEL_VER"
 
 cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
 cp "$INITRD" "$LIVE_DIR/initrd.img"
