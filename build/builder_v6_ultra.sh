@@ -475,17 +475,6 @@ sudo install -Dm644 "$SOLVIONYX_LOGO" \
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 
 ###############################################################################
-# D7 — LOCK SOLVIONYX BRANDING (FINAL)
-###############################################################################
-log "Locking Solvionyx branding files"
-
-sudo chroot "$CHROOT_DIR" bash -lc '
-for f in /etc/os-release /etc/lsb-release; do
-  [ -f "$f" ] && chattr +i "$f" || true
-done
-'
-
-###############################################################################
 # LIVE USER + AUTOLOGIN (Phase 4)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
