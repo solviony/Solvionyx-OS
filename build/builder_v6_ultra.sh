@@ -211,6 +211,19 @@ set -e
 rm -f /usr/sbin/update-initramfs
 dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
 
+# 7b) FORCE initrd creation (CRITICAL)
+# If initrd wasn't generated during kernel install, create it now.
+KERNEL_VER="$(ls /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | head -n1 || true)"
+if [ -n "$KERNEL_VER" ]; then
+  echo "[BUILD] Creating initramfs for kernel: $KERNEL_VER"
+  update-initramfs -c -k "$KERNEL_VER" || update-initramfs -c -k all
+else
+  echo "[BUILD] WARNING: No /boot/vmlinuz-* found yet"
+fi
+
+# Sanity output for logs
+ls -lah /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
+
 # 8) Cleanup
 rm -f /usr/sbin/policy-rc.d
 "
