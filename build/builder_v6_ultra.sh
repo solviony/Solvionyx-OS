@@ -93,8 +93,23 @@ ensure_host_deps
 ###############################################################################
 # CLEAN
 ###############################################################################
-sudo rm -rf "$BUILD_DIR"
-mkdir -p "$CHROOT_DIR" "$LIVE_DIR" "$ISO_DIR/EFI/BOOT" "$SIGNED_DIR" "$UKI_DIR"
+log "Cleaning build directories (preserving immutable branding)"
+
+# Remove build outputs (safe)
+rm -rf \
+  "$BUILD_DIR/iso" \
+  "$BUILD_DIR/signed-iso" \
+  "$BUILD_DIR/uki" \
+  "$BUILD_DIR/efi.img" \
+  "$BUILD_DIR/efi.signed.img" \
+  "$BUILD_DIR/SHA256SUMS.txt" || true
+
+# Clean chroot EXCEPT /etc (branding is immutable by design)
+if [ -d "$BUILD_DIR/chroot" ]; then
+  find "$BUILD_DIR/chroot" -mindepth 1 \
+    ! -path "$BUILD_DIR/chroot/etc" \
+    -exec rm -rf {} + || true
+fi
 
 ###############################################################################
 # BOOTSTRAP
