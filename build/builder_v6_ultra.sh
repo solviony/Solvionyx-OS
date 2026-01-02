@@ -328,6 +328,7 @@ EOF
 # Ensure /etc/os-release points correctly (Debian standard)
 ln -sf /usr/lib/os-release /etc/os-release
 '
+
 ###############################################################################
 # D4 — REMOVE DEBIAN BRANDING FROM GNOME ABOUT
 ###############################################################################
@@ -366,6 +367,63 @@ ln -s /etc/os-release /usr/lib/os-release
 glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
 
 EOF
+
+###############################################################################
+# D5 — REMOVE DEBIAN FROM lsb_release
+###############################################################################
+log "Overriding lsb_release to Solvionyx OS"
+
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+cat > /etc/lsb-release <<EOF
+DISTRIB_ID=Solvionyx
+DISTRIB_RELEASE=Aurora
+DISTRIB_CODENAME=aurora
+DISTRIB_DESCRIPTION="Solvionyx OS Aurora"
+EOF
+
+# Ensure lsb_release command reflects branding
+if command -v lsb_release >/dev/null 2>&1; then
+  sed -i "s/^DISTRIB_ID=.*/DISTRIB_ID=Solvionyx/" /etc/lsb-release
+fi
+'
+
+###############################################################################
+# D6 — SOLVIONYX LOGO IN GNOME ABOUT
+###############################################################################
+log "Installing Solvionyx logo for GNOME About"
+
+# Install vendor logo (required by GNOME)
+sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+sudo cp "$BRANDING_SRC/logos/solvionyx.png" \
+  "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
+
+# GNOME expects vendor icon name to match ID
+sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
+sudo cp "$BRANDING_SRC/logos/solvionyx.png" \
+  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
+
+# Ensure icon cache is updated
+sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
+
+###############################################################################
+# BRANDING LOCK — PREVENT USER OVERRIDES
+###############################################################################
+log "Locking Solvionyx branding against overrides"
+
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+# Make os-release immutable
+chattr +i /etc/os-release || true
+
+# Lock lsb-release
+chattr +i /etc/lsb-release || true
+
+# Protect GNOME GDM branding
+chattr -R +i /etc/dconf/db/gdm.d || true
+'
 
 ###############################################################################
 # LIVE USER + AUTOLOGIN (Phase 4)
