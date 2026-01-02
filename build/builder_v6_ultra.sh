@@ -37,6 +37,13 @@ WELCOME_SRC="$REPO_ROOT/welcome-app"
 SECUREBOOT_DIR="$REPO_ROOT/secureboot"
 
 ###############################################################################
+# BRANDING CANONICAL ASSETS (SINGLE SOURCE OF TRUTH)
+###############################################################################
+SOLVIONYX_LOGO="$BRANDING_SRC/logo/solvionyx-logo.png"
+
+[ -f "$SOLVIONYX_LOGO" ] || fail "Missing canonical logo: $SOLVIONYX_LOGO"
+
+###############################################################################
 # DIRECTORIES
 ###############################################################################
 BUILD_DIR="solvionyx_build"
@@ -343,7 +350,7 @@ fi
 # OS IDENTITY (Phase 3)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc '
-cat > /usr/lib/os-release <<EOF
+cat > /etc/os-release <<EOF
 NAME="Solvionyx OS"
 PRETTY_NAME="Solvionyx OS Aurora"
 ID=solvionyx
@@ -356,8 +363,7 @@ BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
 LOGO=solvionyx
 EOF
 
-# Ensure /etc/os-release points correctly (Debian standard)
-ln -sf /usr/lib/os-release /etc/os-release
+ln -sf /etc/os-release /usr/lib/os-release
 '
 
 ###############################################################################
@@ -454,62 +460,23 @@ fi
 '
 
 ###############################################################################
-# D5b — Lock Solvionyx branding against overrides (NON-CI ONLY)
-###############################################################################
-if [ -z "${GITHUB_ACTIONS:-}" ]; then
-  log "Locking Solvionyx branding files (non-CI environment)"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-  chattr +i /etc/lsb-release || true
-  chattr +i /etc/os-release || true
-  '
-
-else
-  log "Skipping branding immutability (CI environment detected)"
-fi
-
-###############################################################################
-# D6 — SOLVIONYX LOGO IN GNOME ABOUT (FINAL)
+# D6 — SOLVIONYX LOGO IN GNOME ABOUT (FINAL, SAFE)
 ###############################################################################
 log "Installing Solvionyx logo for GNOME About"
 
-# Locate logo (support common names)
-LOGO_SRC=""
+# Canonical logo path (single source of truth)
+SOLVIONYX_LOGO="$BRANDING_SRC/logo/solvionyx-logo.png"
+[ -f "$SOLVIONYX_LOGO" ] || fail "Missing $SOLVIONYX_LOGO"
 
-for candidate in \
-  "$BRANDING_SRC/logos/solvionyx.png" \
-  "$BRANDING_SRC/logos/solvionyx-logo.png" \
-  "$BRANDING_SRC/logos/logo.png"
-do
-  if [ -f "$candidate" ]; then
-    LOGO_SRC="$candidate"
-    break
-  fi
-done
-
-[ -n "$LOGO_SRC" ] || fail "Solvionyx logo not found in branding/logos"
-
-# Install logo (GNOME About lookup paths)
-sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-sudo install -m 0644 "$LOGO_SRC" \
+# GNOME About primary lookup
+sudo install -Dm644 "$SOLVIONYX_LOGO" \
   "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
 
-sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
-sudo install -m 0644 "$LOGO_SRC" \
+# GNOME icon theme fallback
+sudo install -Dm644 "$SOLVIONYX_LOGO" \
   "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
 
-# Ensure os-release advertises the logo (GNOME About reads this)
-sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-if ! grep -q "^LOGO=" /etc/os-release; then
-  echo "LOGO=solvionyx" >> /etc/os-release
-else
-  sed -i "s/^LOGO=.*/LOGO=solvionyx/" /etc/os-release
-fi
-'
-
-# Update icon cache (non-fatal in CI)
+# Refresh icon cache (non-fatal in CI)
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 
 ###############################################################################
@@ -518,29 +485,9 @@ sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || t
 log "Locking Solvionyx branding files"
 
 sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
 for f in /etc/os-release /etc/lsb-release; do
   [ -f "$f" ] && chattr +i "$f" || true
 done
-'
-
-###############################################################################
-# BRANDING LOCK — PREVENT USER OVERRIDES
-###############################################################################
-log "Locking Solvionyx branding against overrides"
-
-sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-# Make os-release immutable
-chattr +i /etc/os-release || true
-
-# Lock lsb-release
-chattr +i /etc/lsb-release || true
-
-# Protect GNOME GDM branding
-chattr -R +i /etc/dconf/db/gdm.d || true
 '
 
 ###############################################################################
@@ -1016,6 +963,37 @@ xorriso -as mkisofs \
   -e efi.img \
   -no-emul-boot \
   "$SIGNED_DIR"
+
+###############################################################################
+# FINAL BRANDING LOCK (NON-CI ONLY, SAFE)
+###############################################################################
+if [ -z "${GITHUB_ACTIONS:-}" ]; then
+  log "Locking Solvionyx branding (non-CI system)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+  set -e
+
+  # Lock OS identity files
+  for f in /etc/os-release /etc/lsb-release; do
+    if [ -f "$f" ]; then
+      chattr +i "$f" || true
+    fi
+  done
+
+  # Lock logo assets used by GNOME About
+  for f in \
+    /usr/share/pixmaps/solvionyx.png \
+    /usr/share/icons/hicolor/256x256/apps/solvionyx.png
+  do
+    if [ -f "$f" ]; then
+      chattr +i "$f" || true
+    fi
+  done
+  '
+
+else
+  log "CI detected — skipping branding immutability"
+fi
 
 ###############################################################################
 # FINAL
