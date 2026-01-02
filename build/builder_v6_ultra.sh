@@ -211,17 +211,20 @@ set -e
 rm -f /usr/sbin/update-initramfs
 dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
 
-# 7b) FORCE initrd creation (CRITICAL)
-# If initrd wasn't generated during kernel install, create it now.
-KERNEL_VER="$(ls /boot/vmlinuz-* 2>/dev/null | sed 's#.*/vmlinuz-##' | head -n1 || true)"
+# 7b) FORCE initrd creation (CI-safe, set -u compatible)
+KERNEL_VER=""
+if ls /boot/vmlinuz-* >/dev/null 2>&1; then
+  KERNEL_VER="$(ls /boot/vmlinuz-* | sed 's#.*/vmlinuz-##' | head -n1)"
+fi
+
 if [ -n "$KERNEL_VER" ]; then
   echo "[BUILD] Creating initramfs for kernel: $KERNEL_VER"
   update-initramfs -c -k "$KERNEL_VER" || update-initramfs -c -k all
 else
-  echo "[BUILD] WARNING: No /boot/vmlinuz-* found yet"
+  echo "[BUILD] WARNING: No kernel found yet, skipping initramfs creation"
 fi
 
-# Sanity output for logs
+# Log for CI visibility
 ls -lah /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
 
 # 8) Cleanup
