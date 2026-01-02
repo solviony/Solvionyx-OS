@@ -264,7 +264,7 @@ fi
 # Log for CI visibility (non-fatal)
 ls -lah /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
 
-sudo chroot "$CHROOT_DIR" apt-get install -y \
+apt-get install -y \
   power-profiles-daemon \
   gnome-shell-extension-just-perfection \
   gnome-shell-extension-blur-my-shell
@@ -932,22 +932,6 @@ EOF
 
   sudo sed -i '/@import url(".*");/a @import url("solvionyx-glass.css");' \
     "$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css" || true
-fi
-
-###############################################################################
-# SOLVIONYX GLASS UI — REQUIRED EXTENSIONS (GNOME ONLY)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Installing Solvionyx glass UI extensions"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-apt-get update
-apt-get install -y \
-  gnome-shell-extension-dash-to-dock \
-  gnome-shell-extension-just-perfection \
-  gnome-shell-extension-blur-my-shell
-'
 fi
 
 ###############################################################################
