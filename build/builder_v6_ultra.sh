@@ -91,11 +91,11 @@ ensure_host_deps() {
 ensure_host_deps
 
 ###############################################################################
-# CLEAN
+# CLEAN (SAFE FOR IMMUTABLE BRANDING)
 ###############################################################################
 log "Cleaning build directories (preserving immutable branding)"
 
-# Remove build outputs (safe)
+# Remove previous build outputs
 rm -rf \
   "$BUILD_DIR/iso" \
   "$BUILD_DIR/signed-iso" \
@@ -104,12 +104,23 @@ rm -rf \
   "$BUILD_DIR/efi.signed.img" \
   "$BUILD_DIR/SHA256SUMS.txt" || true
 
-# Clean chroot EXCEPT /etc (branding is immutable by design)
+# Remove chroot contents except /etc (immutable branding)
 if [ -d "$BUILD_DIR/chroot" ]; then
   find "$BUILD_DIR/chroot" -mindepth 1 \
     ! -path "$BUILD_DIR/chroot/etc" \
     -exec rm -rf {} + || true
 fi
+
+###############################################################################
+# RECREATE BUILD DIRECTORIES (CRITICAL)
+###############################################################################
+mkdir -p \
+  "$BUILD_DIR" \
+  "$CHROOT_DIR" \
+  "$LIVE_DIR" \
+  "$ISO_DIR/EFI/BOOT" \
+  "$SIGNED_DIR" \
+  "$UKI_DIR"
 
 ###############################################################################
 # BOOTSTRAP
