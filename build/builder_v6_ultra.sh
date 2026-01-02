@@ -478,7 +478,19 @@ sudo install -m 0644 "$BRANDING_SRC/oem/solvionyx-oem-cleanup.service" \
 sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-oem-cleanup.service || true
 
 ###############################################################################
-# PRE-SQUASHFS CLEANUP (CRITICAL)
+# KERNEL + INITRD (COPY BEFORE UNMOUNT — SAFE)
+###############################################################################
+VMLINUX=$(ls "$CHROOT_DIR"/boot/vmlinuz-* | head -n1)
+INITRD=$(ls "$CHROOT_DIR"/boot/initrd.img-* | head -n1)
+
+[ -f "$VMLINUX" ] || fail "Kernel image not found"
+[ -f "$INITRD" ] || fail "Initrd image not found"
+
+cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
+cp "$INITRD" "$LIVE_DIR/initrd.img"
+
+###############################################################################
+# PRE-SQUASHFS CLEANUP (CORRECT POSITION)
 ###############################################################################
 log "Unmounting chroot virtual filesystems before SquashFS"
 umount_chroot_fs
@@ -491,12 +503,6 @@ sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
   -comp zstd \
   -Xcompression-level 6 \
   -processors 2
-
-###############################################################################
-# KERNEL + INITRD
-###############################################################################
-cp "$CHROOT_DIR"/boot/vmlinuz-* "$LIVE_DIR/vmlinuz"
-cp "$CHROOT_DIR"/boot/initrd.img-* "$LIVE_DIR/initrd.img"
 
 ###############################################################################
 # EFI + UKI + ISO (UNCHANGED LOGIC)
