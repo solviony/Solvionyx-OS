@@ -309,9 +309,10 @@ fi
 fi
 
 ###############################################################################
-# OS IDENTITY (Phase 3) — FORCE OVERRIDE
+# OS IDENTITY (Phase 3)
 ###############################################################################
-cat > "$CHROOT_DIR/etc/os-release" <<EOF
+sudo chroot "$CHROOT_DIR" bash -lc '
+cat > /usr/lib/os-release <<EOF
 NAME="Solvionyx OS"
 PRETTY_NAME="Solvionyx OS Aurora"
 ID=solvionyx
@@ -324,8 +325,9 @@ BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
 LOGO=solvionyx
 EOF
 
-# Debian 12: GDM prefers /usr/lib/os-release
-cp "$CHROOT_DIR/etc/os-release" "$CHROOT_DIR/usr/lib/os-release"
+# Ensure /etc/os-release points correctly (Debian standard)
+ln -sf /usr/lib/os-release /etc/os-release
+'
 
 ###############################################################################
 # LIVE USER + AUTOLOGIN (Phase 4)
