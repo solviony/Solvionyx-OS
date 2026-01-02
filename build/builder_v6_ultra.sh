@@ -93,23 +93,28 @@ ensure_host_deps
 ###############################################################################
 # CLEAN (SAFE FOR IMMUTABLE BRANDING)
 ###############################################################################
-log "Cleaning build directories (preserving immutable branding)"
+log "Final cleanup (immutable-safe)"
 
-# Remove previous build outputs
-rm -rf \
-  "$BUILD_DIR/iso" \
-  "$BUILD_DIR/signed-iso" \
-  "$BUILD_DIR/uki" \
-  "$BUILD_DIR/efi.img" \
-  "$BUILD_DIR/efi.signed.img" \
-  "$BUILD_DIR/SHA256SUMS.txt" || true
+set +e
 
-# Remove chroot contents except /etc (immutable branding)
-if [ -d "$BUILD_DIR/chroot" ]; then
-  find "$BUILD_DIR/chroot" -mindepth 1 \
-    ! -path "$BUILD_DIR/chroot/etc" \
-    -exec rm -rf {} + || true
-fi
+# Unmount chroot virtual filesystems (best effort)
+umount_chroot_fs || true
+
+# Remove volatile runtime directories only
+rm -rf "$CHROOT_DIR/dev"  || true
+rm -rf "$CHROOT_DIR/proc" || true
+rm -rf "$CHROOT_DIR/sys"  || true
+rm -rf "$CHROOT_DIR/run"  || true
+rm -rf "$CHROOT_DIR/tmp"  || true
+rm -rf "$CHROOT_DIR/var/tmp" || true
+
+# DO NOT TOUCH:
+# - $CHROOT_DIR/etc
+# - branding files
+# - os-release
+# - lsb-release
+
+set -e
 
 ###############################################################################
 # RECREATE BUILD DIRECTORIES (CRITICAL)
@@ -356,6 +361,39 @@ ln -sf /usr/lib/os-release /etc/os-release
 '
 
 ###############################################################################
+# FIX — FORCE OS LOGO (GNOME ABOUT)
+###############################################################################
+log "Forcing Solvionyx logo in os-release"
+
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+sed -i \
+  -e "s/^LOGO=.*/LOGO=solvionyx/" \
+  -e "/^LOGO=/! s|$|\
+LOGO=solvionyx|" \
+  /etc/os-release
+'
+
+###############################################################################
+# FIX — INSTALL SOLVIONYX LOGO (GNOME)
+###############################################################################
+log "Installing Solvionyx logo"
+
+LOGO_SRC="$BRANDING_SRC/logo/solvionyx-logo.png"
+[ -f "$LOGO_SRC" ] || fail "Missing branding/logo/solvionyx-logo.png"
+
+sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+sudo install -m 0644 "$LOGO_SRC" \
+  "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
+
+sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
+sudo install -m 0644 "$LOGO_SRC" \
+  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
+
+sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
+
+###############################################################################
 # D4 — REMOVE DEBIAN BRANDING FROM GNOME ABOUT
 ###############################################################################
 
@@ -431,7 +469,7 @@ else
 fi
 
 ###############################################################################
-# D6 — SOLVIONYX LOGO IN GNOME ABOUT (ROBUST)
+# D6 — SOLVIONYX LOGO IN GNOME ABOUT (FINAL)
 ###############################################################################
 log "Installing Solvionyx logo for GNOME About"
 
@@ -451,13 +489,25 @@ done
 
 [ -n "$LOGO_SRC" ] || fail "Solvionyx logo not found in branding/logos"
 
-# Install for GNOME About
+# Install logo (GNOME About lookup paths)
 sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-sudo cp "$LOGO_SRC" "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
+sudo install -m 0644 "$LOGO_SRC" \
+  "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
 
 sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
-sudo cp "$LOGO_SRC" \
+sudo install -m 0644 "$LOGO_SRC" \
   "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
+
+# Ensure os-release advertises the logo (GNOME About reads this)
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+if ! grep -q "^LOGO=" /etc/os-release; then
+  echo "LOGO=solvionyx" >> /etc/os-release
+else
+  sed -i "s/^LOGO=.*/LOGO=solvionyx/" /etc/os-release
+fi
+'
 
 # Update icon cache (non-fatal in CI)
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
