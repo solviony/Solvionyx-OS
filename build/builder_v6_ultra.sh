@@ -328,6 +328,44 @@ EOF
 # Ensure /etc/os-release points correctly (Debian standard)
 ln -sf /usr/lib/os-release /etc/os-release
 '
+###############################################################################
+# D4 — REMOVE DEBIAN BRANDING FROM GNOME ABOUT
+###############################################################################
+
+sudo chroot "$CHROOT_DIR" bash <<'EOF'
+set -e
+
+# ------------------------------------------------------------------
+# 1) Ensure Solvionyx os-release is authoritative
+# ------------------------------------------------------------------
+cat > /etc/os-release <<'OSREL'
+NAME="Solvionyx OS"
+PRETTY_NAME="Solvionyx OS Aurora"
+ID=solvionyx
+ID_LIKE=debian
+VERSION="Aurora"
+VERSION_ID=aurora
+HOME_URL="https://solviony.com"
+SUPPORT_URL="https://solviony.com/support"
+BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
+LOGO=solvionyx
+OSREL
+
+# ------------------------------------------------------------------
+# 2) Replace Debian fallback os-release (CRITICAL FIX)
+# ------------------------------------------------------------------
+if [ -f /usr/lib/os-release ]; then
+  rm -f /usr/lib/os-release
+fi
+
+ln -s /etc/os-release /usr/lib/os-release
+
+# ------------------------------------------------------------------
+# 3) Refresh GNOME settings caches (safe even if GNOME not active)
+# ------------------------------------------------------------------
+glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
+
+EOF
 
 ###############################################################################
 # LIVE USER + AUTOLOGIN (Phase 4)
@@ -354,6 +392,75 @@ AutomaticLogin=liveuser
 WaylandEnable=true
 EOF
 "
+
+###############################################################################
+# D1 — GDM LOGIN SCREEN BRANDING (REMOVE DEBIAN 12)
+###############################################################################
+
+# Copy Solvionyx logo into chroot
+sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+sudo cp "$BRANDING_SRC/logos/solvionyx.png" \
+  "$CHROOT_DIR/usr/share/pixmaps/solvionyx-logo.png"
+
+# Configure GDM branding (inside chroot)
+sudo chroot "$CHROOT_DIR" bash <<'EOF'
+set -e
+
+mkdir -p /etc/dconf/db/gdm.d
+
+cat > /etc/dconf/db/gdm.d/01-solvionyx <<'CONF'
+[org/gnome/login-screen]
+logo='/usr/share/pixmaps/solvionyx-logo.png'
+disable-user-list=false
+CONF
+
+dconf update
+EOF
+
+###############################################################################
+# D2 — GDM LOGIN SCREEN (HIDE USERNAME ENTRY)
+###############################################################################
+
+sudo chroot "$CHROOT_DIR" bash <<'EOF'
+set -e
+
+mkdir -p /etc/dconf/db/gdm.d
+
+cat > /etc/dconf/db/gdm.d/02-solvionyx-single-user <<'CONF'
+[org/gnome/login-screen]
+disable-user-list=true
+CONF
+
+dconf update
+EOF
+
+###############################################################################
+# D3 — GDM LOGIN SCREEN BACKGROUND (SOLVIONYX GRADIENT)
+###############################################################################
+
+# Install Solvionyx GDM background
+sudo install -d "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
+sudo install -m 0644 \
+  "$BRANDING_SRC/backgrounds/gdm-gradient.png" \
+  "$CHROOT_DIR/usr/share/backgrounds/solvionyx/gdm-gradient.png"
+
+# Configure GDM to use Solvionyx background (inside chroot)
+sudo chroot "$CHROOT_DIR" bash <<'EOF'
+set -e
+
+# Ensure GDM dconf database exists
+mkdir -p /etc/dconf/db/gdm.d
+
+# Apply Solvionyx GDM background
+cat > /etc/dconf/db/gdm.d/03-solvionyx-background <<'CONF'
+[org/gnome/login-screen]
+banner-message-enable=false
+background='/usr/share/backgrounds/solvionyx/gdm-gradient.png'
+CONF
+
+# Compile dconf database
+dconf update
+EOF
 
 ###############################################################################
 # CALAMARES CONFIG + BRANDING (Phase 5)
