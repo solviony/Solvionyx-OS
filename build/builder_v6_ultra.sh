@@ -501,16 +501,17 @@ EOF
 "
 
 ###############################################################################
-# D1 — GDM LOGIN SCREEN BRANDING (REMOVE DEBIAN 12)
+# D1 — GDM LOGIN SCREEN BRANDING (GNOME ONLY)
 ###############################################################################
+if [ "$EDITION" = "gnome" ]; then
 
-# Copy Solvionyx logo into chroot
-sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-sudo cp "$BRANDING_SRC/logos/solvionyx.png" \
-  "$CHROOT_DIR/usr/share/pixmaps/solvionyx-logo.png"
+  # Copy Solvionyx logo into chroot
+  sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+  sudo cp "$BRANDING_SRC/logos/solvionyx.png" \
+    "$CHROOT_DIR/usr/share/pixmaps/solvionyx-logo.png"
 
-# Configure GDM branding (inside chroot)
-sudo chroot "$CHROOT_DIR" bash <<'EOF'
+  # Configure GDM branding (inside chroot)
+  sudo chroot "$CHROOT_DIR" bash <<'EOF'
 set -e
 
 mkdir -p /etc/dconf/db/gdm.d
@@ -521,14 +522,17 @@ logo='/usr/share/pixmaps/solvionyx-logo.png'
 disable-user-list=false
 CONF
 
-dconf update
+dconf update || true
 EOF
 
-###############################################################################
-# D2 — GDM LOGIN SCREEN (HIDE USERNAME ENTRY)
-###############################################################################
+fi
 
-sudo chroot "$CHROOT_DIR" bash <<'EOF'
+###############################################################################
+# D2 — GDM LOGIN SCREEN (HIDE USERNAME ENTRY) (GNOME ONLY)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+
+  sudo chroot "$CHROOT_DIR" bash <<'EOF'
 set -e
 
 mkdir -p /etc/dconf/db/gdm.d
@@ -538,37 +542,39 @@ cat > /etc/dconf/db/gdm.d/02-solvionyx-single-user <<'CONF'
 disable-user-list=true
 CONF
 
-dconf update
+dconf update || true
 EOF
 
+fi
+
 ###############################################################################
-# D3 — GDM LOGIN SCREEN BACKGROUND (SOLVIONYX AURORA WALLPAPER)
+# D3 — GDM LOGIN SCREEN BACKGROUND (GNOME ONLY)
 ###############################################################################
-log "Applying Solvionyx GDM login background"
+if [ "$EDITION" = "gnome" ]; then
+  log "Applying Solvionyx GDM login background"
 
-GDM_BG_SRC="$BRANDING_SRC/wallpapers/aurora-bg.jpg"
-GDM_BG_DST="$CHROOT_DIR/usr/share/backgrounds/solvionyx-gdm.jpg"
+  GDM_BG_SRC="$BRANDING_SRC/wallpapers/aurora-bg.jpg"
+  GDM_BG_DST="$CHROOT_DIR/usr/share/backgrounds/solvionyx-gdm.jpg"
 
-if [ -f "$GDM_BG_SRC" ]; then
-  sudo install -Dm644 "$GDM_BG_SRC" "$GDM_BG_DST"
+  if [ -f "$GDM_BG_SRC" ]; then
+    sudo install -Dm644 "$GDM_BG_SRC" "$GDM_BG_DST"
 
-  sudo chroot "$CHROOT_DIR" bash -lc "
+    sudo chroot "$CHROOT_DIR" bash <<'EOF'
 set -e
 
-# Ensure GDM dconf database exists
 mkdir -p /etc/dconf/db/gdm.d
 
-# Apply Solvionyx GDM background
-cat > /etc/dconf/db/gdm.d/03-solvionyx-background <<EOF
+cat > /etc/dconf/db/gdm.d/03-solvionyx-background <<'CONF'
 [org/gnome/login-screen]
 banner-message-enable=false
 background-image='file:///usr/share/backgrounds/solvionyx-gdm.jpg'
-EOF
+CONF
 
 dconf update || true
-"
-else
-  log 'WARNING: aurora-bg.jpg not found, skipping GDM background branding'
+EOF
+  else
+    log "WARNING: aurora-bg.jpg not found, skipping GDM background branding"
+  fi
 fi
 
 ###############################################################################
