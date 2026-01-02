@@ -2,6 +2,12 @@
 # Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot
 set -euo pipefail
 
+# Detect CI environment
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  SKIP_SECUREBOOT=1
+fi
+
+
 log() { echo "[BUILD] $*"; }
 fail() { echo "[ERROR] $*" >&2; exit 1; }
 trap 'umount_chroot_fs; fail "Build failed at line $LINENO"' ERR
@@ -472,9 +478,19 @@ sudo install -m 0644 "$BRANDING_SRC/oem/solvionyx-oem-cleanup.service" \
 sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-oem-cleanup.service || true
 
 ###############################################################################
+# PRE-SQUASHFS CLEANUP (CRITICAL)
+###############################################################################
+log "Unmounting chroot virtual filesystems before SquashFS"
+umount_chroot_fs
+
+###############################################################################
 # SQUASHFS
 ###############################################################################
-sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" -e boot
+sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
+  -e boot \
+  -comp zstd \
+  -Xcompression-level 6 \
+  -processors 2
 
 ###############################################################################
 # KERNEL + INITRD
@@ -593,32 +609,41 @@ xorriso -as mkisofs \
 ###############################################################################
 # SIGNED ISO
 ###############################################################################
-log "Signing ISO payload"
+log "Preparing signed ISO payload"
 
 rm -rf "$SIGNED_DIR"
 mkdir -p "$SIGNED_DIR"
 xorriso -osirrox on -indev "$BUILD_DIR/${ISO_NAME}.iso" -extract / "$SIGNED_DIR"
 
-DB_KEY="$SECUREBOOT_DIR/db.key"
-DB_CRT="$SECUREBOOT_DIR/db.crt"
-[ -f "$DB_KEY" ] || fail "Missing Secure Boot key: $DB_KEY"
-[ -f "$DB_CRT" ] || fail "Missing Secure Boot cert: $DB_CRT"
+if [ -z "${SKIP_SECUREBOOT:-}" ]; then
+  log "Secure Boot signing enabled"
 
-sbsign --key "$DB_KEY" --cert "$DB_CRT" \
-  --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
-  "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
+  DB_KEY="$SECUREBOOT_DIR/db.key"
+  DB_CRT="$SECUREBOOT_DIR/db.crt"
+  [ -f "$DB_KEY" ] || fail "Missing Secure Boot key: $DB_KEY"
+  [ -f "$DB_CRT" ] || fail "Missing Secure Boot cert: $DB_CRT"
 
-sbsign --key "$DB_KEY" --cert "$DB_CRT" \
-  --output "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
-  "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
-
-if [ -f "$SIGNED_DIR/EFI/BOOT/grubx64.efi" ]; then
   sbsign --key "$DB_KEY" --cert "$DB_CRT" \
-    --output "$SIGNED_DIR/EFI/BOOT/grubx64.efi" \
-    "$SIGNED_DIR/EFI/BOOT/grubx64.efi" || true
+    --output "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
+    "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI"
+
+  sbsign --key "$DB_KEY" --cert "$DB_CRT" \
+    --output "$SIGNED_DIR/EFI/BOOT/solvionyx.efi" \
+    "$SIGNED_DIR/EFI/BOOT/solvionyx.efi"
+
+  if [ -f "$SIGNED_DIR/EFI/BOOT/grubx64.efi" ]; then
+    sbsign --key "$DB_KEY" --cert "$DB_CRT" \
+      --output "$SIGNED_DIR/EFI/BOOT/grubx64.efi" \
+      "$SIGNED_DIR/EFI/BOOT/grubx64.efi" || true
+  fi
+else
+  log "Skipping Secure Boot signing (CI mode)"
 fi
 
-log "Rebuilding EFI image inside signed ISO tree"
+###############################################################################
+# EFI IMAGE (SIGNED OR UNSIGNED)
+###############################################################################
+log "Rebuilding EFI image"
 
 ESP_IMG_SIGNED="$BUILD_DIR/efi.signed.img"
 dd if=/dev/zero of="$ESP_IMG_SIGNED" bs=1M count=$ESP_SIZE_MB
@@ -633,6 +658,9 @@ rmdir /tmp/esp
 
 cp "$ESP_IMG_SIGNED" "$SIGNED_DIR/efi.img"
 
+###############################################################################
+# BUILD FINAL ISO
+###############################################################################
 xorriso -as mkisofs \
   -o "$BUILD_DIR/$SIGNED_NAME" \
   -V "$VOLID" \
