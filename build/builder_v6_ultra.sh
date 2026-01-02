@@ -350,7 +350,9 @@ fi
 # OS IDENTITY (Phase 3)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc '
-cat > /etc/os-release <<EOF
+set -e
+
+cat > /usr/lib/os-release <<EOF
 NAME="Solvionyx OS"
 PRETTY_NAME="Solvionyx OS Aurora"
 ID=solvionyx
@@ -363,9 +365,11 @@ BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
 LOGO=solvionyx
 EOF
 
-ln -sf /etc/os-release /usr/lib/os-release
+# Ensure /etc/os-release exists and points correctly (no relink if same)
+if [ ! -e /etc/os-release ]; then
+  ln -s /usr/lib/os-release /etc/os-release
+fi
 '
-
 ###############################################################################
 # FIX — FORCE OS LOGO (GNOME ABOUT)
 ###############################################################################
@@ -421,15 +425,6 @@ SUPPORT_URL="https://solviony.com/support"
 BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
 LOGO=solvionyx
 OSREL
-
-# ------------------------------------------------------------------
-# 2) Replace Debian fallback os-release (CRITICAL FIX)
-# ------------------------------------------------------------------
-if [ -f /usr/lib/os-release ]; then
-  rm -f /usr/lib/os-release
-fi
-
-ln -s /etc/os-release /usr/lib/os-release
 
 # ------------------------------------------------------------------
 # 3) Refresh GNOME settings caches (safe even if GNOME not active)
