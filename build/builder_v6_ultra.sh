@@ -949,35 +949,21 @@ xorriso -as mkisofs \
   "$SIGNED_DIR"
 
 ###############################################################################
-# FINAL BRANDING LOCK (NON-CI ONLY, SAFE)
+# SAFETY — REMOVE IMMUTABLE FLAGS BEFORE CLEANUP
 ###############################################################################
-if [ -z "${GITHUB_ACTIONS:-}" ]; then
-  log "Locking Solvionyx branding (non-CI system)"
+log "Removing immutable flags before cleanup (CI-safe)"
 
-  sudo chroot "$CHROOT_DIR" bash -lc '
-  set -e
-
-  # Lock OS identity files
-  for f in /etc/os-release /etc/lsb-release; do
-    if [ -f "$f" ]; then
-      chattr +i "$f" || true
-    fi
-  done
-
-  # Lock logo assets used by GNOME About
-  for f in \
-    /usr/share/pixmaps/solvionyx.png \
-    /usr/share/icons/hicolor/256x256/apps/solvionyx.png
-  do
-    if [ -f "$f" ]; then
-      chattr +i "$f" || true
-    fi
-  done
-  '
-
-else
-  log "CI detected — skipping branding immutability"
-fi
+sudo chroot "$CHROOT_DIR" bash -lc '
+set +e
+for f in \
+  /etc/os-release \
+  /etc/lsb-release \
+  /usr/share/pixmaps/solvionyx.png \
+  /usr/share/icons/hicolor/256x256/apps/solvionyx.png
+do
+  [ -e "$f" ] && chattr -i "$f" 2>/dev/null || true
+done
+'
 
 ###############################################################################
 # FINAL
