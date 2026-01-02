@@ -151,12 +151,7 @@ mount_chroot_fs
 # Pass desktop packages safely into chroot
 DESKTOP_PKGS_STR="${DESKTOP_PKGS[*]}"
 
-sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
-  HOME=/root \
-  TERM="${TERM:-xterm}" \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  DESKTOP_PKGS_STR="$DESKTOP_PKGS_STR" \
-  bash -lc "
+CHROOT_PHASE2_SCRIPT="$(cat <<'CHROOT_EOF'
 set -euo pipefail
 
 # 1) Prevent services from starting in CI chroot
@@ -177,8 +172,7 @@ ln -sf /bin/true /usr/sbin/update-initramfs
 
 apt-get update
 
-# 4) GNOME extension check (non-fatal) - correct package name on Debian
-# Debian uses: gnome-shell-extension-dashtodock (NOT ...-dash-to-dock)
+# 4) GNOME extension check (non-fatal)
 if ! apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1; then
   echo '[BUILD] dashtodock package not found; continuing without it'
 fi
@@ -205,7 +199,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   firmware-iwlwifi \
   mesa-vulkan-drivers \
   mesa-utils \
-  \$DESKTOP_PKGS_STR
+  ${DESKTOP_PKGS_STR}
 
 # 6) Install live components LAST (best-effort in CI chroot)
 set +e
@@ -218,14 +212,11 @@ set -e
 rm -f /usr/sbin/update-initramfs
 dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
 
-# 7b) FORCE initrd creation (CI-safe, set -u compatible)
+# 7b) FORCE initrd creation (CI-safe)
 VMLINUX="$(ls /boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
-
 if [ -n "$VMLINUX" ]; then
   KERNEL_VER="${VMLINUX##*/vmlinuz-}"
   echo "[BUILD] Creating initramfs for kernel: $KERNEL_VER"
-
-  # Force initramfs only for detected kernel
   update-initramfs -c -k "$KERNEL_VER" || true
 else
   echo "[BUILD] WARNING: No kernel found yet, skipping initramfs creation"
@@ -236,7 +227,15 @@ ls -lah /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
 
 # 8) Cleanup
 rm -f /usr/sbin/policy-rc.d
-"
+CHROOT_EOF
+)"
+
+sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
+  HOME=/root \
+  TERM="${TERM:-xterm}" \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  DESKTOP_PKGS_STR="$DESKTOP_PKGS_STR" \
+  bash -lc "$CHROOT_PHASE2_SCRIPT"
 
 ###############################################################################
 # PHASE 2A — ENABLE NON-FREE-FIRMWARE (Debian Bookworm)
