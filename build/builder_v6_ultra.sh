@@ -180,6 +180,7 @@ fi
 # 5) Install base system FIRST (exclude live-boot/live-tools for now)
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   sudo systemd systemd-sysv \
+  systemd-boot-efi \
   linux-image-amd64 \
   grub-efi-amd64 grub-efi-amd64-bin \
   shim-signed \
