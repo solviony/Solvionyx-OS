@@ -264,6 +264,11 @@ fi
 # Log for CI visibility (non-fatal)
 ls -lah /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
 
+sudo chroot "$CHROOT_DIR" apt-get install -y \
+  power-profiles-daemon \
+  gnome-shell-extension-just-perfection \
+  gnome-shell-extension-blur-my-shell
+
 # 8) Cleanup
 rm -f /usr/sbin/policy-rc.d
 CHROOT_EOF
@@ -275,6 +280,7 @@ sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   DESKTOP_PKGS_STR="$DESKTOP_PKGS_STR" \
   bash -lc "$CHROOT_PHASE2_SCRIPT"
+
 
 ###############################################################################
 # PHASE 2A — ENABLE NON-FREE-FIRMWARE (Debian Bookworm)
@@ -475,6 +481,36 @@ sudo install -Dm644 "$SOLVIONYX_LOGO" \
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 
 ###############################################################################
+# SOLVIONYX GLASS BLUR CONFIGURATION
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Configuring Solvionyx glass system menu"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+mkdir -p /etc/dconf/db/local.d
+
+cat > /etc/dconf/db/local.d/30-solvionyx-glass <<EOF
+[org/gnome/shell/extensions/blur-my-shell]
+panel=true
+panel-opacity=0.55
+sigma=30
+
+[org/gnome/shell/extensions/blur-my-shell/panel]
+blur=true
+brightness=0.8
+
+[org/gnome/shell/extensions/blur-my-shell/applications]
+blur=true
+
+[org/gnome/shell/extensions/blur-my-shell/overview]
+blur=true
+EOF
+
+dconf update
+'
+fi
+
+###############################################################################
 # LIVE USER + AUTOLOGIN (Phase 4)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
@@ -499,6 +535,181 @@ AutomaticLogin=liveuser
 WaylandEnable=true
 EOF
 "
+
+###############################################################################
+# GNOME — FORCE DASH-TO-DOCK ENABLED (SOLVIONYX DEFAULT)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Enabling Dash-to-Dock for Solvionyx GNOME session"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+# Ensure schemas exist
+glib-compile-schemas /usr/share/glib-2.0/schemas || true
+
+# Enable dash-to-dock extension system-wide
+EXT="dash-to-dock@micxgx.gmail.com"
+
+mkdir -p /etc/dconf/db/local.d
+mkdir -p /etc/dconf/db/local.d/locks
+
+cat > /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
+[org/gnome/shell]
+enabled-extensions=['$EXT']
+
+[org/gnome/shell/extensions/dash-to-dock]
+dock-fixed=true
+autohide=false
+intellihide=false
+dock-position='BOTTOM'
+extend-height=false
+transparency-mode='FIXED'
+background-opacity=0.6
+dash-max-icon-size=48
+center-aligned=true
+show-mounts=true
+show-trash=true
+click-action='focus-or-previews'
+EOF
+
+dconf update
+'
+fi
+
+###############################################################################
+# GNOME — DISABLE OVERVIEW-ONLY MODE
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
+[org/gnome/shell]
+disable-overview-on-startup=true
+EOF
+
+dconf update
+'
+fi
+
+###############################################################################
+# GNOME — ENSURE TOP BAR + PANEL ACTIVE
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
+[org/gnome/desktop/interface]
+enable-hot-corners=false
+EOF
+
+dconf update
+'
+fi
+
+###############################################################################
+# SOLVIONYX PANEL — HIDE GNOME TOP BAR
+###############################################################################
+cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
+[org/gnome/shell/extensions/just-perfection]
+panel=false
+activities-button=false
+app-menu=false
+clock-menu=false
+EOF
+
+###############################################################################
+# SOLVIONYX DOCK — BLUR + GLOW
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+mkdir -p /etc/dconf/db/local.d
+
+cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
+[org/gnome/shell/extensions/dash-to-dock]
+dock-position='BOTTOM'
+extend-height=false
+height-fraction=0.85
+dock-fixed=true
+autohide=false
+intellihide=false
+transparency-mode='FIXED'
+background-opacity=0.55
+custom-background-color=true
+background-color='rgb(10,20,40)'
+border-radius=22
+dash-max-icon-size=48
+show-trash=false
+show-mounts=false
+running-indicator-style='DOTS'
+apply-custom-theme=true
+custom-theme-shrink=true
+custom-theme-running-dots-color='rgb(0,160,255)'
+custom-theme-running-dots-border-color='rgb(0,200,255)'
+EOF
+
+dconf update
+'
+fi
+
+###############################################################################
+# SOLVIONYX GLASS DOCK (DASH-TO-DOCK)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Applying Solvionyx glass dock style"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+mkdir -p /etc/dconf/db/local.d
+
+cat > /etc/dconf/db/local.d/32-solvionyx-dock <<EOF
+[org/gnome/shell/extensions/dash-to-dock]
+dock-position=BOTTOM
+extend-height=false
+transparency-mode=FIXED
+background-opacity=0.35
+blur-background=true
+show-mounts=false
+show-trash=false
+dash-max-icon-size=56
+intellihide=false
+apply-custom-theme=true
+custom-theme-shrink=true
+custom-theme-running-dots=true
+running-indicator-style=DOTS
+EOF
+
+dconf update
+'
+fi
+
+###############################################################################
+# SOLVIONYX PANEL — REMOVE GNOME TOP BAR DEPENDENCY
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
+[org/gnome/desktop/interface]
+enable-hot-corners=false
+clock-show-date=false
+clock-show-seconds=false
+
+[org/gnome/shell]
+favorite-apps=['solviony-store.desktop','org.gnome.Terminal.desktop','org.gnome.Nautilus.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
+
+[org/gnome/shell/extensions/dash-to-dock]
+show-apps-at-top=true
+show-show-apps-button=true
+EOF
+
+dconf update
+'
+fi
 
 ###############################################################################
 # D1 — GDM LOGIN SCREEN BRANDING (GNOME ONLY)
@@ -687,6 +898,80 @@ fi
 "
 fi
 
+  sudo chroot "$CHROOT_DIR" apt-get install -y gnome-shell-extension-just-perfection
+
+###############################################################################
+# SOLVIONYX PANEL — INSTALL JUST PERFECTION (GNOME ONLY)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Installing Just Perfection extension (Solvionyx panel control)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+apt-get update
+apt-get install -y gnome-shell-extension-just-perfection
+'
+fi
+
+###############################################################################
+# SOLVIONYX GLASS GLOW (GNOME SHELL CSS)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Installing Solvionyx glass glow CSS"
+
+  sudo mkdir -p "$CHROOT_DIR/usr/share/gnome-shell/theme"
+  sudo tee "$CHROOT_DIR/usr/share/gnome-shell/theme/solvionyx-glass.css" >/dev/null <<'EOF'
+#dash {
+  background-color: rgba(15, 25, 45, 0.45);
+  border-radius: 22px;
+  box-shadow:
+    0 0 18px rgba(0, 160, 255, 0.25),
+    inset 0 0 1px rgba(255, 255, 255, 0.08);
+}
+EOF
+
+  sudo sed -i '/@import url(".*");/a @import url("solvionyx-glass.css");' \
+    "$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css" || true
+fi
+
+###############################################################################
+# SOLVIONYX GLASS UI — REQUIRED EXTENSIONS (GNOME ONLY)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Installing Solvionyx glass UI extensions"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+apt-get update
+apt-get install -y \
+  gnome-shell-extension-dash-to-dock \
+  gnome-shell-extension-just-perfection \
+  gnome-shell-extension-blur-my-shell
+'
+fi
+
+###############################################################################
+# SOLVIONYX PANEL CONTROL (JUST PERFECTION)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Applying Solvionyx panel layout"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+mkdir -p /etc/dconf/db/local.d
+
+cat > /etc/dconf/db/local.d/31-solvionyx-panel <<EOF
+[org/gnome/shell/extensions/just-perfection]
+panel=false
+activities-button=false
+clock-menu=false
+app-menu=false
+workspace-switcher-size=0
+EOF
+
+dconf update
+'
+fi
+
 ###############################################################################
 # PHASE 5 — SYSTEM RESTORE (TIMESHIFT, BRANDED)
 ###############################################################################
@@ -743,6 +1028,94 @@ sudo install -m 0644 "$BRANDING_SRC/oem/solvionyx-oem-cleanup.service" \
   "$CHROOT_DIR/etc/systemd/system/solvionyx-oem-cleanup.service"
 
 sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-oem-cleanup.service || true
+
+###############################################################################
+# SOLVIONYX GLASS QUICK SETTINGS
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Enabling Solvionyx glass quick settings"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+mkdir -p /etc/dconf/db/local.d
+
+cat > /etc/dconf/db/local.d/33-solvionyx-quick-settings <<EOF
+[org/gnome/shell/extensions/blur-my-shell/panel]
+blur=true
+sigma=28
+brightness=0.85
+opacity=0.55
+
+[org/gnome/shell/extensions/blur-my-shell]
+panel=true
+EOF
+
+dconf update
+'
+fi
+
+###############################################################################
+# SOLVIONYX QUICK SETTINGS GLASS CSS
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Applying Solvionyx glass quick settings CSS"
+
+  sudo tee -a "$CHROOT_DIR/usr/share/gnome-shell/theme/solvionyx-glass.css" >/dev/null <<'EOF'
+.quick-settings {
+  background-color: rgba(18, 28, 48, 0.45);
+  border-radius: 22px;
+  box-shadow:
+    0 0 22px rgba(3, 158, 255, 0.25),
+    inset 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.quick-settings-grid {
+  spacing: 12px;
+}
+
+.quick-toggle {
+  border-radius: 16px;
+}
+EOF
+fi
+
+###############################################################################
+# SOLVIONYX AI — DYNAMIC GPU-AWARE UI (BLUR ENGINE)
+###############################################################################
+log "Installing Solvionyx GPU-aware blur engine"
+
+# Install GPU detection script
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/ai"
+sudo install -m 0755 \
+  "$REPO_ROOT/ai/solvionyx-gpu-profile.sh" \
+  "$CHROOT_DIR/usr/lib/solvionyx/ai/solvionyx-gpu-profile.sh"
+
+# Systemd service to apply blur profile at boot
+sudo tee "$CHROOT_DIR/etc/systemd/system/solvionyx-gpu-profile.service" >/dev/null <<'EOF'
+[Unit]
+Description=Solvionyx AI GPU UI Optimizer
+After=graphical.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/solvionyx/ai/solvionyx-gpu-profile.sh
+
+[Install]
+WantedBy=graphical.target
+EOF
+
+sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-gpu-profile.service
+
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/ai"
+sudo install -m 0755 \
+  "$REPO_ROOT/ai/solvionyx-power-ui.sh" \
+  "$CHROOT_DIR/usr/lib/solvionyx/ai/solvionyx-power-ui.sh"
+
+sudo install -d "$CHROOT_DIR/etc/systemd/user"
+sudo install -m 0644 \
+  "$REPO_ROOT/systemd/solvionyx-power-ui.service" \
+  "$CHROOT_DIR/etc/systemd/user/solvionyx-power-ui.service"
+
+sudo chroot "$CHROOT_DIR" systemctl --user enable solvionyx-power-ui.service || true
 
 ###############################################################################
 # KERNEL + INITRD 

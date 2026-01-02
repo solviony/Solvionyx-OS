@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# Never run in CI or live build environment
+[ -n "${GITHUB_ACTIONS:-}" ] && exit 0
+
 log() { echo "[OEM] $*"; }
 
 FLAG="/etc/solvionyx/oem-enabled"
