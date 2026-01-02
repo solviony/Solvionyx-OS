@@ -309,7 +309,7 @@ fi
 fi
 
 ###############################################################################
-# OS IDENTITY (Phase 3)
+# OS IDENTITY (Phase 3) — FORCE OVERRIDE
 ###############################################################################
 cat > "$CHROOT_DIR/etc/os-release" <<EOF
 NAME="Solvionyx OS"
@@ -324,13 +324,33 @@ BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
 LOGO=solvionyx
 EOF
 
+# Debian 12: GDM prefers /usr/lib/os-release
+cp "$CHROOT_DIR/etc/os-release" "$CHROOT_DIR/usr/lib/os-release"
+
 ###############################################################################
 # LIVE USER + AUTOLOGIN (Phase 4)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc "
-useradd -m -s /bin/bash -G sudo,adm,audio,video,netdev $LIVE_AUTOLOGIN_USER || true
-echo '$LIVE_AUTOLOGIN_USER ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-liveuser
+set -e
+
+# Create live user
+useradd -m -s /bin/bash -G sudo,adm,audio,video,netdev liveuser || true
+
+# Passwordless sudo for live session
+echo 'liveuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-liveuser
 chmod 0440 /etc/sudoers.d/99-liveuser
+
+# -------------------------------
+# GNOME / GDM AUTOLOGIN (CRITICAL)
+# -------------------------------
+mkdir -p /etc/gdm3
+
+cat > /etc/gdm3/daemon.conf <<EOF
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=liveuser
+WaylandEnable=true
+EOF
 "
 
 ###############################################################################
