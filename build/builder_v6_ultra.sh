@@ -390,21 +390,35 @@ fi
 '
 
 ###############################################################################
-# D6 — SOLVIONYX LOGO IN GNOME ABOUT
+# D6 — SOLVIONYX LOGO IN GNOME ABOUT (ROBUST)
 ###############################################################################
 log "Installing Solvionyx logo for GNOME About"
 
-# Install vendor logo (required by GNOME)
-sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-sudo cp "$BRANDING_SRC/logos/solvionyx.png" \
-  "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
+# Locate logo (support common names)
+LOGO_SRC=""
 
-# GNOME expects vendor icon name to match ID
+for candidate in \
+  "$BRANDING_SRC/logos/solvionyx.png" \
+  "$BRANDING_SRC/logos/solvionyx-logo.png" \
+  "$BRANDING_SRC/logos/logo.png"
+do
+  if [ -f "$candidate" ]; then
+    LOGO_SRC="$candidate"
+    break
+  fi
+done
+
+[ -n "$LOGO_SRC" ] || fail "Solvionyx logo not found in branding/logos"
+
+# Install for GNOME About
+sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+sudo cp "$LOGO_SRC" "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
+
 sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
-sudo cp "$BRANDING_SRC/logos/solvionyx.png" \
+sudo cp "$LOGO_SRC" \
   "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
 
-# Ensure icon cache is updated
+# Update icon cache (non-fatal in CI)
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 
 ###############################################################################
