@@ -522,32 +522,34 @@ dconf update
 EOF
 
 ###############################################################################
-# D3 — GDM LOGIN SCREEN BACKGROUND (SOLVIONYX GRADIENT)
+# D3 — GDM LOGIN SCREEN BACKGROUND (SOLVIONYX AURORA WALLPAPER)
 ###############################################################################
+log "Applying Solvionyx GDM login background"
 
-# Install Solvionyx GDM background
-sudo install -d "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
-sudo install -m 0644 \
-  "$BRANDING_SRC/backgrounds/gdm-gradient.png" \
-  "$CHROOT_DIR/usr/share/backgrounds/solvionyx/gdm-gradient.png"
+GDM_BG_SRC="$BRANDING_SRC/wallpapers/aurora-bg.jpg"
+GDM_BG_DST="$CHROOT_DIR/usr/share/backgrounds/solvionyx-gdm.jpg"
 
-# Configure GDM to use Solvionyx background (inside chroot)
-sudo chroot "$CHROOT_DIR" bash <<'EOF'
+if [ -f "$GDM_BG_SRC" ]; then
+  sudo install -Dm644 "$GDM_BG_SRC" "$GDM_BG_DST"
+
+  sudo chroot "$CHROOT_DIR" bash -lc "
 set -e
 
 # Ensure GDM dconf database exists
 mkdir -p /etc/dconf/db/gdm.d
 
 # Apply Solvionyx GDM background
-cat > /etc/dconf/db/gdm.d/03-solvionyx-background <<'CONF'
+cat > /etc/dconf/db/gdm.d/03-solvionyx-background <<EOF
 [org/gnome/login-screen]
 banner-message-enable=false
-background='/usr/share/backgrounds/solvionyx/gdm-gradient.png'
-CONF
-
-# Compile dconf database
-dconf update
+background-image='file:///usr/share/backgrounds/solvionyx-gdm.jpg'
 EOF
+
+dconf update || true
+"
+else
+  log 'WARNING: aurora-bg.jpg not found, skipping GDM background branding'
+fi
 
 ###############################################################################
 # CALAMARES CONFIG + BRANDING (Phase 5)
