@@ -2,11 +2,12 @@
 # Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot
 set -euo pipefail
 
-# Detect CI environment
+###############################################################################
+# CI DETECTION
+###############################################################################
 if [ -n "${GITHUB_ACTIONS:-}" ]; then
   SKIP_SECUREBOOT=1
 fi
-
 
 log() { echo "[BUILD] $*"; }
 fail() { echo "[ERROR] $*" >&2; exit 1; }
@@ -40,7 +41,6 @@ SECUREBOOT_DIR="$REPO_ROOT/secureboot"
 # BRANDING CANONICAL ASSETS (SINGLE SOURCE OF TRUTH)
 ###############################################################################
 SOLVIONYX_LOGO="$BRANDING_SRC/logo/solvionyx-logo.png"
-
 [ -f "$SOLVIONYX_LOGO" ] || fail "Missing canonical logo: $SOLVIONYX_LOGO"
 
 ###############################################################################
@@ -72,13 +72,14 @@ mount_chroot_fs() {
 }
 
 umount_chroot_fs() {
-  # best-effort teardown (do not fail build if already unmounted)
   sudo umount -lf "$CHROOT_DIR/sys" 2>/dev/null || true
   sudo umount -lf "$CHROOT_DIR/proc" 2>/dev/null || true
   sudo umount -lf "$CHROOT_DIR/dev/pts" 2>/dev/null || true
   sudo umount -lf "$CHROOT_DIR/dev" 2>/dev/null || true
 }
 
+trap 'umount_chroot_fs; fail "Build failed at line $LINENO"' ERR
+trap 'umount_chroot_fs' EXIT
 ###############################################################################
 # HOST DEPENDENCIES
 ###############################################################################
@@ -92,7 +93,7 @@ ensure_host_deps() {
   if (( ${#missing[@]} > 0 )); then
     sudo apt-get update
     sudo apt-get install -y \
-    debootstrap squashfs-tools xorriso binutils sbsigntool dosfstools coreutils xz-utils
+      debootstrap squashfs-tools xorriso binutils sbsigntool dosfstools coreutils xz-utils
   fi
 }
 ensure_host_deps
@@ -101,26 +102,14 @@ ensure_host_deps
 # CLEAN (SAFE FOR IMMUTABLE BRANDING)
 ###############################################################################
 log "Final cleanup (immutable-safe)"
-
 set +e
-
-# Unmount chroot virtual filesystems (best effort)
 umount_chroot_fs || true
-
-# Remove volatile runtime directories only
 rm -rf "$CHROOT_DIR/dev"  || true
 rm -rf "$CHROOT_DIR/proc" || true
 rm -rf "$CHROOT_DIR/sys"  || true
 rm -rf "$CHROOT_DIR/run"  || true
 rm -rf "$CHROOT_DIR/tmp"  || true
 rm -rf "$CHROOT_DIR/var/tmp" || true
-
-# DO NOT TOUCH:
-# - $CHROOT_DIR/etc
-# - branding files
-# - os-release
-# - lsb-release
-
 set -e
 
 ###############################################################################
@@ -138,14 +127,17 @@ mkdir -p \
 # BOOTSTRAP
 ###############################################################################
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
-# Create mountpoints required by mount_chroot_fs()
 sudo mkdir -p "$CHROOT_DIR"/{dev,dev/pts,proc,sys}
 mount_chroot_fs
 
-# Ensure non-free packages and firmware are installed correctly
-# Add non-free-firmware repository to chroot environment
+# Enable non-free-firmware early (Bookworm)
 sudo chroot "$CHROOT_DIR" bash -lc "
-echo 'deb http://deb.debian.org/debian/ bookworm main contrib non-free non-free-firmware' > /etc/apt/sources.list
+set -e
+cat > /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+EOF
 apt-get update
 apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
 "
@@ -156,18 +148,18 @@ apt-get install -y firmware-linux firmware-linux-nonfree firmware-iwlwifi
 LIVE_AUTOLOGIN_USER="liveuser"
 
 case "$EDITION" in
- gnome)
-  DESKTOP_PKGS=(
-    task-gnome-desktop
-    gdm3
-    gnome-initial-setup
-    gnome-software
-    gnome-tweaks
-    gnome-shell-extension-dashtodock
-    gnome-shell-extension-appindicator
-  )
-  DM_SERVICE="gdm3"
-  ;;
+  gnome)
+    DESKTOP_PKGS=(
+      task-gnome-desktop
+      gdm3
+      gnome-initial-setup
+      gnome-software
+      gnome-tweaks
+      gnome-shell-extension-dashtodock
+      gnome-shell-extension-appindicator
+    )
+    DM_SERVICE="gdm3"
+    ;;
   kde|plasma)
     DESKTOP_PKGS=(task-kde-desktop sddm plasma-discover)
     DM_SERVICE="sddm"
@@ -185,8 +177,6 @@ esac
 # BASE SYSTEM (Phase 2)
 ###############################################################################
 mount_chroot_fs
-
-# Pass desktop packages safely into chroot
 DESKTOP_PKGS_STR="${DESKTOP_PKGS[*]}"
 
 CHROOT_PHASE2_SCRIPT="$(cat <<'CHROOT_EOF'
@@ -210,12 +200,7 @@ ln -sf /bin/true /usr/sbin/update-initramfs
 
 apt-get update
 
-# 4) GNOME extension check (non-fatal)
-if ! apt-cache show gnome-shell-extension-dashtodock >/dev/null 2>&1; then
-  echo '[BUILD] dashtodock package not found; continuing without it'
-fi
-
-# 5) Install base system FIRST (exclude live-boot/live-tools for now)
+# 4) Install base system FIRST
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   sudo systemd systemd-sysv \
   systemd-boot-efi \
@@ -228,6 +213,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   network-manager \
   xdg-utils \
   python3 python3-pyqt5 \
+  curl ca-certificates unzip \
   timeshift \
   power-profiles-daemon \
   unattended-upgrades \
@@ -240,18 +226,18 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   mesa-utils \
   ${DESKTOP_PKGS_STR}
 
-# 6) Install live components LAST (best-effort in CI chroot)
+# 5) Install live components LAST (best-effort)
 set +e
 DEBIAN_FRONTEND=noninteractive apt-get install -y live-boot live-tools
 dpkg --configure -a
 apt-get -f install -y
 set -e
 
-# 7) Restore initramfs tool
+# 6) Restore initramfs tool
 rm -f /usr/sbin/update-initramfs
 dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
 
-# 7b) FORCE initrd creation (CI-safe)
+# 6b) FORCE initrd creation (best-effort)
 VMLINUX="$(ls /boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
 if [ -n "$VMLINUX" ]; then
   KERNEL_VER="${VMLINUX##*/vmlinuz-}"
@@ -261,15 +247,9 @@ else
   echo "[BUILD] WARNING: No kernel found yet, skipping initramfs creation"
 fi
 
-# Log for CI visibility (non-fatal)
 ls -lah /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
 
-apt-get install -y \
-  power-profiles-daemon \
-  gnome-shell-extension-just-perfection \
-  gnome-shell-extension-blur-my-shell
-
-# 8) Cleanup
+# 7) Cleanup
 rm -f /usr/sbin/policy-rc.d
 CHROOT_EOF
 )"
@@ -281,71 +261,33 @@ sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
   DESKTOP_PKGS_STR="$DESKTOP_PKGS_STR" \
   bash -lc "$CHROOT_PHASE2_SCRIPT"
 
-
 ###############################################################################
-# PHASE 2A — ENABLE NON-FREE-FIRMWARE (Debian Bookworm)
-###############################################################################
-log "Enabling Debian non-free-firmware repositories"
-
-sudo chroot "$CHROOT_DIR" bash -lc "
-cat > /etc/apt/sources.list <<EOF
-deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
-EOF
-
-apt-get update
-"
-
-###############################################################################
-# PHASE 2B — OPTIONAL FIRMWARE & GRAPHICS (NON-FATAL)
-###############################################################################
-log "Installing optional firmware and graphics packages (best-effort)"
-
-sudo chroot "$CHROOT_DIR" bash -lc "
-set +e
-
-apt-get install -y \
-  firmware-linux \
-  firmware-linux-nonfree \
-  firmware-iwlwifi \
-  mesa-vulkan-drivers \
-  mesa-utils
-
-exit 0
-"
-
-###############################################################################
-# PHASE 6 — ENABLE AUTOMATIC SECURITY UPDATES
+# ENABLE AUTOMATIC SECURITY UPDATES
 ###############################################################################
 log "Enabling unattended security upgrades"
-
 sudo chroot "$CHROOT_DIR" bash -lc '
 set -e
-
 CONF=/etc/apt/apt.conf.d/50unattended-upgrades
-
 if [ -f "$CONF" ]; then
   sed -i \
     -e "s|// *\".*-security\";|\"origin=Debian,codename=bookworm-security\";|" \
-    "$CONF"
+    "$CONF" || true
 fi
-
 systemctl enable unattended-upgrades || true
 '
 
 ###############################################################################
-# PHASE 5 — ENABLE PERFORMANCE PROFILES
+# PERFORMANCE PROFILES
 ###############################################################################
 sudo chroot "$CHROOT_DIR" systemctl enable power-profiles-daemon || true
 
 ###############################################################################
-# PHASE 5 — SOLVIONY STORE (GNOME SOFTWARE REBRAND)
+# SOLVIONY STORE (GNOME SOFTWARE REBRAND)
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
   log "Rebranding GNOME Software as Solviony Store (hide original launcher)"
-
   sudo chroot "$CHROOT_DIR" bash -lc "
+set -e
 if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
   sed -i 's/^NoDisplay=.*/NoDisplay=true/' /usr/share/applications/org.gnome.Software.desktop || true
 fi
@@ -353,11 +295,62 @@ fi
 fi
 
 ###############################################################################
-# OS IDENTITY (Phase 3)
+# GNOME EXTENSIONS — INSTALL JUST PERFECTION + BLUR MY SHELL via EGO ZIP
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Installing GNOME extensions (Just Perfection + Blur My Shell) via extensions.gnome.org"
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -euo pipefail
+apt-get update
+apt-get install -y --no-install-recommends curl ca-certificates unzip python3
+
+SHELL_VER="$(gnome-shell --version 2>/dev/null | awk "{print \$3}" | cut -d. -f1-2)"
+[ -n "$SHELL_VER" ] || SHELL_VER="43"
+echo "[BUILD] Detected GNOME Shell version: $SHELL_VER"
+
+fetch_ext_zip() {
+  local uuid="$1"
+  local out="/tmp/${uuid}.zip"
+  python3 - "$uuid" "$SHELL_VER" "$out" << "PY"
+import json, sys, urllib.request, urllib.parse
+uuid, shell_ver, out = sys.argv[1], sys.argv[2], sys.argv[3]
+url = f"https://extensions.gnome.org/extension-info/?uuid={urllib.parse.quote(uuid)}&shell_version={urllib.parse.quote(shell_ver)}"
+with urllib.request.urlopen(url, timeout=30) as r:
+  data = json.load(r)
+dl = data.get("download_url")
+if not dl:
+  raise SystemExit(f"No download_url for {uuid} shell {shell_ver}")
+full = "https://extensions.gnome.org" + dl
+urllib.request.urlretrieve(full, out)
+PY
+}
+
+install_zip_ext() {
+  local uuid="$1"
+  local zip="/tmp/${uuid}.zip"
+  echo "[BUILD] Installing extension: $uuid"
+  fetch_ext_zip "$uuid" "$zip"
+  mkdir -p /usr/share/gnome-shell/extensions
+  rm -rf "/usr/share/gnome-shell/extensions/$uuid"
+  mkdir -p "/usr/share/gnome-shell/extensions/$uuid"
+  unzip -q "$zip" -d "/usr/share/gnome-shell/extensions/$uuid"
+  rm -f "$zip"
+  chown -R root:root "/usr/share/gnome-shell/extensions/$uuid"
+  find "/usr/share/gnome-shell/extensions/$uuid" -type d -exec chmod 0755 {} \;
+  find "/usr/share/gnome-shell/extensions/$uuid" -type f -exec chmod 0644 {} \;
+  test -f "/usr/share/gnome-shell/extensions/$uuid/metadata.json"
+}
+
+install_zip_ext "just-perfection-desktop@just-perfection"
+install_zip_ext "blur-my-shell@aunetx"
+'
+fi
+
+###############################################################################
+# OS IDENTITY
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc '
 set -e
-
 cat > /usr/lib/os-release <<EOF
 NAME="Solvionyx OS"
 PRETTY_NAME="Solvionyx OS Aurora"
@@ -370,126 +363,141 @@ SUPPORT_URL="https://solviony.com/support"
 BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
 LOGO=solvionyx
 EOF
-
-# Ensure /etc/os-release exists and points correctly (no relink if same)
-if [ ! -e /etc/os-release ]; then
-  ln -s /usr/lib/os-release /etc/os-release
-fi
-'
-###############################################################################
-# FIX — FORCE OS LOGO (GNOME ABOUT)
-###############################################################################
-log "Forcing Solvionyx logo in os-release"
-
-sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-sed -i \
-  -e "s/^LOGO=.*/LOGO=solvionyx/" \
-  -e "/^LOGO=/! s|$|\
-LOGO=solvionyx|" \
-  /etc/os-release
+[ -e /etc/os-release ] || ln -s /usr/lib/os-release /etc/os-release
 '
 
-###############################################################################
-# FIX — INSTALL SOLVIONYX LOGO (GNOME)
-###############################################################################
 log "Installing Solvionyx logo"
-
-LOGO_SRC="$BRANDING_SRC/logo/solvionyx-logo.png"
-[ -f "$LOGO_SRC" ] || fail "Missing branding/logo/solvionyx-logo.png"
-
 sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-sudo install -m 0644 "$LOGO_SRC" \
-  "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
-
+sudo install -m 0644 "$SOLVIONYX_LOGO" "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
 sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
-sudo install -m 0644 "$LOGO_SRC" \
-  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
-
+sudo install -m 0644 "$SOLVIONYX_LOGO" "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 
-###############################################################################
-# D4 — REMOVE DEBIAN BRANDING FROM GNOME ABOUT
-###############################################################################
-
-sudo chroot "$CHROOT_DIR" bash <<'EOF'
-set -e
-
-# ------------------------------------------------------------------
-# 1) Ensure Solvionyx os-release is authoritative
-# ------------------------------------------------------------------
-cat > /etc/os-release <<'OSREL'
-NAME="Solvionyx OS"
-PRETTY_NAME="Solvionyx OS Aurora"
-ID=solvionyx
-ID_LIKE=debian
-VERSION="Aurora"
-VERSION_ID=aurora
-HOME_URL="https://solviony.com"
-SUPPORT_URL="https://solviony.com/support"
-BUG_REPORT_URL="https://github.com/solviony/Solvionyx-OS/issues"
-LOGO=solvionyx
-OSREL
-
-# ------------------------------------------------------------------
-# 3) Refresh GNOME settings caches (safe even if GNOME not active)
-# ------------------------------------------------------------------
-glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
-
-EOF
-
-###############################################################################
-# D5 — REMOVE DEBIAN FROM lsb_release
-###############################################################################
 log "Overriding lsb_release to Solvionyx OS"
-
 sudo chroot "$CHROOT_DIR" bash -lc '
 set -e
-
 cat > /etc/lsb-release <<EOF
 DISTRIB_ID=Solvionyx
 DISTRIB_RELEASE=Aurora
 DISTRIB_CODENAME=aurora
 DISTRIB_DESCRIPTION="Solvionyx OS Aurora"
 EOF
-
-# Ensure lsb_release command reflects branding
-if command -v lsb_release >/dev/null 2>&1; then
-  sed -i "s/^DISTRIB_ID=.*/DISTRIB_ID=Solvionyx/" /etc/lsb-release
-fi
 '
 
 ###############################################################################
-# D6 — SOLVIONYX LOGO IN GNOME ABOUT (FINAL, SAFE)
+# INSTALL SOLVIONYX LOGO
 ###############################################################################
-log "Installing Solvionyx logo for GNOME About"
-
-# Canonical logo path (single source of truth)
-SOLVIONYX_LOGO="$BRANDING_SRC/logo/solvionyx-logo.png"
-[ -f "$SOLVIONYX_LOGO" ] || fail "Missing $SOLVIONYX_LOGO"
-
-# GNOME About primary lookup
-sudo install -Dm644 "$SOLVIONYX_LOGO" \
-  "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
-
-# GNOME icon theme fallback
-sudo install -Dm644 "$SOLVIONYX_LOGO" \
-  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
-
-# Refresh icon cache (non-fatal in CI)
-sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || true
+log "Installing Solvionyx logo"
+sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+sudo install -m 0644 "$SOLVIONYX_LOGO" "$CHROOT_DIR/usr/share/pixmaps/solvionyx.png"
+sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
+sudo install -m 0644 "$SOLVIONYX_LOGO" "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
+sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
 
 ###############################################################################
-# SOLVIONYX GLASS BLUR CONFIGURATION
+# FIX — Bookworm extension availability (vendor upstream)
+# Replaces:
+#   apt-get install gnome-shell-extension-just-perfection
+#   apt-get install gnome-shell-extension-blur-my-shell
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
-  log "Configuring Solvionyx glass system menu"
-
+  log "Vendoring GNOME extensions: Just Perfection + Blur my Shell (Bookworm-safe)"
   sudo chroot "$CHROOT_DIR" bash -lc '
+set -euo pipefail
+apt-get update
+apt-get install -y --no-install-recommends git ca-certificates
+
+EXTDIR=/usr/share/gnome-shell/extensions
+mkdir -p "$EXTDIR"
+
+# Just Perfection (UUID)
+JP_UUID="just-perfection-desktop@just-perfection"
+rm -rf "$EXTDIR/$JP_UUID"
+git clone --depth=1 https://github.com/just-perfection-desktop/just-perfection.git "$EXTDIR/$JP_UUID" || true
+if [ -d "$EXTDIR/$JP_UUID/$JP_UUID" ]; then
+  tmp="$EXTDIR/$JP_UUID"
+  rm -rf "$EXTDIR/$JP_UUID"
+  mv "$tmp/$JP_UUID" "$EXTDIR/$JP_UUID"
+  rm -rf "$tmp" || true
+fi
+
+# Blur my Shell (UUID)
+BMS_UUID="blur-my-shell@aunetx"
+rm -rf "$EXTDIR/$BMS_UUID"
+git clone --depth=1 https://github.com/aunetx/blur-my-shell.git "$EXTDIR/$BMS_UUID" || true
+if [ -d "$EXTDIR/$BMS_UUID/$BMS_UUID" ]; then
+  tmp="$EXTDIR/$BMS_UUID"
+  rm -rf "$EXTDIR/$BMS_UUID"
+  mv "$tmp/$BMS_UUID" "$EXTDIR/$BMS_UUID"
+  rm -rf "$tmp" || true
+fi
+
+chmod -R a+rX "$EXTDIR/$JP_UUID" "$EXTDIR/$BMS_UUID" 2>/dev/null || true
+glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
+'
+fi
+
+###############################################################################
+# GNOME — Solvionyx Glass + Dock/Taskbar defaults (NEW DOCK/TASKBAR INCLUDED)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Applying Solvionyx dock/taskbar + glass defaults"
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+D2D="dash-to-dock@micxgx.gmail.com"
+APPIND="appindicatorsupport@rgcjonas.gmail.com"
+JP="just-perfection-desktop@just-perfection"
+BMS="blur-my-shell@aunetx"
+
 mkdir -p /etc/dconf/db/local.d
 
-cat > /etc/dconf/db/local.d/30-solvionyx-glass <<EOF
+cat > /etc/dconf/db/local.d/00-solvionyx-shell <<EOF
+[org/gnome/shell]
+enabled-extensions=['$D2D','$APPIND','$JP','$BMS']
+disable-overview-on-startup=true
+favorite-apps=['solviony-store.desktop','org.gnome.Terminal.desktop','org.gnome.Nautilus.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
+
+[org/gnome/desktop/interface]
+enable-hot-corners=false
+clock-show-date=false
+clock-show-seconds=false
+
+# Dock as taskbar
+[org/gnome/shell/extensions/dash-to-dock]
+dock-position='BOTTOM'
+extend-height=false
+dock-fixed=true
+autohide=false
+intellihide=false
+height-fraction=0.85
+center-aligned=true
+dash-max-icon-size=56
+click-action='focus-or-previews'
+show-mounts=false
+show-trash=false
+running-indicator-style='DOTS'
+
+# Glass styling
+transparency-mode='FIXED'
+background-opacity=0.40
+custom-background-color=true
+background-color='rgb(10,20,40)'
+apply-custom-theme=true
+custom-theme-shrink=true
+custom-theme-running-dots=true
+custom-theme-running-dots-color='rgb(0,160,255)'
+custom-theme-running-dots-border-color='rgb(0,200,255)'
+border-radius=22
+
+# Replace GNOME top bar feel
+[org/gnome/shell/extensions/just-perfection]
+panel=false
+activities-button=false
+app-menu=false
+clock-menu=false
+workspace-switcher-size=0
+
+# Blur (system glass)
 [org/gnome/shell/extensions/blur-my-shell]
 panel=true
 panel-opacity=0.55
@@ -497,10 +505,107 @@ sigma=30
 
 [org/gnome/shell/extensions/blur-my-shell/panel]
 blur=true
-brightness=0.8
+brightness=0.85
+EOF
 
-[org/gnome/shell/extensions/blur-my-shell/applications]
+dconf update
+'
+fi
+
+###############################################################################
+# LIVE USER + AUTOLOGIN
+###############################################################################
+sudo chroot "$CHROOT_DIR" bash -lc "
+set -e
+useradd -m -s /bin/bash -G sudo,adm,audio,video,netdev liveuser || true
+echo 'liveuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-liveuser
+chmod 0440 /etc/sudoers.d/99-liveuser
+
+if [ \"$EDITION\" = \"gnome\" ]; then
+  mkdir -p /etc/gdm3
+  cat > /etc/gdm3/daemon.conf <<EOF
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=liveuser
+WaylandEnable=true
+EOF
+fi
+"
+
+###############################################################################
+# GNOME — SOLVIONYX UI DEFAULTS (ALL WRITES INSIDE CHROOT)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Applying Solvionyx GNOME UI defaults (dock + glass + panel controls)"
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -euo pipefail
+glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
+
+mkdir -p /etc/dconf/db/local.d
+mkdir -p /etc/dconf/db/local.d/locks
+
+cat > /etc/dconf/db/local.d/00-solvionyx-shell <<EOF
+[org/gnome/shell]
+enabled-extensions=[
+  "dash-to-dock@micxgx.gmail.com",
+  "just-perfection-desktop@just-perfection",
+  "blur-my-shell@aunetx"
+]
+disable-overview-on-startup=true
+favorite-apps=[
+  "solviony-store.desktop",
+  "org.gnome.Terminal.desktop",
+  "org.gnome.Nautilus.desktop",
+  "org.mozilla.firefox.desktop",
+  "steam.desktop",
+  "solvionyx-control-center.desktop"
+]
+
+[org/gnome/desktop/interface]
+enable-hot-corners=false
+clock-show-date=false
+clock-show-seconds=false
+EOF
+
+cat > /etc/dconf/db/local.d/10-solvionyx-dock <<EOF
+[org/gnome/shell/extensions/dash-to-dock]
+dock-position='BOTTOM'
+extend-height=false
+dock-fixed=true
+autohide=false
+intellihide=false
+transparency-mode='FIXED'
+background-opacity=0.40
+dash-max-icon-size=56
+center-aligned=true
+show-mounts=false
+show-trash=false
+running-indicator-style='DOTS'
+apply-custom-theme=true
+custom-theme-shrink=true
+custom-theme-running-dots=true
+custom-theme-running-dots-color='rgb(0,160,255)'
+custom-theme-running-dots-border-color='rgb(0,200,255)'
+EOF
+
+cat > /etc/dconf/db/local.d/20-solvionyx-just-perfection <<EOF
+[org/gnome/shell/extensions/just-perfection]
+panel=false
+activities-button=false
+app-menu=false
+clock-menu=false
+workspace-switcher-size=0
+EOF
+
+cat > /etc/dconf/db/local.d/30-solvionyx-blur <<EOF
+[org/gnome/shell/extensions/blur-my-shell]
+panel=true
+panel-opacity=0.55
+sigma=28
+
+[org/gnome/shell/extensions/blur-my-shell/panel]
 blur=true
+brightness=0.85
 
 [org/gnome/shell/extensions/blur-my-shell/overview]
 blur=true
@@ -511,285 +616,39 @@ dconf update
 fi
 
 ###############################################################################
-# LIVE USER + AUTOLOGIN (Phase 4)
-###############################################################################
-sudo chroot "$CHROOT_DIR" bash -lc "
-set -e
-
-# Create live user
-useradd -m -s /bin/bash -G sudo,adm,audio,video,netdev liveuser || true
-
-# Passwordless sudo for live session
-echo 'liveuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-liveuser
-chmod 0440 /etc/sudoers.d/99-liveuser
-
-# -------------------------------
-# GNOME / GDM AUTOLOGIN (CRITICAL)
-# -------------------------------
-mkdir -p /etc/gdm3
-
-cat > /etc/gdm3/daemon.conf <<EOF
-[daemon]
-AutomaticLoginEnable=true
-AutomaticLogin=liveuser
-WaylandEnable=true
-EOF
-"
-
-###############################################################################
-# GNOME — FORCE DASH-TO-DOCK ENABLED (SOLVIONYX DEFAULT)
+# GNOME SHELL CSS — DOCK GLOW + QUICK SETTINGS GLASS
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
-  log "Enabling Dash-to-Dock for Solvionyx GNOME session"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-# Ensure schemas exist
-glib-compile-schemas /usr/share/glib-2.0/schemas || true
-
-# Enable dash-to-dock extension system-wide
-EXT="dash-to-dock@micxgx.gmail.com"
-
-mkdir -p /etc/dconf/db/local.d
-mkdir -p /etc/dconf/db/local.d/locks
-
-cat > /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
-[org/gnome/shell]
-enabled-extensions=['$EXT']
-
-[org/gnome/shell/extensions/dash-to-dock]
-dock-fixed=true
-autohide=false
-intellihide=false
-dock-position='BOTTOM'
-extend-height=false
-transparency-mode='FIXED'
-background-opacity=0.6
-dash-max-icon-size=48
-center-aligned=true
-show-mounts=true
-show-trash=true
-click-action='focus-or-previews'
+  log "Installing Solvionyx glass glow CSS"
+  sudo mkdir -p "$CHROOT_DIR/usr/share/gnome-shell/theme"
+  sudo tee "$CHROOT_DIR/usr/share/gnome-shell/theme/solvionyx-glass.css" >/dev/null <<'EOF'
+/* Solvionyx Glass + Glow */
+#dash {
+  background-color: rgba(15, 25, 45, 0.45);
+  border-radius: 22px;
+  box-shadow:
+    0 0 18px rgba(0, 160, 255, 0.25),
+    inset 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.quick-settings {
+  background-color: rgba(18, 28, 48, 0.45);
+  border-radius: 22px;
+  box-shadow:
+    0 0 22px rgba(3, 158, 255, 0.25),
+    inset 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.quick-settings-grid { spacing: 12px; }
+.quick-toggle { border-radius: 16px; }
 EOF
 
-dconf update
-'
-fi
-
-###############################################################################
-# GNOME — DISABLE OVERVIEW-ONLY MODE
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
-[org/gnome/shell]
-disable-overview-on-startup=true
-EOF
-
-dconf update
-'
-fi
-
-###############################################################################
-# GNOME — ENSURE TOP BAR + PANEL ACTIVE
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
-[org/gnome/desktop/interface]
-enable-hot-corners=false
-EOF
-
-dconf update
-'
-fi
-
-###############################################################################
-# SOLVIONYX PANEL — HIDE GNOME TOP BAR
-###############################################################################
-cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
-[org/gnome/shell/extensions/just-perfection]
-panel=false
-activities-button=false
-app-menu=false
-clock-menu=false
-EOF
-
-###############################################################################
-# SOLVIONYX DOCK — BLUR + GLOW
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-mkdir -p /etc/dconf/db/local.d
-
-cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
-[org/gnome/shell/extensions/dash-to-dock]
-dock-position='BOTTOM'
-extend-height=false
-height-fraction=0.85
-dock-fixed=true
-autohide=false
-intellihide=false
-transparency-mode='FIXED'
-background-opacity=0.55
-custom-background-color=true
-background-color='rgb(10,20,40)'
-border-radius=22
-dash-max-icon-size=48
-show-trash=false
-show-mounts=false
-running-indicator-style='DOTS'
-apply-custom-theme=true
-custom-theme-shrink=true
-custom-theme-running-dots-color='rgb(0,160,255)'
-custom-theme-running-dots-border-color='rgb(0,200,255)'
-EOF
-
-dconf update
-'
-fi
-
-###############################################################################
-# SOLVIONYX GLASS DOCK (DASH-TO-DOCK)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Applying Solvionyx glass dock style"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-mkdir -p /etc/dconf/db/local.d
-
-cat > /etc/dconf/db/local.d/32-solvionyx-dock <<EOF
-[org/gnome/shell/extensions/dash-to-dock]
-dock-position=BOTTOM
-extend-height=false
-transparency-mode=FIXED
-background-opacity=0.35
-blur-background=true
-show-mounts=false
-show-trash=false
-dash-max-icon-size=56
-intellihide=false
-apply-custom-theme=true
-custom-theme-shrink=true
-custom-theme-running-dots=true
-running-indicator-style=DOTS
-EOF
-
-dconf update
-'
-fi
-
-###############################################################################
-# SOLVIONYX PANEL — REMOVE GNOME TOP BAR DEPENDENCY
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-cat >> /etc/dconf/db/local.d/00-solvionyx-dock <<EOF
-[org/gnome/desktop/interface]
-enable-hot-corners=false
-clock-show-date=false
-clock-show-seconds=false
-
-[org/gnome/shell]
-favorite-apps=['solviony-store.desktop','org.gnome.Terminal.desktop','org.gnome.Nautilus.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
-
-[org/gnome/shell/extensions/dash-to-dock]
-show-apps-at-top=true
-show-show-apps-button=true
-EOF
-
-dconf update
-'
-fi
-
-###############################################################################
-# D1 — GDM LOGIN SCREEN BRANDING (GNOME ONLY)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-
-  # Copy Solvionyx logo into chroot
-  sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-  sudo cp "$BRANDING_SRC/logos/solvionyx.png" \
-    "$CHROOT_DIR/usr/share/pixmaps/solvionyx-logo.png"
-
-  # Configure GDM branding (inside chroot)
-  sudo chroot "$CHROOT_DIR" bash <<'EOF'
-set -e
-
-mkdir -p /etc/dconf/db/gdm.d
-
-cat > /etc/dconf/db/gdm.d/01-solvionyx <<'CONF'
-[org/gnome/login-screen]
-logo='/usr/share/pixmaps/solvionyx-logo.png'
-disable-user-list=false
-CONF
-
-dconf update || true
-EOF
-
-fi
-
-###############################################################################
-# D2 — GDM LOGIN SCREEN (HIDE USERNAME ENTRY) (GNOME ONLY)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-
-  sudo chroot "$CHROOT_DIR" bash <<'EOF'
-set -e
-
-mkdir -p /etc/dconf/db/gdm.d
-
-cat > /etc/dconf/db/gdm.d/02-solvionyx-single-user <<'CONF'
-[org/gnome/login-screen]
-disable-user-list=true
-CONF
-
-dconf update || true
-EOF
-
-fi
-
-###############################################################################
-# D3 — GDM LOGIN SCREEN BACKGROUND (GNOME ONLY)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Applying Solvionyx GDM login background"
-
-  GDM_BG_SRC="$BRANDING_SRC/wallpapers/aurora-bg.jpg"
-  GDM_BG_DST="$CHROOT_DIR/usr/share/backgrounds/solvionyx-gdm.jpg"
-
-  if [ -f "$GDM_BG_SRC" ]; then
-    sudo install -Dm644 "$GDM_BG_SRC" "$GDM_BG_DST"
-
-    sudo chroot "$CHROOT_DIR" bash <<'EOF'
-set -e
-
-mkdir -p /etc/dconf/db/gdm.d
-
-cat > /etc/dconf/db/gdm.d/03-solvionyx-background <<'CONF'
-[org/gnome/login-screen]
-banner-message-enable=false
-background-image='file:///usr/share/backgrounds/solvionyx-gdm.jpg'
-CONF
-
-dconf update || true
-EOF
-  else
-    log "WARNING: aurora-bg.jpg not found, skipping GDM background branding"
+  if ! grep -q 'solvionyx-glass.css' "$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css" 2>/dev/null; then
+    sudo sed -i '1i @import url("solvionyx-glass.css");' \
+      "$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css" || true
   fi
 fi
 
 ###############################################################################
-# CALAMARES CONFIG + BRANDING (Phase 5)
+# CALAMARES CONFIG + BRANDING
 ###############################################################################
 sudo install -d "$CHROOT_DIR/etc/calamares/modules/shellprocess"
 sudo install -m 0644 "$CALAMARES_SRC/settings.conf" "$CHROOT_DIR/etc/calamares/settings.conf"
@@ -802,19 +661,19 @@ sudo install -m 0644 "$CALAMARES_SRC/branding.desc" \
   "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc"
 
 ###############################################################################
-# WELCOME APP + DESKTOP CAPABILITIES (Phase 6)
+# WELCOME APP + DESKTOP CAPABILITIES
 ###############################################################################
 sudo install -d "$CHROOT_DIR/usr/share/solvionyx/welcome-app"
 sudo cp -a "$WELCOME_SRC/." "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"
-sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"*.sh || true
-sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"*.py || true
+sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"*.sh 2>/dev/null || true
+sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"*.py 2>/dev/null || true
 
 sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d"
 sudo cp -a "$BRANDING_SRC/desktop-capabilities/." \
   "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/"
 
 ###############################################################################
-# SOLVIONYX CONTROL CENTER (Phase 7)
+# SOLVIONYX CONTROL CENTER
 ###############################################################################
 log "Installing Solvionyx Control Center"
 sudo install -d "$CHROOT_DIR/usr/share/solvionyx/control-center"
@@ -826,25 +685,10 @@ sudo install -m 0644 "$REPO_ROOT/control-center/solvionyx-control-center.desktop
   "$CHROOT_DIR/usr/share/applications/solvionyx-control-center.desktop" || true
 
 ###############################################################################
-# OEM / Factory Workflow (Phase 8) — installed but inactive unless enabled
-###############################################################################
-log "Installing OEM workflow (inactive unless /etc/solvionyx/oem-enabled exists)"
-sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/oem"
-sudo cp -a "$REPO_ROOT/oem/solvionyx-oem-cleanup.sh" "$CHROOT_DIR/usr/lib/solvionyx/oem/" || true
-sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/oem/solvionyx-oem-cleanup.sh" || true
-
-sudo install -d "$CHROOT_DIR/etc/systemd/system"
-sudo install -m 0644 "$REPO_ROOT/oem/solvionyx-oem-cleanup.service" \
-  "$CHROOT_DIR/etc/systemd/system/solvionyx-oem-cleanup.service" || true
-
-sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-oem-cleanup.service >/dev/null 2>&1 || true
-
-###############################################################################
-# PLYMOUTH (CORRECT ORDER)
+# PLYMOUTH
 ###############################################################################
 sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
-sudo cp -a "$BRANDING_SRC/plymouth/." \
-  "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/"
+sudo cp -a "$BRANDING_SRC/plymouth/." "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/"
 
 cat > "$CHROOT_DIR/etc/plymouth/plymouthd.conf" <<EOF
 [Daemon]
@@ -857,264 +701,29 @@ update-alternatives --install /usr/share/plymouth/themes/default.plymouth defaul
 update-alternatives --set default.plymouth \
   /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth || true
 "
-
-sudo chroot "$CHROOT_DIR" update-initramfs -u
+sudo chroot "$CHROOT_DIR" update-initramfs -u || true
 
 ###############################################################################
-# WALLPAPERS + GNOME UX (ONCE)
+# WALLPAPERS + GNOME UX
 ###############################################################################
 sudo install -d "$CHROOT_DIR/usr/share/backgrounds/solvionyx"
-sudo cp -a "$BRANDING_SRC/wallpapers/." \
-  "$CHROOT_DIR/usr/share/backgrounds/solvionyx/"
+sudo cp -a "$BRANDING_SRC/wallpapers/." "$CHROOT_DIR/usr/share/backgrounds/solvionyx/"
 
 if [ "$EDITION" = "gnome" ]; then
   sudo install -d "$CHROOT_DIR/usr/share/glib-2.0/schemas"
   sudo cp "$BRANDING_SRC/gnome/"*.override \
-    "$CHROOT_DIR/usr/share/glib-2.0/schemas/" || true
-  sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas
+    "$CHROOT_DIR/usr/share/glib-2.0/schemas/" 2>/dev/null || true
+  sudo chroot "$CHROOT_DIR" glib-compile-schemas /usr/share/glib-2.0/schemas || true
 fi
 
 ###############################################################################
-# PHASE 5 — ENABLE PERFORMANCE PROFILES
+# KERNEL + INITRD
 ###############################################################################
-log "Enabling power-profiles-daemon"
-
-sudo chroot "$CHROOT_DIR" systemctl enable power-profiles-daemon || true
-
-###############################################################################
-# PHASE 5 — SOLVIONY STORE (GNOME SOFTWARE)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Rebranding GNOME Software as Solviony Store"
-
-  sudo install -d "$CHROOT_DIR/usr/share/applications"
-  sudo install -m 0644 "$BRANDING_SRC/store/solviony-store.desktop" \
-    "$CHROOT_DIR/usr/share/applications/solviony-store.desktop"
-
-  sudo chroot "$CHROOT_DIR" bash -lc "
-if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
-  sed -i 's/^NoDisplay=.*/NoDisplay=true/' /usr/share/applications/org.gnome.Software.desktop || true
-fi
-"
-fi
-
-  sudo chroot "$CHROOT_DIR" apt-get install -y gnome-shell-extension-just-perfection
-
-###############################################################################
-# SOLVIONYX PANEL — INSTALL JUST PERFECTION (GNOME ONLY)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Installing Just Perfection extension (Solvionyx panel control)"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-apt-get update
-apt-get install -y gnome-shell-extension-just-perfection
-'
-fi
-
-###############################################################################
-# SOLVIONYX GLASS GLOW (GNOME SHELL CSS)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Installing Solvionyx glass glow CSS"
-
-  sudo mkdir -p "$CHROOT_DIR/usr/share/gnome-shell/theme"
-  sudo tee "$CHROOT_DIR/usr/share/gnome-shell/theme/solvionyx-glass.css" >/dev/null <<'EOF'
-#dash {
-  background-color: rgba(15, 25, 45, 0.45);
-  border-radius: 22px;
-  box-shadow:
-    0 0 18px rgba(0, 160, 255, 0.25),
-    inset 0 0 1px rgba(255, 255, 255, 0.08);
-}
-EOF
-
-  sudo sed -i '/@import url(".*");/a @import url("solvionyx-glass.css");' \
-    "$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css" || true
-fi
-
-###############################################################################
-# SOLVIONYX PANEL CONTROL (JUST PERFECTION)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Applying Solvionyx panel layout"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-mkdir -p /etc/dconf/db/local.d
-
-cat > /etc/dconf/db/local.d/31-solvionyx-panel <<EOF
-[org/gnome/shell/extensions/just-perfection]
-panel=false
-activities-button=false
-clock-menu=false
-app-menu=false
-workspace-switcher-size=0
-EOF
-
-dconf update
-'
-fi
-
-###############################################################################
-# PHASE 5 — SYSTEM RESTORE (TIMESHIFT, BRANDED)
-###############################################################################
-log "Installing Solvionyx System Restore launcher"
-
-sudo install -d "$CHROOT_DIR/usr/share/applications"
-sudo install -m 0644 "$BRANDING_SRC/restore/solvionyx-system-restore.desktop" \
-  "$CHROOT_DIR/usr/share/applications/solvionyx-system-restore.desktop"
-
-###############################################################################
-# PHASE 5 — PERFORMANCE PROFILES (BRANDED LAUNCHER)
-###############################################################################
-log "Installing Solvionyx Performance Profiles launcher"
-
-sudo install -d "$CHROOT_DIR/usr/share/applications"
-sudo install -m 0644 "$BRANDING_SRC/performance/solvionyx-performance.desktop" \
-  "$CHROOT_DIR/usr/share/applications/solvionyx-performance.desktop"
-
-###############################################################################
-# PHASE 5 — SOLVY PERMISSIONS DEFAULTS
-###############################################################################
-log "Installing Solvy permissions defaults"
-
-sudo install -d "$CHROOT_DIR/etc/solvionyx"
-sudo install -m 0644 "$BRANDING_SRC/solvy/permissions.conf" \
-  "$CHROOT_DIR/etc/solvionyx/solvy-permissions.conf"
-
-###############################################################################
-# PHASE 6 — SYSTEM HARDENING
-###############################################################################
-log "Applying Solvionyx security hardening"
-
-sudo install -d "$CHROOT_DIR/etc/sysctl.d"
-sudo install -m 0644 "$BRANDING_SRC/security/99-solvionyx-hardening.conf" \
-  "$CHROOT_DIR/etc/sysctl.d/99-solvionyx-hardening.conf"
-
-###############################################################################
-# PHASE 6 — SECURITY CENTER
-###############################################################################
-sudo install -m 0644 "$BRANDING_SRC/security/solvionyx-security.desktop" \
-  "$CHROOT_DIR/usr/share/applications/solvionyx-security.desktop"
-
-###############################################################################
-# PHASE 7 — OEM CLEANUP
-###############################################################################
-log "Installing OEM cleanup service"
-
-sudo install -d "$CHROOT_DIR/usr/lib/solvionyx"
-sudo install -m 0755 "$BRANDING_SRC/oem/oem-cleanup.sh" \
-  "$CHROOT_DIR/usr/lib/solvionyx/oem-cleanup.sh"
-
-sudo install -d "$CHROOT_DIR/etc/systemd/system"
-sudo install -m 0644 "$BRANDING_SRC/oem/solvionyx-oem-cleanup.service" \
-  "$CHROOT_DIR/etc/systemd/system/solvionyx-oem-cleanup.service"
-
-sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-oem-cleanup.service || true
-
-###############################################################################
-# SOLVIONYX GLASS QUICK SETTINGS
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Enabling Solvionyx glass quick settings"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-mkdir -p /etc/dconf/db/local.d
-
-cat > /etc/dconf/db/local.d/33-solvionyx-quick-settings <<EOF
-[org/gnome/shell/extensions/blur-my-shell/panel]
-blur=true
-sigma=28
-brightness=0.85
-opacity=0.55
-
-[org/gnome/shell/extensions/blur-my-shell]
-panel=true
-EOF
-
-dconf update
-'
-fi
-
-###############################################################################
-# SOLVIONYX QUICK SETTINGS GLASS CSS
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Applying Solvionyx glass quick settings CSS"
-
-  sudo tee -a "$CHROOT_DIR/usr/share/gnome-shell/theme/solvionyx-glass.css" >/dev/null <<'EOF'
-.quick-settings {
-  background-color: rgba(18, 28, 48, 0.45);
-  border-radius: 22px;
-  box-shadow:
-    0 0 22px rgba(3, 158, 255, 0.25),
-    inset 0 0 1px rgba(255, 255, 255, 0.08);
-}
-
-.quick-settings-grid {
-  spacing: 12px;
-}
-
-.quick-toggle {
-  border-radius: 16px;
-}
-EOF
-fi
-
-###############################################################################
-# SOLVIONYX AI — DYNAMIC GPU-AWARE UI (BLUR ENGINE)
-###############################################################################
-log "Installing Solvionyx GPU-aware blur engine"
-
-# Install GPU detection script
-sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/ai"
-sudo install -m 0755 \
-  "$REPO_ROOT/ai/solvionyx-gpu-profile.sh" \
-  "$CHROOT_DIR/usr/lib/solvionyx/ai/solvionyx-gpu-profile.sh"
-
-# Systemd service to apply blur profile at boot
-sudo tee "$CHROOT_DIR/etc/systemd/system/solvionyx-gpu-profile.service" >/dev/null <<'EOF'
-[Unit]
-Description=Solvionyx AI GPU UI Optimizer
-After=graphical.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/lib/solvionyx/ai/solvionyx-gpu-profile.sh
-
-[Install]
-WantedBy=graphical.target
-EOF
-
-sudo chroot "$CHROOT_DIR" systemctl enable solvionyx-gpu-profile.service
-
-sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/ai"
-sudo install -m 0755 \
-  "$REPO_ROOT/ai/solvionyx-power-ui.sh" \
-  "$CHROOT_DIR/usr/lib/solvionyx/ai/solvionyx-power-ui.sh"
-
-sudo install -d "$CHROOT_DIR/etc/systemd/user"
-sudo install -m 0644 \
-  "$REPO_ROOT/systemd/solvionyx-power-ui.service" \
-  "$CHROOT_DIR/etc/systemd/user/solvionyx-power-ui.service"
-
-sudo chroot "$CHROOT_DIR" systemctl --user enable solvionyx-power-ui.service || true
-
-###############################################################################
-# KERNEL + INITRD 
-###############################################################################
-
 VMLINUX="$(ls "$CHROOT_DIR"/boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
 INITRD="$(ls "$CHROOT_DIR"/boot/initrd.img-* 2>/dev/null | head -n1 || true)"
 
-if [ -z "$VMLINUX" ]; then
-  fail "Kernel image not found in chroot"
-fi
-
-if [ -z "$INITRD" ]; then
-  fail "Initrd image not found in chroot"
-fi
+[ -n "$VMLINUX" ] || fail "Kernel image not found in chroot"
+[ -n "$INITRD" ]  || fail "Initrd image not found in chroot"
 
 KERNEL_VER="${VMLINUX##*/vmlinuz-}"
 log "Detected kernel version: $KERNEL_VER"
@@ -1123,7 +732,7 @@ cp "$VMLINUX" "$LIVE_DIR/vmlinuz"
 cp "$INITRD" "$LIVE_DIR/initrd.img"
 
 ###############################################################################
-# PRE-SQUASHFS CLEANUP (CORRECT POSITION)
+# PRE-SQUASHFS CLEANUP
 ###############################################################################
 log "Unmounting chroot virtual filesystems before SquashFS"
 umount_chroot_fs
@@ -1138,7 +747,7 @@ sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
   -processors 2
 
 ###############################################################################
-# EFI + UKI + ISO (UNCHANGED LOGIC)
+# EFI + UKI + ISO
 ###############################################################################
 STUB_SRC="$CHROOT_DIR/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
 STUB_DST="$UKI_DIR/linuxx64.efi.stub"
@@ -1310,23 +919,6 @@ xorriso -as mkisofs \
   -e efi.img \
   -no-emul-boot \
   "$SIGNED_DIR"
-
-###############################################################################
-# SAFETY — REMOVE IMMUTABLE FLAGS BEFORE CLEANUP
-###############################################################################
-log "Removing immutable flags before cleanup (CI-safe)"
-
-sudo chroot "$CHROOT_DIR" bash -lc '
-set +e
-for f in \
-  /etc/os-release \
-  /etc/lsb-release \
-  /usr/share/pixmaps/solvionyx.png \
-  /usr/share/icons/hicolor/256x256/apps/solvionyx.png
-do
-  [ -e "$f" ] && chattr -i "$f" 2>/dev/null || true
-done
-'
 
 ###############################################################################
 # FINAL
