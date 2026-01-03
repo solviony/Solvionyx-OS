@@ -537,21 +537,11 @@ glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
 mkdir -p /etc/dconf/db/local.d /etc/dconf/db/local.d/locks
 
 cat > /etc/dconf/db/local.d/00-solvionyx-shell <<'EOL'
+
 [org/gnome/shell]
-enabled-extensions=[
-  "dash-to-dock@micxgx.gmail.com",
-  "just-perfection-desktop@just-perfection",
-  "blur-my-shell@aunetx"
-]
+enabled-extensions=['dash-to-dock@micxgx.gmail.com','just-perfection-desktop@just-perfection','blur-my-shell@aunetx']
 disable-overview-on-startup=true
-favorite-apps=[
-  "solviony-store.desktop",
-  "org.gnome.Terminal.desktop",
-  "org.gnome.Nautilus.desktop",
-  "org.mozilla.firefox.desktop",
-  "steam.desktop",
-  "solvionyx-control-center.desktop"
-]
+favorite-apps=['solviony-store.desktop','org.gnome.Terminal.desktop','org.gnome.Nautilus.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
 
 [org/gnome/desktop/interface]
 enable-hot-corners=false
@@ -651,15 +641,7 @@ mkdir -p /etc/dconf/db/local.d /etc/dconf/db/local.d/locks
 cat > /etc/dconf/db/local.d/99-solvionyx-phase4 <<'EOL'
 [org/gnome/shell]
 disable-overview-on-startup=true
-favorite-apps=[
-  "solvy.desktop",
-  "solviony-store.desktop",
-  "org.gnome.Nautilus.desktop",
-  "org.gnome.Terminal.desktop",
-  "org.mozilla.firefox.desktop",
-  "steam.desktop",
-  "solvionyx-control-center.desktop"
-]
+favorite-apps=['solvy.desktop','solviony-store.desktop','org.gnome.Nautilus.desktop','org.gnome.Terminal.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
 
 [org/gnome/desktop/interface]
 enable-hot-corners=false
