@@ -397,52 +397,6 @@ sudo install -m 0644 "$SOLVIONYX_LOGO" "$CHROOT_DIR/usr/share/icons/hicolor/256x
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
 
 ###############################################################################
-# FIX — CI-safe vendoring of GNOME extensions (NO git clone)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Vendoring GNOME extensions (CI-safe tarball method)"
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -euo pipefail
-
-apt-get update
-apt-get install -y --no-install-recommends curl ca-certificates tar
-
-EXTDIR=/usr/share/gnome-shell/extensions
-mkdir -p "$EXTDIR"
-
-install_ext_tarball() {
-  local name="$1"
-  local uuid="$2"
-  local url="$3"
-
-  echo "[BUILD] Installing $name"
-  rm -rf "$EXTDIR/$uuid"
-  mkdir -p "$EXTDIR/$uuid"
-
-  curl -L --fail "$url" \
-    | tar -xz --strip-components=1 -C "$EXTDIR/$uuid"
-
-  test -f "$EXTDIR/$uuid/metadata.json"
-  chmod -R a+rX "$EXTDIR/$uuid"
-}
-
-# Just Perfection
-install_ext_tarball \
-  "Just Perfection" \
-  "just-perfection-desktop@just-perfection" \
-  "https://codeload.github.com/just-perfection-desktop/just-perfection/tar.gz/master"
-
-# Blur My Shell
-install_ext_tarball \
-  "Blur My Shell" \
-  "blur-my-shell@aunetx" \
-  "https://github.com/aunetx/blur-my-shell/archive/refs/heads/master.tar.gz"
-
-glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
-'
-fi
-
-###############################################################################
 # GNOME — Solvionyx Glass + Dock/Taskbar defaults (NEW DOCK/TASKBAR INCLUDED)
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
