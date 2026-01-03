@@ -16,17 +16,22 @@ jobs:
     name: Build Solvionyx OS Aurora — ${{ matrix.edition }}
     runs-on: ubuntu-24.04
 
-    # ⏱ Increased timeout (was 360)
     timeout-minutes: 720
 
     strategy:
       fail-fast: false
-
-      # 🚦 Prevent I/O contention during squashfs
       max-parallel: 1
-
       matrix:
         edition: [gnome, kde, xfce]
+
+    # ---------------------------------------------------------
+    # AI PROVIDER ENVIRONMENT (SECURE)
+    # ---------------------------------------------------------
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      SOLVIONYX_AI_PROVIDER: ${{ vars.SOLVIONYX_AI_PROVIDER }}
+      SOLVIONYX_AI_MODEL: ${{ vars.SOLVIONYX_AI_MODEL }}
 
     steps:
       - name: Checkout Repository
@@ -49,6 +54,18 @@ jobs:
             zstd \
             rsync wget curl
 
+      # ---------------------------------------------------------
+      # VERIFY AI SECRETS (NO VALUE OUTPUT)
+      # ---------------------------------------------------------
+      - name: Verify AI provider secrets
+        run: |
+          [ -n "$OPENAI_API_KEY" ] && echo "OpenAI API key detected"
+          [ -n "$GEMINI_API_KEY" ] && echo "Gemini API key detected"
+          echo "AI provider default: ${SOLVIONYX_AI_PROVIDER:-local}"
+
+      # ---------------------------------------------------------
+      # RESTORE SECURE BOOT KEYS
+      # ---------------------------------------------------------
       - name: Restore SecureBoot Keys (Base64 Decode)
         run: |
           mkdir -p secureboot
@@ -57,7 +74,28 @@ jobs:
           chmod 600 secureboot/db.key
           chmod 644 secureboot/db.crt
 
-      - name: 🛠 Run Solvionyx Builder — ${{ matrix.edition }}
+      # ---------------------------------------------------------
+      # OPTIONAL: CI-ONLY AI KEY INJECTION
+      # ---------------------------------------------------------
+      - name: Inject AI keys into runtime (CI only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          sudo mkdir -p /etc/solvionyx/ai/keys
+
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "$OPENAI_API_KEY" | sudo tee /etc/solvionyx/ai/keys/openai.key >/dev/null
+            sudo chmod 600 /etc/solvionyx/ai/keys/openai.key
+          fi
+
+          if [ -n "$GEMINI_API_KEY" ]; then
+            echo "$GEMINI_API_KEY" | sudo tee /etc/solvionyx/ai/keys/gemini.key >/dev/null
+            sudo chmod 600 /etc/solvionyx/ai/keys/gemini.key
+          fi
+
+      # ---------------------------------------------------------
+      # RUN SOLVIONYX BUILDER
+      # ---------------------------------------------------------
+      - name: Run Solvionyx Builder — ${{ matrix.edition }}
         shell: bash
         run: |
           chmod +x build/builder_v6_ultra.sh
@@ -72,7 +110,7 @@ jobs:
             solvionyx_build/SHA256SUMS.txt
 
   # =========================================================
-  # RELEASE JOB (UNCHANGED — ALREADY CORRECT)
+  # RELEASE JOB
   # =========================================================
   release:
     name: Publish Unified Solvionyx Aurora Release

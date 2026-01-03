@@ -692,6 +692,612 @@ EOF
 fi
 
 ###############################################################################
+# PHASE 4 — FINAL SOLVIONYX DOCK ISLAND (AUTHORITATIVE OVERRIDE)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Phase 4: Applying final Solvionyx dock island layout (authoritative)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+mkdir -p /etc/dconf/db/local.d
+mkdir -p /etc/dconf/db/local.d/locks
+
+cat > /etc/dconf/db/local.d/99-solvionyx-phase4 <<EOF
+[org/gnome/shell]
+disable-overview-on-startup=true
+favorite-apps=[
+  "solvy.desktop",
+  "solviony-store.desktop",
+  "org.gnome.Nautilus.desktop",
+  "org.gnome.Terminal.desktop",
+  "org.mozilla.firefox.desktop",
+  "steam.desktop",
+  "solvionyx-control-center.desktop"
+]
+
+[org/gnome/desktop/interface]
+enable-hot-corners=false
+clock-show-date=false
+clock-show-seconds=false
+
+[org/gnome/shell/extensions/dash-to-dock]
+dock-position='BOTTOM'
+extend-height=false
+dock-fixed=true
+autohide=false
+intellihide=false
+center-aligned=true
+height-fraction=0.92
+dash-max-icon-size=52
+icon-size-fixed=true
+transparency-mode='FIXED'
+background-opacity=0.38
+apply-custom-theme=true
+custom-theme-shrink=true
+custom-theme-running-dots=true
+custom-theme-running-dots-color='rgb(0,170,255)'
+custom-theme-running-dots-border-color='rgb(0,220,255)'
+border-radius=26
+click-action='focus-or-previews'
+show-mounts=false
+show-trash=false
+running-indicator-style='DOTS'
+EOF
+
+cat > /etc/dconf/db/local.d/locks/99-solvionyx-phase4-locks <<EOF
+/org/gnome/shell/favorite-apps
+/org/gnome/shell/disable-overview-on-startup
+/org/gnome/shell/extensions/dash-to-dock/dock-position
+/org/gnome/shell/extensions/dash-to-dock/dock-fixed
+/org/gnome/shell/extensions/dash-to-dock/autohide
+/org/gnome/shell/extensions/dash-to-dock/intellihide
+/org/gnome/shell/extensions/dash-to-dock/extend-height
+/org/gnome/shell/extensions/dash-to-dock/center-aligned
+/org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size
+/org/gnome/shell/extensions/dash-to-dock/background-opacity
+/org/gnome/shell/extensions/dash-to-dock/border-radius
+EOF
+
+dconf update
+'
+fi
+
+###############################################################################
+# PHASE 5 — SOLVY SYSTEM INTEGRATION (NON-INTRUSIVE)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Phase 5: Enabling Solvy system integration"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+# Autostart Solvy if installed
+if [ -f /usr/share/applications/solvy.desktop ]; then
+  mkdir -p /etc/xdg/autostart
+  cat > /etc/xdg/autostart/solvy.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Solvy AI Assistant
+Exec=solvy
+Icon=solvy
+Terminal=false
+X-GNOME-Autostart-enabled=true
+Categories=Utility;AI;
+EOF
+fi
+'
+fi
+
+###############################################################################
+# PHASE 6 — SOLVY LIVE INTELLIGENCE LAYER (SAFE / OPTIONAL)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Phase 6: Enabling Solvy live intelligence layer"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+###############################################################################
+# 1) Dock hover expansion (subtle, non-distracting)
+###############################################################################
+mkdir -p /etc/dconf/db/local.d
+
+cat > /etc/dconf/db/local.d/99-solvionyx-phase6 <<EOF
+[org/gnome/shell/extensions/dash-to-dock]
+animate-show-apps=true
+animation-time=0.18
+scroll-action="cycle-windows"
+EOF
+
+###############################################################################
+# 2) Solvy readiness signal (file-based, no hard dependency)
+###############################################################################
+SOLVY_STATE_DIR="/run/solvionyx"
+mkdir -p "$SOLVY_STATE_DIR"
+chmod 0755 "$SOLVY_STATE_DIR"
+
+# Create placeholder state file (used by Solvy if it wants)
+touch "$SOLVY_STATE_DIR/solvy-ready"
+chmod 0644 "$SOLVY_STATE_DIR/solvy-ready"
+
+###############################################################################
+# 3) Performance telemetry hook (read-only, safe)
+###############################################################################
+mkdir -p /usr/lib/solvionyx/hooks
+
+cat > /usr/lib/solvionyx/hooks/system-metrics.sh <<EOF
+#!/bin/sh
+# Lightweight metrics snapshot for Solvy (optional consumer)
+
+CPU_LOAD=\$(cut -d" " -f1 /proc/loadavg 2>/dev/null || echo 0)
+MEM_USED=\$(free -m 2>/dev/null | awk "/Mem:/ {print \$3}" || echo 0)
+GPU_PRESENT=\$(command -v nvidia-smi >/dev/null 2>&1 && echo 1 || echo 0)
+
+echo "cpu_load=\$CPU_LOAD"
+echo "mem_used_mb=\$MEM_USED"
+echo "gpu_present=\$GPU_PRESENT"
+EOF
+
+chmod +x /usr/lib/solvionyx/hooks/system-metrics.sh
+
+###############################################################################
+# 4) Optional Solvy systemd user unit (only if Solvy exists)
+###############################################################################
+if [ -f /usr/share/applications/solvy.desktop ]; then
+  mkdir -p /etc/systemd/user
+
+  cat > /etc/systemd/user/solvy.service <<EOF
+[Unit]
+Description=Solvy AI Assistant (User Session)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=solvy
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+fi
+
+###############################################################################
+# Apply dconf changes
+###############################################################################
+dconf update
+'
+fi
+
+###############################################################################
+# PHASE 7 — SOLVY AWARE DESKTOP + FIRST-BOOT INTELLIGENCE
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Phase 7: Enabling Solvy-aware desktop intelligence"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+###############################################################################
+# 1) Solvy runtime state channels (no assumptions)
+###############################################################################
+SOLVY_RUNTIME="/run/solvionyx"
+SOLVY_STATE="$SOLVY_RUNTIME/solvy-state"
+
+mkdir -p "$SOLVY_RUNTIME"
+chmod 0755 "$SOLVY_RUNTIME"
+
+# Default state files (used only if Solvy reads/writes them)
+for f in idle listening busy onboarding; do
+  touch "$SOLVY_STATE.$f"
+  chmod 0644 "$SOLVY_STATE.$f"
+done
+
+###############################################################################
+# 2) Desktop intent channel (performance modes)
+###############################################################################
+SOLVY_INTENT="/etc/solvionyx"
+mkdir -p "$SOLVY_INTENT"
+
+cat > "$SOLVY_INTENT/performance-mode" <<EOF
+balanced
+EOF
+chmod 0644 "$SOLVY_INTENT/performance-mode"
+
+###############################################################################
+# 3) Dock badge + pulse plumbing (CSS only, inert by default)
+###############################################################################
+THEME_DIR="/usr/share/gnome-shell/theme"
+CSS_FILE="$THEME_DIR/solvionyx-solvy.css"
+
+mkdir -p "$THEME_DIR"
+
+cat > "$CSS_FILE" <<EOF
+/* ===============================
+   SOLVY STATUS VISUAL CHANNEL
+   =============================== */
+
+/* Placeholder class hooks — activated only if Solvy toggles them */
+.solvy-idle { }
+.solvy-listening {
+  box-shadow: 0 0 18px rgba(0, 200, 255, 0.55);
+}
+.solvy-busy {
+  box-shadow: 0 0 18px rgba(255, 120, 0, 0.55);
+}
+
+/* Optional dock pulse (disabled unless class applied) */
+.solvy-pulse {
+  animation: solvyPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes solvyPulse {
+  0%   { box-shadow: 0 0 0 rgba(0,160,255,0.0); }
+  50%  { box-shadow: 0 0 20px rgba(0,160,255,0.6); }
+  100% { box-shadow: 0 0 0 rgba(0,160,255,0.0); }
+}
+EOF
+
+# Ensure CSS is imported (idempotent)
+if ! grep -q "solvionyx-solvy.css" "$THEME_DIR/gnome-shell.css" 2>/dev/null; then
+  sed -i "1i @import url('solvionyx-solvy.css');" "$THEME_DIR/gnome-shell.css" || true
+fi
+
+###############################################################################
+# 4) First-boot Solvy onboarding marker
+###############################################################################
+FIRST_BOOT_FLAG="/var/lib/solvionyx/first-boot"
+
+mkdir -p "$(dirname "$FIRST_BOOT_FLAG")"
+touch "$FIRST_BOOT_FLAG"
+chmod 0644 "$FIRST_BOOT_FLAG"
+
+###############################################################################
+# 5) Optional Solvy onboarding autostart (only if Solvy exists)
+###############################################################################
+if [ -f /usr/share/applications/solvy.desktop ]; then
+  mkdir -p /etc/xdg/autostart
+
+  cat > /etc/xdg/autostart/solvy-onboarding.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Solvy Onboarding
+Exec=solvy --onboarding
+Icon=solvy
+Terminal=false
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=GNOME;
+EOF
+fi
+'
+fi
+
+###############################################################################
+# PHASE 8 — VOICE WAKE WORD + GPU-AWARE THROTTLING + NOTIFICATIONS + POLICY
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Phase 8: Enabling voice/policy/telemetry plumbing (optional)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+###############################################################################
+# 1) Enterprise policy layer (Solvy reads, OS-owned)
+###############################################################################
+POLICY_DIR="/etc/solvionyx/policy.d"
+mkdir -p "$POLICY_DIR"
+
+cat > "$POLICY_DIR/00-default.policy" <<EOF
+# Solvionyx OS Policy (default)
+# Solvy may read and enforce these settings (optional, non-binding by OS)
+
+[solvy]
+enabled=true
+telemetry=local
+allow-notifications=true
+allow-voice=true
+
+[performance]
+mode=balanced
+max_cpu_pct=85
+max_mem_pct=85
+prefer_gpu=true
+gpu_throttle_on_thermal=true
+
+[security]
+allow-privileged-actions=false
+EOF
+chmod 0644 "$POLICY_DIR/00-default.policy"
+
+###############################################################################
+# 2) Runtime event channels (notifications + voice + state)
+###############################################################################
+RUNTIME_DIR="/run/solvionyx"
+EVENT_DIR="$RUNTIME_DIR/events"
+mkdir -p "$EVENT_DIR"
+chmod 0755 "$RUNTIME_DIR" "$EVENT_DIR"
+
+# FIFO channels (created at boot by runtime if tmpfs wipes them; placeholders here)
+# Solvy can write structured messages to these for system-side helpers
+touch "$EVENT_DIR/.keep"
+chmod 0644 "$EVENT_DIR/.keep"
+
+###############################################################################
+# 3) Notification bridge (dock/desktop notifications, optional)
+###############################################################################
+HOOK_DIR="/usr/lib/solvionyx/hooks"
+mkdir -p "$HOOK_DIR"
+
+cat > "$HOOK_DIR/notify-bridge.sh" <<EOF
+#!/bin/sh
+# Solvionyx notify bridge (optional consumer)
+# Usage: echo "TITLE|BODY" | /usr/lib/solvionyx/hooks/notify-bridge.sh
+
+if ! command -v notify-send >/dev/null 2>&1; then
+  exit 0
+fi
+
+line=\$(cat 2>/dev/null || true)
+title=\${line%%|*}
+body=\${line#*|}
+
+[ -n "\$title" ] || title="Solvionyx"
+[ "\$body" = "\$line" ] && body=""
+
+notify-send "\$title" "\$body" >/dev/null 2>&1 || true
+EOF
+chmod +x "$HOOK_DIR/notify-bridge.sh"
+
+###############################################################################
+# 4) GPU-aware throttling hook (read-only, safe)
+###############################################################################
+cat > "$HOOK_DIR/gpu-telemetry.sh" <<EOF
+#!/bin/sh
+# Solvionyx GPU telemetry (optional consumer)
+# Prints: gpu_present=0/1 gpu_temp_c=... gpu_util_pct=...
+
+gpu_present=0
+gpu_temp_c=""
+gpu_util_pct=""
+
+if command -v nvidia-smi >/dev/null 2>&1; then
+  gpu_present=1
+  gpu_temp_c=\$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 || true)
+  gpu_util_pct=\$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 || true)
+else
+  # Generic fallback: detect DRM devices (presence only)
+  if [ -d /sys/class/drm ]; then
+    if ls /sys/class/drm/card* >/dev/null 2>&1; then
+      gpu_present=1
+    fi
+  fi
+fi
+
+echo "gpu_present=\$gpu_present"
+[ -n "\$gpu_temp_c" ] && echo "gpu_temp_c=\$gpu_temp_c"
+[ -n "\$gpu_util_pct" ] && echo "gpu_util_pct=\$gpu_util_pct"
+EOF
+chmod +x "$HOOK_DIR/gpu-telemetry.sh"
+
+cat > "$HOOK_DIR/throttle-recommendation.sh" <<EOF
+#!/bin/sh
+# Solvionyx throttle recommendation (optional)
+# Emits a simple recommendation key Solvy may use:
+#   throttle=none|light|heavy
+
+policy_file="/etc/solvionyx/policy.d/00-default.policy"
+throttle="none"
+
+# Default thresholds (can be overridden by policy)
+temp_light=80
+temp_heavy=88
+
+if [ -f "\$policy_file" ]; then
+  # Read only simple key=value lines if present (non-strict)
+  val=\$(awk -F= "/^gpu_temp_light=/ {print \\$2}" "\$policy_file" 2>/dev/null | tr -d " " | head -n1 || true)
+  [ -n "\$val" ] && temp_light=\$val
+  val=\$(awk -F= "/^gpu_temp_heavy=/ {print \\$2}" "\$policy_file" 2>/dev/null | tr -d " " | head -n1 || true)
+  [ -n "\$val" ] && temp_heavy=\$val
+fi
+
+temp=\$(/usr/lib/solvionyx/hooks/gpu-telemetry.sh 2>/dev/null | awk -F= "/^gpu_temp_c=/ {print \\$2}" | head -n1 || true)
+
+if [ -n "\$temp" ]; then
+  if [ "\$temp" -ge "\$temp_heavy" ] 2>/dev/null; then
+    throttle="heavy"
+  elif [ "\$temp" -ge "\$temp_light" ] 2>/dev/null; then
+    throttle="light"
+  fi
+fi
+
+echo "throttle=\$throttle"
+EOF
+chmod +x "$HOOK_DIR/throttle-recommendation.sh"
+
+###############################################################################
+# 5) Voice wake word plumbing (no forced deps; Solvy may consume)
+###############################################################################
+VOICE_DIR="/etc/solvionyx/voice"
+mkdir -p "$VOICE_DIR"
+
+cat > "$VOICE_DIR/wakeword.conf" <<EOF
+# Solvionyx Voice Wake Word (optional)
+enabled=true
+wake_word=solvy
+input=default
+sensitivity=0.60
+EOF
+chmod 0644 "$VOICE_DIR/wakeword.conf"
+
+###############################################################################
+# 6) Optional systemd user units (only if Solvy is available)
+###############################################################################
+if command -v systemctl >/dev/null 2>&1; then
+  mkdir -p /etc/systemd/user
+
+  # Event listener: reads event messages (if any) and converts to notifications
+  cat > /etc/systemd/user/solvionyx-event-bridge.service <<EOF
+[Unit]
+Description=Solvionyx Event Bridge (notifications)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -lc "if [ -p /run/solvionyx/events/notify.fifo ]; then while read -r line < /run/solvionyx/events/notify.fifo; do printf '%s' \"\$line\" | /usr/lib/solvionyx/hooks/notify-bridge.sh; done; else sleep infinity; fi"
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+
+  # Create FIFOs at session start (tmpfs-safe)
+  cat > /etc/systemd/user/solvionyx-event-fifos.service <<EOF
+[Unit]
+Description=Solvionyx Event FIFOs
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -lc "mkdir -p /run/solvionyx/events; [ -p /run/solvionyx/events/notify.fifo ] || mkfifo /run/solvionyx/events/notify.fifo; chmod 0622 /run/solvionyx/events/notify.fifo"
+
+[Install]
+WantedBy=default.target
+EOF
+
+  # Enable units only if Solvy is present (desktop launcher indicates integration intent)
+  if [ -f /usr/share/applications/solvy.desktop ]; then
+    systemctl --global enable solvionyx-event-fifos.service >/dev/null 2>&1 || true
+    systemctl --global enable solvionyx-event-bridge.service >/dev/null 2>&1 || true
+  fi
+fi
+'
+fi
+
+###############################################################################
+# PHASE 9 — CLOUD AI PROVIDERS (OPENAI + GEMINI) — OS PLUMBING ONLY
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Phase 9: Enabling cloud AI provider interfaces (OpenAI + Gemini)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+###############################################################################
+# 1) Provider configuration directory (OS-owned, user-populated)
+###############################################################################
+PROVIDER_DIR="/etc/solvionyx/ai/providers"
+mkdir -p "$PROVIDER_DIR"
+
+###############################################################################
+# OpenAI provider config (NO KEY EMBEDDED)
+###############################################################################
+cat > "$PROVIDER_DIR/openai.conf" <<EOF
+# Solvionyx AI Provider — OpenAI
+enabled=false
+provider=openai
+api_base=https://api.openai.com/v1
+model_default=gpt-4.1-mini
+timeout_sec=30
+
+# API key must be provided AFTER install:
+# export OPENAI_API_KEY=...
+# or write to /etc/solvionyx/ai/keys/openai.key
+EOF
+chmod 0644 "$PROVIDER_DIR/openai.conf"
+
+###############################################################################
+# Google Gemini provider config (NO KEY EMBEDDED)
+###############################################################################
+cat > "$PROVIDER_DIR/gemini.conf" <<EOF
+# Solvionyx AI Provider — Google Gemini
+enabled=false
+provider=gemini
+api_base=https://generativelanguage.googleapis.com
+model_default=gemini-1.5-pro
+timeout_sec=30
+
+# API key must be provided AFTER install:
+# export GEMINI_API_KEY=...
+# or write to /etc/solvionyx/ai/keys/gemini.key
+EOF
+chmod 0644 "$PROVIDER_DIR/gemini.conf"
+
+###############################################################################
+# 2) Secure key storage directory (NOT populated)
+###############################################################################
+KEY_DIR="/etc/solvionyx/ai/keys"
+mkdir -p "$KEY_DIR"
+chmod 0700 "$KEY_DIR"
+
+###############################################################################
+# 3) Provider selector (simple, deterministic)
+###############################################################################
+cat > /etc/solvionyx/ai/provider <<EOF
+# active provider: openai | gemini | local
+local
+EOF
+chmod 0644 /etc/solvionyx/ai/provider
+
+###############################################################################
+# 4) Unified AI request interface (CLI contract for Solvy)
+###############################################################################
+BIN_DIR="/usr/lib/solvionyx/ai"
+mkdir -p "$BIN_DIR"
+
+cat > "$BIN_DIR/ai-provider-info.sh" <<EOF
+#!/bin/sh
+# Prints active AI provider + model (read-only)
+
+provider=\$(sed -n "1p" /etc/solvionyx/ai/provider 2>/dev/null || echo local)
+conf="/etc/solvionyx/ai/providers/\$provider.conf"
+
+echo "provider=\$provider"
+
+if [ -f "\$conf" ]; then
+  awk -F= "/^model_default=/ {print \"model=\"\\\$2}" "\$conf"
+  awk -F= "/^api_base=/ {print \"api_base=\"\\\$2}" "\$conf"
+fi
+EOF
+chmod +x "$BIN_DIR/ai-provider-info.sh"
+
+###############################################################################
+# 5) Network availability guard (Solvy-safe)
+###############################################################################
+cat > "$BIN_DIR/ai-network-check.sh" <<EOF
+#!/bin/sh
+# Returns 0 if network likely available, 1 otherwise
+
+if command -v nmcli >/dev/null 2>&1; then
+  nmcli -t -f STATE general status 2>/dev/null | grep -q connected && exit 0
+fi
+
+ping -c1 -W1 8.8.8.8 >/dev/null 2>&1 && exit 0
+exit 1
+EOF
+chmod +x "$BIN_DIR/ai-network-check.sh"
+
+###############################################################################
+# 6) Policy integration (Phase 8 compatibility)
+###############################################################################
+POLICY_FILE="/etc/solvionyx/policy.d/00-default.policy"
+
+if [ -f "\$POLICY_FILE" ]; then
+  if ! grep -q "\\[ai\\]" "\$POLICY_FILE"; then
+    cat >> "\$POLICY_FILE" <<EOF
+
+[ai]
+allow-cloud=true
+default-provider=local
+fallback-on-failure=true
+EOF
+  fi
+fi
+'
+fi
+
+###############################################################################
 # CALAMARES CONFIG + BRANDING
 ###############################################################################
 sudo install -d "$CHROOT_DIR/etc/calamares/modules/shellprocess"
@@ -715,6 +1321,32 @@ sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"*.py 2>/dev/null || 
 sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d"
 sudo cp -a "$BRANDING_SRC/desktop-capabilities/." \
   "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/"
+
+###############################################################################
+# PHASE 11 — SOLVY FIRST-BOOT API KEY UI
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Installing Solvy first-boot onboarding UI"
+
+  sudo install -d "$CHROOT_DIR/usr/share/solvy/onboarding"
+  sudo cp -a "$REPO_ROOT/solvy/onboarding/." \
+    "$CHROOT_DIR/usr/share/solvy/onboarding/"
+
+  sudo chmod +x "$CHROOT_DIR/usr/share/solvy/onboarding/solvy-onboarding.py"
+
+  sudo install -d "$CHROOT_DIR/usr/share/applications"
+  sudo install -m 0644 \
+    "$REPO_ROOT/solvy/onboarding/solvy-onboarding.desktop" \
+    "$CHROOT_DIR/usr/share/applications/solvy-onboarding.desktop"
+
+  sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+  sudo ln -sf \
+    /usr/share/applications/solvy-onboarding.desktop \
+    "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop"
+
+  sudo install -d "$CHROOT_DIR/etc/solvionyx/ai/keys"
+  sudo install -d "$CHROOT_DIR/var/lib/solvionyx"
+fi
 
 ###############################################################################
 # SOLVY AI ASSISTANT — install + launcher + autostart
