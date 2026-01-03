@@ -25,9 +25,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BRANDING_SRC="$REPO_ROOT/branding"
 CALAMARES_SRC="$REPO_ROOT/branding/calamares"
 WELCOME_SRC="$REPO_ROOT/welcome-app"
-SOLVY_SRC="$REPO_ROOT/solvy"
 SECUREBOOT_DIR="$REPO_ROOT/secureboot"
 
+# Optional components (CI-safe)
+SOLVY_SRC="$REPO_ROOT/solvy"
 ###############################################################################
 # BRANDING CANONICAL ASSETS (SINGLE SOURCE OF TRUTH)
 ###############################################################################
@@ -1002,7 +1003,7 @@ sudo cp -a "$BRANDING_SRC/desktop-capabilities/." \
 ###############################################################################
 # PHASE 11 — SOLVY FIRST-BOOT API KEY UI
 ###############################################################################
-if [ "$EDITION" = "gnome" ]; then
+if [ "$EDITION" = "gnome" ] && [ -d "$REPO_ROOT/solvy/onboarding" ]; then
   log "Installing Solvy first-boot onboarding UI"
   sudo install -d "$CHROOT_DIR/usr/share/solvy/onboarding"
   sudo cp -a "$REPO_ROOT/solvy/onboarding/." "$CHROOT_DIR/usr/share/solvy/onboarding/" || true
@@ -1020,23 +1021,30 @@ if [ "$EDITION" = "gnome" ]; then
   sudo install -d "$CHROOT_DIR/etc/solvionyx/ai/keys"
   sudo install -d "$CHROOT_DIR/var/lib/solvionyx"
 fi
+else
+  log "Solvy onboarding UI not present — skipping"
+fi
 
 ###############################################################################
-# SOLVY AI ASSISTANT — install + launcher + autostart
+# SOLVY AI ASSISTANT — optional (CI-safe)
 ###############################################################################
-log "Installing Solvy AI Assistant"
-[ -d "$SOLVY_SRC" ] || fail "Missing SOLVY source directory: $SOLVY_SRC (expected $REPO_ROOT/solvy)"
+log "Solvy AI Assistant (optional)"
 
-sudo install -d "$CHROOT_DIR/usr/share/solvionyx/solvy"
-sudo cp -a "$SOLVY_SRC/." "$CHROOT_DIR/usr/share/solvionyx/solvy/"
-sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/solvy/solvy.py" 2>/dev/null || true
+if [ -d "$SOLVY_SRC" ]; then
+  log "Installing Solvy AI Assistant"
 
-sudo install -d "$CHROOT_DIR/usr/share/applications"
-sudo install -m 0644 "$SOLVY_SRC/solvy.desktop" \
-  "$CHROOT_DIR/usr/share/applications/solvy.desktop" || true
+  sudo install -d "$CHROOT_DIR/usr/share/solvionyx/solvy"
+  sudo cp -a "$SOLVY_SRC/." "$CHROOT_DIR/usr/share/solvionyx/solvy/"
+  sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/solvy/solvy.py" 2>/dev/null || true
 
-sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
-sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-autostart.desktop" >/dev/null <<'EOF'
+  # Desktop launcher (dock pin target)
+  sudo install -d "$CHROOT_DIR/usr/share/applications"
+  sudo install -m 0644 "$SOLVY_SRC/solvy.desktop" \
+    "$CHROOT_DIR/usr/share/applications/solvy.desktop" || true
+
+  # Autostart (system-wide)
+  sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+  sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-autostart.desktop" >/dev/null <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Solvy AI Assistant
@@ -1048,17 +1056,21 @@ X-GNOME-Autostart-enabled=true
 Categories=Utility;System;AI;
 EOF
 
-if [ -f "$BRANDING_SRC/logo/solvy.png" ]; then
-  sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
-  sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
-    "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvy.png"
-  sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-  sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
-    "$CHROOT_DIR/usr/share/pixmaps/solvy.png"
-  chroot_sh <<'EOF'
-set -e
-gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
-EOF
+  # Icon (optional)
+  if [ -f "$BRANDING_SRC/logo/solvy.png" ]; then
+    sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
+    sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
+      "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvy.png"
+
+    sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+    sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
+      "$CHROOT_DIR/usr/share/pixmaps/solvy.png"
+
+    sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+  fi
+
+else
+  log "Solvy source not present — skipping Solvy installation (CI-safe)"
 fi
 
 ###############################################################################
