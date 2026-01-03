@@ -410,7 +410,7 @@ BMS="blur-my-shell@aunetx"
 
 mkdir -p /etc/dconf/db/local.d
 
-cat > /etc/dconf/db/local.d/00-solvionyx-shell <<EOF
+cat > /etc/dconf/db/local.d/00-solvionyx-shell <<'EOF'
 [org/gnome/shell]
 enabled-extensions=['$D2D','$APPIND','$JP','$BMS']
 disable-overview-on-startup=true
