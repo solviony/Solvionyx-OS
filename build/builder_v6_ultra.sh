@@ -134,7 +134,7 @@ mount_chroot_fs
 # Enable non-free-firmware early (Bookworm)
 sudo chroot "$CHROOT_DIR" bash -lc "
 set -e
-cat > /etc/apt/sources.list <<EOF
+cat > /etc/apt/sources.list <<'EOF'
 deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
@@ -353,7 +353,7 @@ fi
 ###############################################################################
 sudo chroot "$CHROOT_DIR" bash -lc '
 set -e
-cat > /usr/lib/os-release <<EOF
+cat > /usr/lib/os-release <<'EOF'
 NAME="Solvionyx OS"
 PRETTY_NAME="Solvionyx OS Aurora"
 ID=solvionyx
@@ -378,7 +378,7 @@ sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor || t
 log "Overriding lsb_release to Solvionyx OS"
 sudo chroot "$CHROOT_DIR" bash -lc '
 set -e
-cat > /etc/lsb-release <<EOF
+cat > /etc/lsb-release <<'EOF'
 DISTRIB_ID=Solvionyx
 DISTRIB_RELEASE=Aurora
 DISTRIB_CODENAME=aurora
@@ -481,7 +481,7 @@ if [ "$EDITION" = "gnome" ]; then
 set -e
 mkdir -p /etc/dconf/db/local.d/locks
 
-cat > /etc/dconf/db/local.d/locks/00-solvionyx-locks <<EOF
+cat > /etc/dconf/db/local.d/locks/00-solvionyx-locks <<'EOF'
 /org/gnome/shell/enabled-extensions
 /org/gnome/shell/favorite-apps
 /org/gnome/shell/disable-overview-on-startup
@@ -522,7 +522,7 @@ chmod 0440 /etc/sudoers.d/99-liveuser
 
 if [ \"$EDITION\" = \"gnome\" ]; then
   mkdir -p /etc/gdm3
-  cat > /etc/gdm3/daemon.conf <<EOF
+  cat > /etc/gdm3/daemon.conf <<'EOF'
 [daemon]
 AutomaticLoginEnable=true
 AutomaticLogin=liveuser
@@ -543,7 +543,7 @@ glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
 mkdir -p /etc/dconf/db/local.d
 mkdir -p /etc/dconf/db/local.d/locks
 
-cat > /etc/dconf/db/local.d/00-solvionyx-shell <<EOF
+cat > /etc/dconf/db/local.d/00-solvionyx-shell <<'EOF'
 [org/gnome/shell]
 enabled-extensions=[
   "dash-to-dock@micxgx.gmail.com",
@@ -566,7 +566,7 @@ clock-show-date=false
 clock-show-seconds=false
 EOF
 
-cat > /etc/dconf/db/local.d/10-solvionyx-dock <<EOF
+cat > /etc/dconf/db/local.d/10-solvionyx-dock <<'EOF'
 [org/gnome/shell/extensions/dash-to-dock]
 dock-position='BOTTOM'
 extend-height=false
@@ -587,7 +587,7 @@ custom-theme-running-dots-color='rgb(0,160,255)'
 custom-theme-running-dots-border-color='rgb(0,200,255)'
 EOF
 
-cat > /etc/dconf/db/local.d/20-solvionyx-just-perfection <<EOF
+cat > /etc/dconf/db/local.d/20-solvionyx-just-perfection <<'EOF'
 [org/gnome/shell/extensions/just-perfection]
 panel=false
 activities-button=false
@@ -596,7 +596,7 @@ clock-menu=false
 workspace-switcher-size=0
 EOF
 
-cat > /etc/dconf/db/local.d/30-solvionyx-blur <<EOF
+cat > /etc/dconf/db/local.d/30-solvionyx-blur <<'EOF'
 [org/gnome/shell/extensions/blur-my-shell]
 panel=true
 panel-opacity=0.55
@@ -658,7 +658,7 @@ set -e
 mkdir -p /etc/dconf/db/local.d
 mkdir -p /etc/dconf/db/local.d/locks
 
-cat > /etc/dconf/db/local.d/99-solvionyx-phase4 <<EOF
+cat > /etc/dconf/db/local.d/99-solvionyx-phase4 <<'EOF'
 [org/gnome/shell]
 disable-overview-on-startup=true
 favorite-apps=[
@@ -700,7 +700,7 @@ show-trash=false
 running-indicator-style='DOTS'
 EOF
 
-cat > /etc/dconf/db/local.d/locks/99-solvionyx-phase4-locks <<EOF
+cat > /etc/dconf/db/local.d/locks/99-solvionyx-phase4-locks <<'EOF'
 /org/gnome/shell/favorite-apps
 /org/gnome/shell/disable-overview-on-startup
 /org/gnome/shell/extensions/dash-to-dock/dock-position
@@ -730,7 +730,7 @@ set -e
 # Autostart Solvy if installed
 if [ -f /usr/share/applications/solvy.desktop ]; then
   mkdir -p /etc/xdg/autostart
-  cat > /etc/xdg/autostart/solvy.desktop <<EOF
+  cat > /etc/xdg/autostart/solvy.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Solvy AI Assistant
@@ -758,7 +758,7 @@ set -e
 ###############################################################################
 mkdir -p /etc/dconf/db/local.d
 
-cat > /etc/dconf/db/local.d/99-solvionyx-phase6 <<EOF
+cat > /etc/dconf/db/local.d/99-solvionyx-phase6 <<'EOF'
 [org/gnome/shell/extensions/dash-to-dock]
 animate-show-apps=true
 animation-time=0.18
@@ -781,7 +781,7 @@ chmod 0644 "$SOLVY_STATE_DIR/solvy-ready"
 ###############################################################################
 mkdir -p /usr/lib/solvionyx/hooks
 
-cat > /usr/lib/solvionyx/hooks/system-metrics.sh <<EOF
+cat > /usr/lib/solvionyx/hooks/system-metrics.sh <<'EOF'
 #!/bin/sh
 # Lightweight metrics snapshot for Solvy (optional consumer)
 
@@ -802,7 +802,7 @@ chmod +x /usr/lib/solvionyx/hooks/system-metrics.sh
 if [ -f /usr/share/applications/solvy.desktop ]; then
   mkdir -p /etc/systemd/user
 
-  cat > /etc/systemd/user/solvy.service <<EOF
+  cat > /etc/systemd/user/solvy.service <<'EOF'
 [Unit]
 Description=Solvy AI Assistant (User Session)
 After=graphical-session.target
@@ -855,7 +855,7 @@ done
 SOLVY_INTENT="/etc/solvionyx"
 mkdir -p "$SOLVY_INTENT"
 
-cat > "$SOLVY_INTENT/performance-mode" <<EOF
+cat > "$SOLVY_INTENT/performance-mode" <<'EOF'
 balanced
 EOF
 chmod 0644 "$SOLVY_INTENT/performance-mode"
@@ -868,7 +868,7 @@ CSS_FILE="$THEME_DIR/solvionyx-solvy.css"
 
 mkdir -p "$THEME_DIR"
 
-cat > "$CSS_FILE" <<EOF
+cat > "$CSS_FILE" <<'EOF'
 /* ===============================
    SOLVY STATUS VISUAL CHANNEL
    =============================== */
@@ -914,7 +914,7 @@ chmod 0644 "$FIRST_BOOT_FLAG"
 if [ -f /usr/share/applications/solvy.desktop ]; then
   mkdir -p /etc/xdg/autostart
 
-  cat > /etc/xdg/autostart/solvy-onboarding.desktop <<EOF
+  cat > /etc/xdg/autostart/solvy-onboarding.desktop <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Solvy Onboarding
@@ -943,7 +943,7 @@ set -e
 POLICY_DIR="/etc/solvionyx/policy.d"
 mkdir -p "$POLICY_DIR"
 
-cat > "$POLICY_DIR/00-default.policy" <<EOF
+cat > "$POLICY_DIR/00-default.policy" <<'EOF'
 # Solvionyx OS Policy (default)
 # Solvy may read and enforce these settings (optional, non-binding by OS)
 
@@ -984,7 +984,7 @@ chmod 0644 "$EVENT_DIR/.keep"
 HOOK_DIR="/usr/lib/solvionyx/hooks"
 mkdir -p "$HOOK_DIR"
 
-cat > "$HOOK_DIR/notify-bridge.sh" <<EOF
+cat > "$HOOK_DIR/notify-bridge.sh" <<'EOF'
 #!/bin/sh
 # Solvionyx notify bridge (optional consumer)
 # Usage: echo "TITLE|BODY" | /usr/lib/solvionyx/hooks/notify-bridge.sh
@@ -1007,7 +1007,7 @@ chmod +x "$HOOK_DIR/notify-bridge.sh"
 ###############################################################################
 # 4) GPU-aware throttling hook (read-only, safe)
 ###############################################################################
-cat > "$HOOK_DIR/gpu-telemetry.sh" <<EOF
+cat > "$HOOK_DIR/gpu-telemetry.sh" <<'EOF'
 #!/bin/sh
 # Solvionyx GPU telemetry (optional consumer)
 # Prints: gpu_present=0/1 gpu_temp_c=... gpu_util_pct=...
@@ -1035,7 +1035,7 @@ echo "gpu_present=\$gpu_present"
 EOF
 chmod +x "$HOOK_DIR/gpu-telemetry.sh"
 
-cat > "$HOOK_DIR/throttle-recommendation.sh" <<EOF
+cat > "$HOOK_DIR/throttle-recommendation.sh" <<'EOF'
 #!/bin/sh
 # Solvionyx throttle recommendation (optional)
 # Emits a simple recommendation key Solvy may use:
@@ -1076,7 +1076,7 @@ chmod +x "$HOOK_DIR/throttle-recommendation.sh"
 VOICE_DIR="/etc/solvionyx/voice"
 mkdir -p "$VOICE_DIR"
 
-cat > "$VOICE_DIR/wakeword.conf" <<EOF
+cat > "$VOICE_DIR/wakeword.conf" <<'EOF'
 # Solvionyx Voice Wake Word (optional)
 enabled=true
 wake_word=solvy
@@ -1092,7 +1092,7 @@ if command -v systemctl >/dev/null 2>&1; then
   mkdir -p /etc/systemd/user
 
   # Event listener: reads event messages (if any) and converts to notifications
-  cat > /etc/systemd/user/solvionyx-event-bridge.service <<EOF
+  cat > /etc/systemd/user/solvionyx-event-bridge.service <<'EOF'
 [Unit]
 Description=Solvionyx Event Bridge (notifications)
 After=graphical-session.target
@@ -1108,7 +1108,7 @@ WantedBy=default.target
 EOF
 
   # Create FIFOs at session start (tmpfs-safe)
-  cat > /etc/systemd/user/solvionyx-event-fifos.service <<EOF
+  cat > /etc/systemd/user/solvionyx-event-fifos.service <<'EOF'
 [Unit]
 Description=Solvionyx Event FIFOs
 After=graphical-session.target
@@ -1148,7 +1148,7 @@ mkdir -p "$PROVIDER_DIR"
 ###############################################################################
 # OpenAI provider config (NO KEY EMBEDDED)
 ###############################################################################
-cat > "$PROVIDER_DIR/openai.conf" <<EOF
+cat > "$PROVIDER_DIR/openai.conf" <<'EOF'
 # Solvionyx AI Provider — OpenAI
 enabled=false
 provider=openai
@@ -1165,7 +1165,7 @@ chmod 0644 "$PROVIDER_DIR/openai.conf"
 ###############################################################################
 # Google Gemini provider config (NO KEY EMBEDDED)
 ###############################################################################
-cat > "$PROVIDER_DIR/gemini.conf" <<EOF
+cat > "$PROVIDER_DIR/gemini.conf" <<'EOF'
 # Solvionyx AI Provider — Google Gemini
 enabled=false
 provider=gemini
@@ -1189,7 +1189,7 @@ chmod 0700 "$KEY_DIR"
 ###############################################################################
 # 3) Provider selector (simple, deterministic)
 ###############################################################################
-cat > /etc/solvionyx/ai/provider <<EOF
+cat > /etc/solvionyx/ai/provider <<'EOF'
 # active provider: openai | gemini | local
 local
 EOF
@@ -1201,7 +1201,7 @@ chmod 0644 /etc/solvionyx/ai/provider
 BIN_DIR="/usr/lib/solvionyx/ai"
 mkdir -p "$BIN_DIR"
 
-cat > "$BIN_DIR/ai-provider-info.sh" <<EOF
+cat > "$BIN_DIR/ai-provider-info.sh" <<'EOF'
 #!/bin/sh
 # Prints active AI provider + model (read-only)
 
@@ -1220,7 +1220,7 @@ chmod +x "$BIN_DIR/ai-provider-info.sh"
 ###############################################################################
 # 5) Network availability guard (Solvy-safe)
 ###############################################################################
-cat > "$BIN_DIR/ai-network-check.sh" <<EOF
+cat > "$BIN_DIR/ai-network-check.sh" <<'EOF'
 #!/bin/sh
 # Returns 0 if network likely available, 1 otherwise
 
@@ -1240,7 +1240,7 @@ POLICY_FILE="/etc/solvionyx/policy.d/00-default.policy"
 
 if [ -f "\$POLICY_FILE" ]; then
   if ! grep -q "\\[ai\\]" "\$POLICY_FILE"; then
-    cat >> "\$POLICY_FILE" <<EOF
+    cat >> "\$POLICY_FILE" <<'EOF'
 
 [ai]
 allow-cloud=true
@@ -1361,7 +1361,7 @@ sudo install -m 0644 "$REPO_ROOT/control-center/solvionyx-control-center.desktop
 sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
 sudo cp -a "$BRANDING_SRC/plymouth/." "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/"
 
-cat > "$CHROOT_DIR/etc/plymouth/plymouthd.conf" <<EOF
+cat > "$CHROOT_DIR/etc/plymouth/plymouthd.conf" <<'EOF'
 [Daemon]
 Theme=solvionyx
 EOF
