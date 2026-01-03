@@ -1001,13 +1001,17 @@ sudo cp -a "$BRANDING_SRC/desktop-capabilities/." \
   "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/" || true
 
 ###############################################################################
-# PHASE 11 — SOLVY FIRST-BOOT API KEY UI
+# PHASE 11 — SOLVY FIRST-BOOT API KEY UI (OPTIONAL, CI-SAFE)
 ###############################################################################
 if [ "$EDITION" = "gnome" ] && [ -d "$REPO_ROOT/solvy/onboarding" ]; then
   log "Installing Solvy first-boot onboarding UI"
+
   sudo install -d "$CHROOT_DIR/usr/share/solvy/onboarding"
-  sudo cp -a "$REPO_ROOT/solvy/onboarding/." "$CHROOT_DIR/usr/share/solvy/onboarding/" || true
-  sudo chmod +x "$CHROOT_DIR/usr/share/solvy/onboarding/solvy-onboarding.py" 2>/dev/null || true
+  sudo cp -a "$REPO_ROOT/solvy/onboarding/." \
+    "$CHROOT_DIR/usr/share/solvy/onboarding/" || true
+
+  sudo chmod +x \
+    "$CHROOT_DIR/usr/share/solvy/onboarding/solvy-onboarding.py" 2>/dev/null || true
 
   sudo install -d "$CHROOT_DIR/usr/share/applications"
   sudo install -m 0644 \
@@ -1015,21 +1019,19 @@ if [ "$EDITION" = "gnome" ] && [ -d "$REPO_ROOT/solvy/onboarding" ]; then
     "$CHROOT_DIR/usr/share/applications/solvy-onboarding.desktop" || true
 
   sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
-  sudo ln -sf /usr/share/applications/solvy-onboarding.desktop \
+  sudo ln -sf \
+    /usr/share/applications/solvy-onboarding.desktop \
     "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop" || true
 
   sudo install -d "$CHROOT_DIR/etc/solvionyx/ai/keys"
   sudo install -d "$CHROOT_DIR/var/lib/solvionyx"
-fi
 else
-  log "Solvy onboarding UI not present — skipping"
+  log "Solvy onboarding UI not present — skipping (CI-safe)"
 fi
 
 ###############################################################################
-# SOLVY AI ASSISTANT — optional (CI-safe)
+# SOLVY AI ASSISTANT — OPTIONAL (CI-SAFE)
 ###############################################################################
-log "Solvy AI Assistant (optional)"
-
 if [ -d "$SOLVY_SRC" ]; then
   log "Installing Solvy AI Assistant"
 
@@ -1037,18 +1039,15 @@ if [ -d "$SOLVY_SRC" ]; then
   sudo cp -a "$SOLVY_SRC/." "$CHROOT_DIR/usr/share/solvionyx/solvy/"
   sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/solvy/solvy.py" 2>/dev/null || true
 
-  # Desktop launcher (dock pin target)
   sudo install -d "$CHROOT_DIR/usr/share/applications"
   sudo install -m 0644 "$SOLVY_SRC/solvy.desktop" \
     "$CHROOT_DIR/usr/share/applications/solvy.desktop" || true
 
-  # Autostart (system-wide)
   sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
   sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-autostart.desktop" >/dev/null <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Solvy AI Assistant
-Comment=Solvionyx OS intelligent assistant
 Exec=/usr/share/solvionyx/solvy/solvy.py
 Icon=solvy
 Terminal=false
@@ -1056,21 +1055,14 @@ X-GNOME-Autostart-enabled=true
 Categories=Utility;System;AI;
 EOF
 
-  # Icon (optional)
   if [ -f "$BRANDING_SRC/logo/solvy.png" ]; then
     sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
     sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
       "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvy.png"
-
-    sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-    sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
-      "$CHROOT_DIR/usr/share/pixmaps/solvy.png"
-
     sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
   fi
-
 else
-  log "Solvy source not present — skipping Solvy installation (CI-safe)"
+  log "Solvy source not present — skipping Solvy install (CI-safe)"
 fi
 
 ###############################################################################
