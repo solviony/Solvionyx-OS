@@ -398,6 +398,88 @@ EOL
 EOF
 
 ###############################################################################
+# GNOME INITIAL SETUP — SOLVIONYX BRANDING (FIRST BOOT USER CREATION)
+###############################################################################
+log "Branding GNOME Initial Setup (Solvionyx)"
+
+# 1) GNOME Initial Setup installer branding (logo)
+sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup/branding"
+
+sudo install -m 0644 \
+  "$BRANDING_SRC/logo/Installer logo.png" \
+  "$CHROOT_DIR/usr/share/gnome-initial-setup/branding/logo.png"
+
+# 2) Rename Initial Setup experience
+sudo install -d "$CHROOT_DIR/usr/share/applications"
+
+sudo tee "$CHROOT_DIR/usr/share/applications/org.gnome.InitialSetup.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Welcome to Solvionyx OS
+Comment=Set up your Solvionyx device
+Exec=gnome-initial-setup
+Icon=solvionyx
+NoDisplay=true
+Categories=GNOME;System;
+EOF
+
+# 3) System icons (desktop / light / dark)
+sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
+
+sudo install -m 0644 \
+  "$BRANDING_SRC/logo/Desktop icon.png" \
+  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
+
+sudo install -m 0644 \
+  "$BRANDING_SRC/logo/OS default logo light mode.png" \
+  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx-light.png"
+
+sudo install -m 0644 \
+  "$BRANDING_SRC/logo/OS default logo dark mode.png" \
+  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx-dark.png"
+
+# 4) Terminal / CLI branding (optional but clean)
+sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+
+sudo install -m 0644 \
+  "$BRANDING_SRC/logo/Terminal logo.png" \
+  "$CHROOT_DIR/usr/share/pixmaps/solvionyx-terminal.png"
+
+# 5) Refresh icon cache
+sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+
+###############################################################################
+# GNOME INITIAL SETUP — SOLVIONYX BRANDING
+###############################################################################
+log "Branding GNOME Initial Setup (Solvionyx)"
+
+sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup/branding"
+
+# Preferred SVG (if you have it)
+if [ -f "$BRANDING_SRC/logo/solvionyx.svg" ]; then
+  sudo install -m 0644 \
+    "$BRANDING_SRC/logo/solvionyx.svg" \
+    "$CHROOT_DIR/usr/share/gnome-initial-setup/branding/logo.svg"
+else
+  # Fallback PNG
+  sudo install -m 0644 \
+    "$SOLVIONYX_LOGO" \
+    "$CHROOT_DIR/usr/share/gnome-initial-setup/branding/logo.png"
+fi
+
+###############################################################################
+# GNOME INITIAL SETUP — VENDOR MESSAGE
+###############################################################################
+sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup/vendor"
+
+sudo tee "$CHROOT_DIR/usr/share/gnome-initial-setup/vendor/vendor.conf" >/dev/null <<'EOF'
+[Vendor]
+Name=Solvionyx OS
+Welcome=Welcome to Solvionyx OS
+Description=Set up your Solvionyx device and get started with Solvy AI
+EOF
+
+###############################################################################
 # GNOME — Solvionyx Glass + Dock/Taskbar defaults
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
@@ -503,7 +585,7 @@ EOF
 fi
 
 ###############################################################################
-# LIVE USER + AUTOLOGIN
+# LIVE USER + AUTOLOGIN (LIVE SESSION ONLY)
 ###############################################################################
 sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
   HOME=/root TERM="${TERM:-xterm}" \
@@ -511,11 +593,14 @@ sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
   EDITION="$EDITION" \
   bash -s <<'EOF'
 set -e
+
+# Create live user (ISO only)
 useradd -m -s /bin/bash -G sudo,adm,audio,video,netdev liveuser || true
 echo 'liveuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-liveuser
 chmod 0440 /etc/sudoers.d/99-liveuser
 
-if [ "$EDITION" = "gnome" ]; then
+# Autologin ONLY for live ISO
+if [ "$EDITION" = "gnome" ] && [ -d /lib/live ]; then
   mkdir -p /etc/gdm3
   cat > /etc/gdm3/daemon.conf <<'EOL'
 [daemon]
@@ -524,7 +609,38 @@ AutomaticLogin=liveuser
 WaylandEnable=true
 EOL
 fi
+
 EOF
+
+###############################################################################
+# FORCE DASH-TO-DOCK TO ACT AS TASKBAR (LIVE SESSION FIX)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Forcing Dash-to-Dock to appear as taskbar for liveuser"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+USER_DB="/var/lib/dconf"
+mkdir -p "$USER_DB"
+
+# Ensure system dconf is compiled
+dconf update || true
+
+# Apply gsettings defaults for liveuser
+sudo -u liveuser DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+  gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed true || true
+
+sudo -u liveuser DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+  gsettings set org.gnome.shell.extensions.dash-to-dock autohide false || true
+
+sudo -u liveuser DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+  gsettings set org.gnome.shell.extensions.dash-to-dock intellihide false || true
+
+sudo -u liveuser DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+  gsettings set org.gnome.shell.extensions.dash-to-dock dock-position BOTTOM || true
+'
+fi
 
 ###############################################################################
 # GNOME — SOLVIONYX UI DEFAULTS
@@ -816,7 +932,7 @@ if [ -f /usr/share/applications/solvy.desktop ]; then
 [Desktop Entry]
 Type=Application
 Name=Solvy Onboarding
-Exec=solvy --onboarding
+#Exec=solvy --onboarding
 Icon=solvy
 Terminal=false
 X-GNOME-Autostart-enabled=true
@@ -989,6 +1105,66 @@ sudo install -m 0644 "$CALAMARES_SRC/branding.desc" \
   "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc"
 
 ###############################################################################
+# CALAMARES INSTALLER SOUND HOOKS
+###############################################################################
+log "Installing Calamares installer sounds"
+
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/installer"
+
+sudo tee "$CHROOT_DIR/usr/lib/solvionyx/installer/play.sh" >/dev/null <<'EOF'
+#!/bin/sh
+
+SOUND="$1"
+
+if command -v pw-play >/dev/null 2>&1; then
+  pw-play "$SOUND" >/dev/null 2>&1 &
+elif command -v paplay >/dev/null 2>&1; then
+  paplay "$SOUND" >/dev/null 2>&1 &
+fi
+EOF
+
+sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/installer/play.sh"
+
+###############################################################################
+# REMOVE LIVE USER (INSTALLED SYSTEM)
+###############################################################################
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+if id liveuser >/dev/null 2>&1; then
+  userdel -r liveuser || true
+fi
+
+rm -rf /home/liveuser || true
+rm -f /etc/sudoers.d/99-liveuser || true
+'
+
+###############################################################################
+# OEM FIRST BOOT — USER CREATION (GNOME INITIAL SETUP)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Enabling GNOME Initial Setup (first boot user creation)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+# Force GNOME Initial Setup on first boot
+touch /etc/gnome-initial-setup-enabled
+
+# Ensure GDM is enabled
+systemctl enable gdm || true
+
+# Ensure NO autologin survives install
+if [ -f /etc/gdm3/daemon.conf ]; then
+  sed -i \
+    -e "s/^AutomaticLoginEnable=.*/AutomaticLoginEnable=false/" \
+    -e "s/^AutomaticLogin=.*/#AutomaticLogin=/" \
+    /etc/gdm3/daemon.conf || true
+fi
+'
+fi
+
+###############################################################################
 # WELCOME APP + DESKTOP CAPABILITIES
 ###############################################################################
 sudo install -d "$CHROOT_DIR/usr/share/solvionyx/welcome-app"
@@ -1066,6 +1242,58 @@ else
 fi
 
 ###############################################################################
+# SOLVY — FIRST LOGIN ONBOARDING WRAPPER
+###############################################################################
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx"
+
+sudo tee "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh" >/dev/null <<'EOF'
+#!/bin/sh
+
+# Run only in GNOME
+[ "$XDG_CURRENT_DESKTOP" = "GNOME" ] || exit 0
+
+STATE_DIR="$HOME/.local/state/solvionyx"
+DONE_FLAG="$STATE_DIR/solvy-onboarding-done"
+GNOME_DONE="$HOME/.config/gnome-initial-setup-done"
+
+# Wait until GNOME Initial Setup has completed
+[ -f "$GNOME_DONE" ] || exit 0
+
+# Already completed?
+[ -f "$DONE_FLAG" ] && exit 0
+
+mkdir -p "$STATE_DIR"
+
+# Launch Solvy onboarding
+if command -v solvy >/dev/null 2>&1; then
+  solvy --onboarding &
+elif [ -x /usr/share/solvionyx/solvy/solvy.py ]; then
+  /usr/share/solvionyx/solvy/solvy.py --onboarding &
+fi
+
+# Mark as done
+touch "$DONE_FLAG"
+EOF
+
+sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh"
+
+###############################################################################
+# SOLVY — AUTOSTART AFTER USER CREATION (GNOME)
+###############################################################################
+sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+
+sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Solvy Onboarding
+Comment=Welcome to Solvionyx OS
+Exec=/usr/lib/solvionyx/solvy-first-login.sh
+Terminal=false
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true
+EOF
+
+###############################################################################
 # SOLVIONYX CONTROL CENTER
 ###############################################################################
 log "Installing Solvionyx Control Center"
@@ -1076,6 +1304,31 @@ sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/control-center/solvionyx-control-
 sudo install -d "$CHROOT_DIR/usr/share/applications"
 sudo install -m 0644 "$REPO_ROOT/control-center/solvionyx-control-center.desktop" \
   "$CHROOT_DIR/usr/share/applications/solvionyx-control-center.desktop" || true
+
+###############################################################################
+# PHASE 12 — FIRST BOOT USER SETUP (OEM / OOBE)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Enabling GNOME Initial Setup (first-boot user creation)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+# Marker file that forces GNOME Initial Setup to run
+touch /etc/gnome-initial-setup-enabled
+
+# Ensure GDM is enabled
+systemctl enable gdm || true
+
+# Disable automatic login (installer must not auto-login)
+if [ -f /etc/gdm3/daemon.conf ]; then
+  sed -i \
+    -e "s/^AutomaticLoginEnable=.*/AutomaticLoginEnable=false/" \
+    -e "s/^AutomaticLogin=.*/#AutomaticLogin=/" \
+    /etc/gdm3/daemon.conf || true
+fi
+'
+fi
 
 ###############################################################################
 # PLYMOUTH
@@ -1111,6 +1364,186 @@ set -e
 glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
 EOF
 fi
+
+###############################################################################
+# SOLVIONYX LOGIN SOUND SCRIPT
+###############################################################################
+log "Installing Solvionyx login sound handler"
+
+sudo install -d "$CHROOT_DIR/usr/bin"
+
+sudo tee "$CHROOT_DIR/usr/bin/solvionyx-login-sound" >/dev/null <<'EOF'
+#!/bin/sh
+
+CONF="/etc/solvionyx/audio/boot-chime.conf"
+SOUND="/usr/share/solvionyx/audio/boot/solvionyx-boot-startup.mp3"
+FLAG="/run/user/$(id -u)/.solvionyx-login-sound-played"
+
+ENABLED=true
+[ -f "$CONF" ] && ENABLED=$(grep -E '^enabled=' "$CONF" | cut -d= -f2)
+
+[ "$ENABLED" != "true" ] && exit 0
+[ -f "$FLAG" ] && exit 0
+
+if command -v pw-play >/dev/null 2>&1; then
+  pw-play "$SOUND" >/dev/null 2>&1 &
+elif command -v paplay >/dev/null 2>&1; then
+  paplay "$SOUND" >/dev/null 2>&1 &
+fi
+
+touch "$FLAG"
+EOF
+
+sudo chmod +x "$CHROOT_DIR/usr/bin/solvionyx-login-sound"
+
+###############################################################################
+# SOLVIONYX AUDIO BRANDING
+###############################################################################
+log "Installing Solvionyx audio branding"
+
+AUDIO_SRC="$BRANDING_SRC/audio"
+
+if [ -d "$AUDIO_SRC" ]; then
+  sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio"
+
+  # Boot audio
+  if [ -d "$AUDIO_SRC/boot" ]; then
+    sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio/boot"
+    sudo cp -a "$AUDIO_SRC/boot/." \
+      "$CHROOT_DIR/usr/share/solvionyx/audio/boot/"
+  fi
+
+  # System sounds
+  if [ -d "$AUDIO_SRC/system" ]; then
+    sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio/system"
+    sudo cp -a "$AUDIO_SRC/system/." \
+      "$CHROOT_DIR/usr/share/solvionyx/audio/system/"
+  fi
+
+  sudo chmod -R 0644 "$CHROOT_DIR/usr/share/solvionyx/audio"
+else
+  log "No Solvionyx audio assets found — skipping"
+fi
+
+###############################################################################
+# SOLVIONYX LOGIN / BOOT SOUND (USER SESSION SAFE)
+###############################################################################
+log "Installing Solvionyx login sound"
+
+sudo install -d "$CHROOT_DIR/usr/bin"
+
+sudo tee "$CHROOT_DIR/usr/bin/solvionyx-login-sound" >/dev/null <<'EOF'
+#!/bin/sh
+SOUND="/usr/share/solvionyx/audio/boot/solvionyx-boot-startup.mp3"
+
+# Play once per session
+FLAG="/run/user/$(id -u)/.solvionyx-login-sound-played"
+[ -f "$FLAG" ] && exit 0
+
+if command -v pw-play >/dev/null 2>&1; then
+  pw-play "$SOUND" >/dev/null 2>&1 &
+elif command -v paplay >/dev/null 2>&1; then
+  paplay "$SOUND" >/dev/null 2>&1 &
+fi
+
+touch "$FLAG"
+EOF
+
+sudo chmod +x "$CHROOT_DIR/usr/bin/solvionyx-login-sound"
+
+sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+
+sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvionyx-login-sound.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Solvionyx Login Sound
+Exec=/usr/bin/solvionyx-login-sound
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+
+###############################################################################
+# SOLVIONYX AUDIO SETTINGS (DEFAULTS)
+###############################################################################
+log "Initializing Solvionyx audio settings"
+
+sudo install -d "$CHROOT_DIR/etc/solvionyx/audio"
+
+sudo tee "$CHROOT_DIR/etc/solvionyx/audio/boot-chime.conf" >/dev/null <<'EOF'
+enabled=true
+EOF
+
+###############################################################################
+# SOLVIONYX SOUND THEME (GNOME)
+###############################################################################
+log "Registering Solvionyx sound theme"
+
+sudo install -d "$CHROOT_DIR/usr/share/sounds/solvionyx"
+sudo install -d "$CHROOT_DIR/usr/share/sounds/solvionyx/stereo"
+
+sudo tee "$CHROOT_DIR/usr/share/sounds/solvionyx/index.theme" >/dev/null <<'EOF'
+[Sound Theme]
+Name=Solvionyx
+Comment=Solvionyx OS Sound Theme
+Directories=stereo
+
+[stereo]
+OutputProfile=stereo
+EOF
+
+###############################################################################
+# SOLVIONYX SYSTEM EVENT SOUNDS
+###############################################################################
+log "Mapping Solvionyx system sounds"
+
+sudo ln -sf \
+  /usr/share/solvionyx/audio/system/alert.mp3 \
+  "$CHROOT_DIR/usr/share/sounds/solvionyx/stereo/dialog-warning.ogg"
+
+sudo ln -sf \
+  /usr/share/solvionyx/audio/system/power-device-plug-in.mp3 \
+  "$CHROOT_DIR/usr/share/sounds/solvionyx/stereo/power-plug.ogg"
+
+sudo ln -sf \
+  /usr/share/solvionyx/audio/system/power-device-disconnect.mp3 \
+  "$CHROOT_DIR/usr/share/sounds/solvionyx/stereo/power-unplug.ogg"
+
+###############################################################################
+# SET DEFAULT SOUND THEME
+###############################################################################
+log "Setting Solvionyx as default sound theme"
+
+sudo chroot "$CHROOT_DIR" bash -lc '
+gsettings set org.gnome.desktop.sound theme-name "solvionyx" || true
+'
+
+###############################################################################
+# SOLVY AUDIO INTERFACE (OPTIONAL)
+###############################################################################
+log "Installing Solvy audio interface"
+
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/audio"
+
+sudo tee "$CHROOT_DIR/usr/lib/solvionyx/audio/play.sh" >/dev/null <<'EOF'
+#!/bin/sh
+# Usage: play.sh alert | power-plug | power-unplug | boot
+
+case "$1" in
+  alert) sound="/usr/share/solvionyx/audio/system/alert.mp3" ;;
+  power-plug) sound="/usr/share/solvionyx/audio/system/power-device-plug-in.mp3" ;;
+  power-unplug) sound="/usr/share/solvionyx/audio/system/power-device-disconnect.mp3" ;;
+  boot) sound="/usr/share/solvionyx/audio/boot/solvionyx-boot-startup.mp3" ;;
+  *) exit 0 ;;
+esac
+
+if command -v pw-play >/dev/null 2>&1; then
+  pw-play "$sound" >/dev/null 2>&1 &
+elif command -v paplay >/dev/null 2>&1; then
+  paplay "$sound" >/dev/null 2>&1 &
+fi
+EOF
+
+sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/audio/play.sh"
 
 ###############################################################################
 # KERNEL + INITRD

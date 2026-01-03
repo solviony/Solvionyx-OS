@@ -208,3 +208,16 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+BOOT_CHIME_CONF = "/etc/solvionyx/audio/boot-chime.conf"
+
+def get_boot_chime():
+    try:
+        with open(BOOT_CHIME_CONF) as f:
+            return "enabled=true" in f.read()
+    except:
+        return True  # default ON
+
+def set_boot_chime(enabled: bool):
+    with open(BOOT_CHIME_CONF, "w") as f:
+        f.write(f"enabled={'true' if enabled else 'false'}\n")
