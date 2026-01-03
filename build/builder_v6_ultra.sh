@@ -430,7 +430,7 @@ install_ext_tarball() {
 install_ext_tarball \
   "Just Perfection" \
   "just-perfection-desktop@just-perfection" \
-  "https://github.com/just-perfection-desktop/just-perfection/archive/refs/heads/main.tar.gz"
+  "https://github.com/just-perfection-desktop/just-perfection/archive/refs/heads/master.tar.gz"
 
 # Blur My Shell
 install_ext_tarball \
