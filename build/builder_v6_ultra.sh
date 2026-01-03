@@ -2,6 +2,7 @@
 # Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot
 set -euo pipefail
 
+export GIT_TERMINAL_PROMPT=0
 ###############################################################################
 # CI DETECTION
 ###############################################################################
@@ -238,7 +239,7 @@ rm -f /usr/sbin/update-initramfs
 dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
 
 # 6b) FORCE initrd creation (best-effort)
-VMLINUX="$(ls /boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
+=VMLINUX="$(ls /boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
 if [ -n "$VMLINUX" ]; then
   KERNEL_VER="${VMLINUX##*/vmlinuz-}"
   echo "[BUILD] Creating initramfs for kernel: $KERNEL_VER"
@@ -395,44 +396,47 @@ sudo install -m 0644 "$SOLVIONYX_LOGO" "$CHROOT_DIR/usr/share/icons/hicolor/256x
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
 
 ###############################################################################
-# FIX — Bookworm extension availability (vendor upstream)
-# Replaces:
-#   apt-get install gnome-shell-extension-just-perfection
-#   apt-get install gnome-shell-extension-blur-my-shell
+# FIX — CI-safe vendoring of GNOME extensions (NO git clone)
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
-  log "Vendoring GNOME extensions: Just Perfection + Blur my Shell (Bookworm-safe)"
+  log "Vendoring GNOME extensions (CI-safe tarball method)"
   sudo chroot "$CHROOT_DIR" bash -lc '
 set -euo pipefail
+
 apt-get update
-apt-get install -y --no-install-recommends git ca-certificates
+apt-get install -y --no-install-recommends curl ca-certificates tar
 
 EXTDIR=/usr/share/gnome-shell/extensions
 mkdir -p "$EXTDIR"
 
-# Just Perfection (UUID)
-JP_UUID="just-perfection-desktop@just-perfection"
-rm -rf "$EXTDIR/$JP_UUID"
-git clone --depth=1 https://github.com/just-perfection-desktop/just-perfection.git "$EXTDIR/$JP_UUID" || true
-if [ -d "$EXTDIR/$JP_UUID/$JP_UUID" ]; then
-  tmp="$EXTDIR/$JP_UUID"
-  rm -rf "$EXTDIR/$JP_UUID"
-  mv "$tmp/$JP_UUID" "$EXTDIR/$JP_UUID"
-  rm -rf "$tmp" || true
-fi
+install_ext_tarball() {
+  local name="$1"
+  local uuid="$2"
+  local url="$3"
 
-# Blur my Shell (UUID)
-BMS_UUID="blur-my-shell@aunetx"
-rm -rf "$EXTDIR/$BMS_UUID"
-git clone --depth=1 https://github.com/aunetx/blur-my-shell.git "$EXTDIR/$BMS_UUID" || true
-if [ -d "$EXTDIR/$BMS_UUID/$BMS_UUID" ]; then
-  tmp="$EXTDIR/$BMS_UUID"
-  rm -rf "$EXTDIR/$BMS_UUID"
-  mv "$tmp/$BMS_UUID" "$EXTDIR/$BMS_UUID"
-  rm -rf "$tmp" || true
-fi
+  echo "[BUILD] Installing $name"
+  rm -rf "$EXTDIR/$uuid"
+  mkdir -p "$EXTDIR/$uuid"
 
-chmod -R a+rX "$EXTDIR/$JP_UUID" "$EXTDIR/$BMS_UUID" 2>/dev/null || true
+  curl -L --fail "$url" \
+    | tar -xz --strip-components=1 -C "$EXTDIR/$uuid"
+
+  test -f "$EXTDIR/$uuid/metadata.json"
+  chmod -R a+rX "$EXTDIR/$uuid"
+}
+
+# Just Perfection
+install_ext_tarball \
+  "Just Perfection" \
+  "just-perfection-desktop@just-perfection" \
+  "https://github.com/just-perfection-desktop/just-perfection/archive/refs/heads/main.tar.gz"
+
+# Blur My Shell
+install_ext_tarball \
+  "Blur My Shell" \
+  "blur-my-shell@aunetx" \
+  "https://github.com/aunetx/blur-my-shell/archive/refs/heads/master.tar.gz"
+
 glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
 '
 fi
@@ -455,7 +459,7 @@ cat > /etc/dconf/db/local.d/00-solvionyx-shell <<EOF
 [org/gnome/shell]
 enabled-extensions=['$D2D','$APPIND','$JP','$BMS']
 disable-overview-on-startup=true
-favorite-apps=['solviony-store.desktop','org.gnome.Terminal.desktop','org.gnome.Nautilus.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
+favorite-apps=['solvy.desktop','solviony-store.desktop','org.gnome.Terminal.desktop','org.gnome.Nautilus.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
 
 [org/gnome/desktop/interface]
 enable-hot-corners=false
@@ -509,6 +513,46 @@ brightness=0.85
 EOF
 
 dconf update
+'
+fi
+
+###############################################################################
+# PHASE 3 — LOCK SOLVIONYX DOCK + EXTENSIONS (enforce Solvionyx feel)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Locking Solvionyx GNOME layout (dock + pinned apps + extensions)"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+mkdir -p /etc/dconf/db/local.d/locks
+
+cat > /etc/dconf/db/local.d/locks/00-solvionyx-locks <<EOF
+/org/gnome/shell/enabled-extensions
+/org/gnome/shell/favorite-apps
+/org/gnome/shell/disable-overview-on-startup
+
+/org/gnome/shell/extensions/dash-to-dock/dock-position
+/org/gnome/shell/extensions/dash-to-dock/dock-fixed
+/org/gnome/shell/extensions/dash-to-dock/autohide
+/org/gnome/shell/extensions/dash-to-dock/intellihide
+/org/gnome/shell/extensions/dash-to-dock/extend-height
+/org/gnome/shell/extensions/dash-to-dock/center-aligned
+/org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size
+/org/gnome/shell/extensions/dash-to-dock/transparency-mode
+/org/gnome/shell/extensions/dash-to-dock/background-opacity
+EOF
+
+dconf update
+'
+fi
+
+if [ "$EDITION" = "gnome" ]; then
+  sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+if [ -f /usr/share/applications/org.gnome.Extensions.desktop ]; then
+  sed -i "s/^NoDisplay=.*/NoDisplay=true/; t; \$aNoDisplay=true" \
+    /usr/share/applications/org.gnome.Extensions.desktop
+fi
 '
 fi
 
@@ -671,6 +715,46 @@ sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"*.py 2>/dev/null || 
 sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d"
 sudo cp -a "$BRANDING_SRC/desktop-capabilities/." \
   "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/"
+
+###############################################################################
+# SOLVY AI ASSISTANT — install + launcher + autostart
+###############################################################################
+log "Installing Solvy AI Assistant"
+
+# 1) Install payload
+sudo install -d "$CHROOT_DIR/usr/share/solvionyx/solvy"
+sudo cp -a "$SOLVY_SRC/." "$CHROOT_DIR/usr/share/solvionyx/solvy/"
+sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/solvy/solvy.py" 2>/dev/null || true
+
+# 2) Desktop launcher (dock pin target)
+sudo install -d "$CHROOT_DIR/usr/share/applications"
+sudo install -m 0644 "$SOLVY_SRC/solvy.desktop" \
+  "$CHROOT_DIR/usr/share/applications/solvy.desktop" || true
+
+# 3) Autostart (system-wide: live + installed)
+sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-autostart.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Solvy AI Assistant
+Comment=Solvionyx OS intelligent assistant
+Exec=/usr/share/solvionyx/solvy/solvy.py
+Icon=solvy
+Terminal=false
+X-GNOME-Autostart-enabled=true
+Categories=Utility;System;AI;
+EOF
+
+# 4) Icon install
+if [ -f "$BRANDING_SRC/logo/solvy.png" ]; then
+  sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
+  sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
+    "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvy.png"
+  sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
+  sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
+    "$CHROOT_DIR/usr/share/pixmaps/solvy.png"
+  sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
 
 ###############################################################################
 # SOLVIONYX CONTROL CENTER
