@@ -238,17 +238,18 @@ set -e
 rm -f /usr/sbin/update-initramfs
 dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
 
-# 6b) FORCE initrd creation (best-effort)
-=VMLINUX="$(ls /boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
-if [ -n "$VMLINUX" ]; then
-  KERNEL_VER="${VMLINUX##*/vmlinuz-}"
-  echo "[BUILD] Creating initramfs for kernel: $KERNEL_VER"
-  update-initramfs -c -k "$KERNEL_VER" || true
-else
-  echo "[BUILD] WARNING: No kernel found yet, skipping initramfs creation"
-fi
+# 6b) Defer initramfs creation (CI-safe)
+echo "[BUILD] Deferring initramfs generation until kernel is confirmed"
 
-ls -lah /boot/vmlinuz-* /boot/initrd.img-* 2>/dev/null || true
+if ls /boot/vmlinuz-* >/dev/null 2>&1; then
+  for v in /boot/vmlinuz-*; do
+    KERNEL_VER="${v##*/vmlinuz-}"
+    echo "[BUILD] Generating initramfs for kernel: $KERNEL_VER"
+    update-initramfs -c -k "$KERNEL_VER" || true
+  done
+else
+  echo "[BUILD] No kernel images present yet, skipping initramfs"
+fi
 
 # 7) Cleanup
 rm -f /usr/sbin/policy-rc.d
