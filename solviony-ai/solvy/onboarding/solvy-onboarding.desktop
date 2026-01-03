@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Solvy Setup
+Comment=Configure AI providers for Solvionyx OS
+Exec=/usr/share/solvy/onboarding/solvy-onboarding.py
+Icon=preferences-system
+Terminal=false
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true
