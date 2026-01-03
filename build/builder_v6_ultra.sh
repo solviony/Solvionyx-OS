@@ -1,4 +1,4 @@
-#!/bin/bash
+!/bin/bash1
 # Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot
 set -euo pipefail
 
@@ -317,7 +317,7 @@ apt-get install -y --no-install-recommends curl ca-certificates unzip python3
 SHELL_VER="$(gnome-shell --version 2>/dev/null | awk '{print $3}' | cut -d. -f1-2 || true)"
 [ -n "$SHELL_VER" ] || SHELL_VER="43"
 echo "[BUILD] Detected GNOME Shell version: $SHELL_VER"
-
+ 
 fetch_ext_zip() {
   local uuid="$1"
   local out="/tmp/${uuid}.zip"
@@ -610,6 +610,39 @@ WaylandEnable=true
 EOL
 fi
 
+EOF
+
+###############################################################################
+# GNOME INITIAL SETUP (USER-FIRST EXPERIENCE)
+###############################################################################
+log "Enabling GNOME Initial Setup for first boot"
+
+sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+
+sudo tee "$CHROOT_DIR/etc/xdg/autostart/gnome-initial-setup.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Initial Setup
+Exec=gnome-initial-setup
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true
+EOF
+
+###############################################################################
+# GNOME INITIAL SETUP BRANDING
+###############################################################################
+log "Branding GNOME Initial Setup"
+
+sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup"
+
+sudo install -m 0644 \
+  "$BRANDING_SRC/logo/Installer logo.png" \
+  "$CHROOT_DIR/usr/share/gnome-initial-setup/solvionyx-logo.png"
+
+sudo tee "$CHROOT_DIR/usr/share/gnome-initial-setup/vendor.conf" >/dev/null <<'EOF'
+[Vendor]
+name=Solvionyx OS
+logo=/usr/share/gnome-initial-setup/solvionyx-logo.png
 EOF
 
 ###############################################################################
@@ -1105,6 +1138,73 @@ sudo install -m 0644 "$CALAMARES_SRC/branding.desc" \
   "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc"
 
 ###############################################################################
+# CALAMARES INSTALLER SOUND
+###############################################################################
+sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio"
+sudo install -m 0644 "$BRANDING_SRC/audio/installer-chime.mp3" \
+  "$CHROOT_DIR/usr/share/solvionyx/audio/installer-chime.mp3"
+
+sudo install -d "$CHROOT_DIR/etc/calamares/scripts"
+cat > "$CHROOT_DIR/etc/calamares/scripts/play-installer-sound.sh" <<'EOF'
+#!/bin/sh
+command -v paplay >/dev/null 2>&1 || exit 0
+paplay /usr/share/solvionyx/audio/installer-chime.mp3 >/dev/null 2>&1 || true
+EOF
+chmod +x "$CHROOT_DIR/etc/calamares/scripts/play-installer-sound.sh"
+
+# ADD THIS LINE **HERE**
+sed -i '/modules:/a\ \ - play-installer-sound' \
+  "$CHROOT_DIR/etc/calamares/settings.conf"
+
+grep -q 'play-installer-sound' \
+  "$CHROOT_DIR/etc/calamares/settings.conf" || \
+  log "WARNING: Installer sound module not injected"
+
+###############################################################################
+# USER-FIRST SETUP — GNOME INITIAL SETUP (POST-INSTALL)
+###############################################################################
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+# Ensure GNOME Initial Setup runs on first boot
+mkdir -p /etc/gdm3
+cat > /etc/gdm3/custom.conf <<EOF
+[daemon]
+InitialSetupEnable=true
+EOF
+
+# Remove any leftover live autologin
+rm -f /etc/gdm3/daemon.conf || true
+
+# Mark system as first boot
+mkdir -p /var/lib/gnome-initial-setup
+touch /var/lib/gnome-initial-setup/first-login
+'
+
+###############################################################################
+# GNOME INITIAL SETUP — SOLVIONYX BRANDING
+###############################################################################
+sudo chroot "$CHROOT_DIR" bash -lc '
+set -e
+
+GIS_DIR="/usr/share/gnome-initial-setup"
+
+# Replace header/logo
+if [ -d "$GIS_DIR" ]; then
+  install -m 0644 /usr/share/pixmaps/solvionyx.png \
+    "$GIS_DIR/solvionyx-logo.png" || true
+fi
+
+# Override product name
+mkdir -p /etc/gnome-initial-setup
+cat > /etc/gnome-initial-setup/vendor.conf <<EOF
+[Vendor]
+Name=Solvionyx OS
+Logo=/usr/share/pixmaps/solvionyx.png
+EOF
+'
+
+###############################################################################
 # CALAMARES INSTALLER SOUND HOOKS
 ###############################################################################
 log "Installing Calamares installer sounds"
@@ -1348,6 +1448,38 @@ update-alternatives --install /usr/share/plymouth/themes/default.plymouth defaul
 update-alternatives --set default.plymouth \
   /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth || true
 update-initramfs -u || true
+EOF
+
+###############################################################################
+# SOLVIONYX PLYMOUTH BOOT SOUND
+###############################################################################
+log "Configuring Solvionyx Plymouth boot sound"
+
+BOOT_SOUND="$BRANDING_SRC/Audio/boot/Solvionyx_Boot_startup.mp3"
+
+if [ -f "$BOOT_SOUND" ]; then
+  sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio"
+  sudo install -m 0644 "$BOOT_SOUND" \
+    "$CHROOT_DIR/usr/share/solvionyx/audio/boot.mp3"
+
+  sudo tee "$CHROOT_DIR/usr/lib/plymouth/solvionyx-boot-sound.sh" >/dev/null <<'EOF'
+#!/bin/sh
+command -v paplay >/dev/null 2>&1 || exit 0
+paplay /usr/share/solvionyx/audio/boot.mp3 >/dev/null 2>&1 || true
+EOF
+  sudo chmod +x "$CHROOT_DIR/usr/lib/plymouth/solvionyx-boot-sound.sh"
+fi
+
+###############################################################################
+# BOOT AUDIO — SOLVIONYX CHIME
+###############################################################################
+sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio"
+sudo install -m 0644 "$BRANDING_SRC/audio/boot-chime.mp3" \
+  "$CHROOT_DIR/usr/share/solvionyx/audio/boot-chime.mp3"
+
+cat > "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/solvionyx.sound" <<EOF
+[Sound]
+File=/usr/share/solvionyx/audio/boot-chime.mp3
 EOF
 
 ###############################################################################
