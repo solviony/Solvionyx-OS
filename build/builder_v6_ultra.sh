@@ -773,10 +773,14 @@ if [ "$EDITION" = "gnome" ]; then
 .quick-toggle { border-radius: 16px; }
 EOF
 
-  if ! grep -q 'solvionyx-glass.css' "$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css" 2>/dev/null; then
-    sudo sed -i '1i @import url("solvionyx-glass.css");' \
-      "$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css" || true
+THEME_CSS="$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css"
+
+if [ -f "$THEME_CSS" ]; then
+  if ! grep -q 'solvionyx-glass.css' "$THEME_CSS"; then
+    sudo sed -i '1i @import url("solvionyx-glass.css");' "$THEME_CSS"
   fi
+fi
+
 fi
 
 ###############################################################################
@@ -1138,27 +1142,23 @@ sudo install -m 0644 "$CALAMARES_SRC/branding.desc" \
   "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc"
 
 ###############################################################################
-# CALAMARES INSTALLER SOUND
+# INSTALLER AUDIO (Calamares) — CI-safe, repo-aligned
 ###############################################################################
-sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio"
-sudo install -m 0644 "$BRANDING_SRC/audio/installer-chime.mp3" \
-  "$CHROOT_DIR/usr/share/solvionyx/audio/installer-chime.mp3"
+INSTALLER_AUDIO_DIR="$BRANDING_SRC/Audio/installer"
 
-sudo install -d "$CHROOT_DIR/etc/calamares/scripts"
-cat > "$CHROOT_DIR/etc/calamares/scripts/play-installer-sound.sh" <<'EOF'
-#!/bin/sh
-command -v paplay >/dev/null 2>&1 || exit 0
-paplay /usr/share/solvionyx/audio/installer-chime.mp3 >/dev/null 2>&1 || true
-EOF
-chmod +x "$CHROOT_DIR/etc/calamares/scripts/play-installer-sound.sh"
+if [ -f "$INSTALLER_AUDIO_DIR/installer-start.mp3" ]; then
+  sudo install -d "$CHROOT_DIR/usr/share/sounds/solvionyx"
+  sudo install -m 0644 \
+    "$INSTALLER_AUDIO_DIR/installer-start.mp3" \
+    "$CHROOT_DIR/usr/share/sounds/solvionyx/installer-start.mp3"
+fi
 
-# ADD THIS LINE **HERE**
-sed -i '/modules:/a\ \ - play-installer-sound' \
-  "$CHROOT_DIR/etc/calamares/settings.conf"
+if [ -f "$INSTALLER_AUDIO_DIR/installer-finish.mp3" ]; then
+  sudo install -m 0644 \
+    "$INSTALLER_AUDIO_DIR/installer-finish.mp3" \
+    "$CHROOT_DIR/usr/share/sounds/solvionyx/installer-finish.mp3"
+fi
 
-grep -q 'play-installer-sound' \
-  "$CHROOT_DIR/etc/calamares/settings.conf" || \
-  log "WARNING: Installer sound module not injected"
 
 ###############################################################################
 # USER-FIRST SETUP — GNOME INITIAL SETUP (POST-INSTALL)
