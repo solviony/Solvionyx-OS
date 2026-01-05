@@ -1471,16 +1471,20 @@ EOF
 fi
 
 ###############################################################################
-# BOOT AUDIO — SOLVIONYX CHIME
+# SOLVIONYX PLYMOUTH BOOT SOUND (REPO-ALIGNED)
 ###############################################################################
-sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio"
-sudo install -m 0644 "$BRANDING_SRC/audio/boot-chime.mp3" \
-  "$CHROOT_DIR/usr/share/solvionyx/audio/boot-chime.mp3"
+log "Configuring Solvionyx Plymouth boot sound"
 
-cat > "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/solvionyx.sound" <<EOF
-[Sound]
-File=/usr/share/solvionyx/audio/boot-chime.mp3
-EOF
+BOOT_SOUND="$BRANDING_SRC/Audio/boot/boot-chime.mp3"
+
+if [ -f "$BOOT_SOUND" ]; then
+  sudo install -d "$CHROOT_DIR/usr/share/solvionyx/audio/boot"
+  sudo install -m 0644 \
+    "$BOOT_SOUND" \
+    "$CHROOT_DIR/usr/share/solvionyx/audio/boot/boot-chime.mp3"
+else
+  log "Boot chime not found — skipping (CI-safe)"
+fi
 
 ###############################################################################
 # WALLPAPERS + GNOME UX
