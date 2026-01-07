@@ -512,6 +512,43 @@ else
 fi
 
 ###############################################################################
+# SOLVY ONBOARDING — RUN ON FIRST LOGIN AFTER GNOME INITIAL SETUP
+###############################################################################
+sudo install -d "$CHROOT_DIR/usr/lib/solvionyx"
+sudo tee "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh" >/dev/null <<'EOF'
+#!/bin/sh
+[ "$XDG_CURRENT_DESKTOP" = "GNOME" ] || exit 0
+
+DONE="$HOME/.config/gnome-initial-setup-done"
+FLAG="$HOME/.local/state/solvionyx/solvy-onboarding-done"
+
+[ -f "$DONE" ] || exit 0
+[ -f "$FLAG" ] && exit 0
+
+mkdir -p "$(dirname "$FLAG")"
+
+if command -v solvy >/dev/null 2>&1; then
+  solvy --onboarding >/dev/null 2>&1 &
+elif [ -x /usr/share/solvionyx/solvy/solvy.py ]; then
+  /usr/share/solvionyx/solvy/solvy.py --onboarding >/dev/null 2>&1 &
+fi
+
+touch "$FLAG"
+EOF
+sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh"
+
+sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Solvy Onboarding
+Exec=/usr/lib/solvionyx/solvy-first-login.sh
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+
+###############################################################################
 # GNOME INITIAL SETUP — VENDOR MESSAGE
 ###############################################################################
 sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup/vendor"
@@ -1186,23 +1223,54 @@ sudo install -m 0644 "$CALAMARES_SRC/branding.desc" \
   "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc"
 
 ###############################################################################
-# INSTALLER AUDIO (Calamares) — CI-safe, repo-aligned
+# CALAMARES INSTALLER SOUND — CI-safe, repo-aligned
 ###############################################################################
-INSTALLER_AUDIO_DIR="$BRANDING_SRC/Audio/installer"
+INSTALLER_AUDIO_DIR="$BRANDING_SRC/audio/installer"
 
-if [ -f "$INSTALLER_AUDIO_DIR/installer-start.mp3" ]; then
+# Copy installer sounds into target
+if [ -d "$INSTALLER_AUDIO_DIR" ]; then
   sudo install -d "$CHROOT_DIR/usr/share/sounds/solvionyx"
-  sudo install -m 0644 \
-    "$INSTALLER_AUDIO_DIR/installer-start.mp3" \
-    "$CHROOT_DIR/usr/share/sounds/solvionyx/installer-start.mp3"
+
+  if [ -f "$INSTALLER_AUDIO_DIR/installer-start.mp3" ]; then
+    sudo install -m 0644 \
+      "$INSTALLER_AUDIO_DIR/installer-start.mp3" \
+      "$CHROOT_DIR/usr/share/sounds/solvionyx/installer-start.mp3"
+  fi
+
+  if [ -f "$INSTALLER_AUDIO_DIR/installer-finish.mp3" ]; then
+    sudo install -m 0644 \
+      "$INSTALLER_AUDIO_DIR/installer-finish.mp3" \
+      "$CHROOT_DIR/usr/share/sounds/solvionyx/installer-finish.mp3"
+  fi
 fi
 
-if [ -f "$INSTALLER_AUDIO_DIR/installer-finish.mp3" ]; then
-  sudo install -m 0644 \
-    "$INSTALLER_AUDIO_DIR/installer-finish.mp3" \
-    "$CHROOT_DIR/usr/share/sounds/solvionyx/installer-finish.mp3"
-fi
+# Install scripts used by Calamares shellprocess modules
+sudo install -d "$CHROOT_DIR/etc/calamares/scripts"
 
+cat > "$CHROOT_DIR/etc/calamares/scripts/solvionyx-installer-start.sh" <<'EOF'
+#!/bin/sh
+command -v paplay >/dev/null 2>&1 || exit 0
+[ -f /usr/share/sounds/solvionyx/installer-start.mp3 ] || exit 0
+paplay /usr/share/sounds/solvionyx/installer-start.mp3 >/dev/null 2>&1 &
+EOF
+
+cat > "$CHROOT_DIR/etc/calamares/scripts/solvionyx-installer-finish.sh" <<'EOF'
+#!/bin/sh
+command -v paplay >/dev/null 2>&1 || exit 0
+[ -f /usr/share/sounds/solvionyx/installer-finish.mp3 ] || exit 0
+paplay /usr/share/sounds/solvionyx/installer-finish.mp3 >/dev/null 2>&1 &
+EOF
+
+sudo chmod +x \
+  "$CHROOT_DIR/etc/calamares/scripts/solvionyx-installer-start.sh" \
+  "$CHROOT_DIR/etc/calamares/scripts/solvionyx-installer-finish.sh"
+
+# Inject start module right after "modules:"
+sudo sed -i '/^modules:/a\ \ - play-installer-start' \
+  "$CHROOT_DIR/etc/calamares/settings.conf"
+
+# Append finish module at the bottom
+echo "  - play-installer-finish" | sudo tee -a "$CHROOT_DIR/etc/calamares/settings.conf" >/dev/null
 
 ###############################################################################
 # USER-FIRST SETUP — GNOME INITIAL SETUP (POST-INSTALL)
