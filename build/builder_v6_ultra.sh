@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 ###############################################################################
-# SAFE TEMP DIRECTORY (prevents dpkg/tar failures)
+# HARD TEMP FIX — prevents dpkg / tar failures
 ###############################################################################
 export TMPDIR=/var/tmp
 export TEMP=/var/tmp
@@ -9,9 +9,8 @@ export TMP=/var/tmp
 export DPKG_TMPDIR=/var/tmp
 export TAR_TMPDIR=/var/tmp
 
-# Ensure permissions (safe even if already exists)
-mkdir -p /var/tmp
-chmod 1777 /var/tmp
+mkdir -p /tmp /var/tmp
+chmod 1777 /tmp /var/tmp
 
 ###############################################################################
 # Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot
@@ -31,13 +30,6 @@ need_cmd() { command -v "$1" >/dev/null 2>&1; }
 # PARAMETERS
 ###############################################################################
 EDITION="${1:-gnome}"
-
-###############################################################################
-# SAFE TEMP DIRECTORY (prevents dpkg/tar tmp failures)
-###############################################################################
-export TMPDIR=/var/tmp
-sudo mkdir -p /var/tmp
-sudo chmod 1777 /var/tmp
 
 ###############################################################################
 # PATHS (repo-relative)
@@ -174,6 +166,25 @@ mkdir -p \
 sudo debootstrap --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 sudo mkdir -p "$CHROOT_DIR"/{dev,dev/pts,proc,sys}
 mount_chroot_fs
+
+###############################################################################
+# FIX TEMP DIRS INSIDE CHROOT (dpkg / tar safety)
+###############################################################################
+sudo mkdir -p \
+  "$CHROOT_DIR/tmp" \
+  "$CHROOT_DIR/var/tmp" \
+  "$CHROOT_DIR/var/cache/apt/archives/partial" \
+  "$CHROOT_DIR/var/lib/dpkg/tmp.ci"
+
+sudo chmod 1777 \
+  "$CHROOT_DIR/tmp" \
+  "$CHROOT_DIR/var/tmp"
+
+sudo chmod 755 \
+  "$CHROOT_DIR/var/cache/apt/archives" \
+  "$CHROOT_DIR/var/cache/apt/archives/partial" \
+  "$CHROOT_DIR/var/lib/dpkg" \
+  "$CHROOT_DIR/var/lib/dpkg/tmp.ci"
 
 # Enable non-free-firmware early (Bookworm)
 chroot_sh <<'EOF'
@@ -844,10 +855,14 @@ done
 cp "$GRUB_EFI" "$ISO_DIR/EFI/BOOT/grubx64.efi"
 
 cat > "$ISO_DIR/EFI/BOOT/grub.cfg" <<'EOF'
-set timeout=3
+set timeout=5
 set default=0
 
-menuentry "Solvionyx OS Aurora (Live)" {
+menuentry "Try Solvionyx OS Aurora (Live)" {
+  chainloader /EFI/BOOT/solvionyx.efi
+}
+
+menuentry "Install Solvionyx OS Aurora" {
   chainloader /EFI/BOOT/solvionyx.efi
 }
 EOF

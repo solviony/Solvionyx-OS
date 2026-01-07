@@ -1,0 +1,162 @@
+:root{
+  --bg0:#050a14;
+  --bg1:#071226;
+  --ink:#eaf2ff;
+  --muted:rgba(234,242,255,.72);
+  --glass:rgba(12,22,44,.55);
+  --stroke:rgba(140,180,255,.18);
+
+  --aqua:#00c8ff;
+  --cyan:#60f3ff;
+  --blue:#2b6bff;
+  --navy:#0b1734;
+
+  --ok:#34d399;
+  --warn:#fbbf24;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
+  color:var(--ink);
+  background:
+    radial-gradient(1000px 600px at 20% 20%, rgba(0,200,255,.20), transparent 60%),
+    radial-gradient(900px 540px at 85% 30%, rgba(43,107,255,.18), transparent 60%),
+    radial-gradient(900px 540px at 55% 90%, rgba(96,243,255,.10), transparent 60%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+  overflow:hidden;
+}
+
+.bg{
+  position:fixed; inset:0;
+  background: url("../img/aurora-bg.jpg") center/cover no-repeat;
+  opacity:.18;
+  filter:saturate(1.2) contrast(1.05);
+  pointer-events:none;
+}
+.bg::after{
+  content:"";
+  position:absolute; inset:0;
+  background: linear-gradient(180deg, rgba(5,10,20,.75), rgba(7,18,38,.82));
+}
+
+.wrap{
+  position:relative;
+  height:100%;
+  padding:48px 56px;
+  display:grid;
+  grid-template-rows: auto 1fr auto;
+  gap:22px;
+}
+
+.header{
+  display:flex; align-items:center; gap:14px;
+}
+.brand{
+  display:flex; align-items:center; gap:12px;
+  padding:10px 14px;
+  background: rgba(7,18,38,.35);
+  border:1px solid var(--stroke);
+  border-radius:16px;
+  backdrop-filter: blur(10px);
+}
+.brand img{width:34px; height:34px; object-fit:contain}
+.brand .title{
+  display:flex; flex-direction:column; line-height:1.05;
+}
+.brand .title strong{font-size:16px; letter-spacing:.2px}
+.brand .title span{font-size:12.5px; color:var(--muted)}
+
+.card{
+  background: var(--glass);
+  border:1px solid var(--stroke);
+  border-radius:22px;
+  padding:30px 30px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 0 28px rgba(0,200,255,.12);
+}
+
+.grid{
+  display:grid;
+  grid-template-columns: 1.25fr .75fr;
+  gap:22px;
+  align-items:stretch;
+}
+
+.h1{font-size:40px; letter-spacing:.3px; margin:0 0 10px}
+.h2{font-size:22px; margin:0 0 12px}
+.p{font-size:16px; color:var(--muted); margin:0 0 10px; line-height:1.6}
+.list{margin:14px 0 0; padding:0; list-style:none}
+.list li{
+  padding:10px 0 10px 0;
+  border-top: 1px solid rgba(140,180,255,.12);
+  display:flex; gap:10px;
+  color:rgba(234,242,255,.86);
+}
+.list li:first-child{border-top:none}
+.bullet{
+  width:10px; height:10px; border-radius:999px;
+  background: radial-gradient(circle at 30% 30%, var(--cyan), var(--aqua));
+  margin-top:6px;
+  box-shadow: 0 0 12px rgba(0,200,255,.35);
+}
+
+.side{
+  display:flex; flex-direction:column; gap:14px;
+}
+.kpi{
+  padding:16px 16px;
+  border-radius:18px;
+  border:1px solid rgba(140,180,255,.14);
+  background: rgba(5,10,20,.35);
+}
+.kpi strong{display:block; font-size:13px; color:rgba(234,242,255,.78); letter-spacing:.2px}
+.kpi span{display:block; font-size:20px; margin-top:4px}
+
+.footer{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
+}
+.progress{
+  flex:1;
+  display:flex; align-items:center; gap:12px;
+  padding:12px 14px;
+  border-radius:16px;
+  border:1px solid rgba(140,180,255,.14);
+  background: rgba(5,10,20,.35);
+}
+.bar{
+  position:relative;
+  height:8px; flex:1;
+  border-radius:999px;
+  background: rgba(140,180,255,.12);
+  overflow:hidden;
+}
+.bar > i{
+  display:block;
+  height:100%;
+  width:10%;
+  border-radius:999px;
+  background: linear-gradient(90deg, var(--aqua), var(--blue));
+  box-shadow: 0 0 16px rgba(0,200,255,.25);
+  transition: width .35s ease;
+}
+.status{
+  font-size:13px;
+  color:rgba(234,242,255,.80);
+  white-space:nowrap;
+}
+.pill{
+  font-size:12.5px;
+  padding:8px 10px;
+  border-radius:999px;
+  border:1px solid rgba(140,180,255,.16);
+  background: rgba(7,18,38,.45);
+  color:rgba(234,242,255,.82);
+}
+.pill b{color:var(--cyan)}
+.small{font-size:12.5px; color:rgba(234,242,255,.70)}

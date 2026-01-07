@@ -1,0 +1,41 @@
+{
+  "brand_name": "Solvionyx OS",
+  "brand_tag": "Aurora Edition",
+  "progress_preparing": "Preparing installation…",
+  "progress_partitioning": "Partitioning disks…",
+  "progress_copying": "Copying system files…",
+  "progress_configuring": "Configuring your system…",
+  "progress_installing_bootloader": "Installing bootloader…",
+  "progress_finalizing": "Finalizing…",
+  "progress_done": "Installation complete. Ready to reboot.",
+
+  "welcome_h1": "Welcome to Solvionyx OS",
+  "welcome_p": "A next-generation Linux experience built by Solviony for speed, creativity, and heavy-duty computing.",
+  "welcome_b1": "Modern GNOME experience with Solvionyx defaults",
+  "welcome_b2": "Performance tooling and a creator-friendly desktop",
+  "welcome_b3": "Secure Boot–ready build pipeline",
+
+  "solvy_h2": "Meet Solvy",
+  "solvy_p": "Your AI companion for setup, productivity, and creative workflows—available after first boot.",
+  "solvy_b1": "Onboarding after GNOME Initial Setup",
+  "solvy_b2": "Workflow shortcuts and guided tools",
+  "solvy_b3": "Designed for developers and creators",
+
+  "perf_h2": "Performance by Design",
+  "perf_p": "Solvionyx OS is tuned for responsive desktop use and demanding workloads.",
+  "perf_b1": "Power profiles and sensible defaults",
+  "perf_b2": "GPU-ready tooling and Vulkan stack",
+  "perf_b3": "Clean base system with optional layers",
+
+  "sec_h2": "Security You Can Trust",
+  "sec_p": "Built on Debian stability with modern security components and best practices.",
+  "sec_b1": "Secure Boot with signed boot chain",
+  "sec_b2": "Unattended security updates (configurable)",
+  "sec_b3": "Clear system identity and vendor branding",
+
+  "ready_h2": "You’re Almost Ready",
+  "ready_p": "Once installation completes, reboot to finish setup and meet Solvy.",
+  "ready_b1": "Complete GNOME Initial Setup",
+  "ready_b2": "Solvy onboarding launches once (first login)",
+  "ready_b3": "Start building with Solvionyx OS"
+}

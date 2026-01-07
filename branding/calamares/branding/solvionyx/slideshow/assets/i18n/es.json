@@ -1,0 +1,41 @@
+{
+  "brand_name": "Solvionyx OS",
+  "brand_tag": "Edición Aurora",
+  "progress_preparing": "Preparando la instalación…",
+  "progress_partitioning": "Particionando discos…",
+  "progress_copying": "Copiando archivos del sistema…",
+  "progress_configuring": "Configurando tu sistema…",
+  "progress_installing_bootloader": "Instalando el cargador de arranque…",
+  "progress_finalizing": "Finalizando…",
+  "progress_done": "Instalación completa. Listo para reiniciar.",
+
+  "welcome_h1": "Bienvenido a Solvionyx OS",
+  "welcome_p": "Una experiencia Linux de nueva generación creada por Solviony para velocidad, creatividad y alto rendimiento.",
+  "welcome_b1": "Experiencia GNOME moderna con valores predeterminados de Solvionyx",
+  "welcome_b2": "Herramientas de rendimiento y escritorio para creadores",
+  "welcome_b3": "Pipeline listo para Secure Boot",
+
+  "solvy_h2": "Conoce a Solvy",
+  "solvy_p": "Tu asistente de IA para configuración, productividad y flujos creativos—disponible después del primer inicio.",
+  "solvy_b1": "Onboarding tras GNOME Initial Setup",
+  "solvy_b2": "Atajos y herramientas guiadas",
+  "solvy_b3": "Diseñado para desarrolladores y creadores",
+
+  "perf_h2": "Rendimiento por Diseño",
+  "perf_p": "Solvionyx OS está optimizado para un escritorio ágil y cargas exigentes.",
+  "perf_b1": "Perfiles de energía y valores predeterminados",
+  "perf_b2": "Preparado para GPU y Vulkan",
+  "perf_b3": "Base limpia con capas opcionales",
+
+  "sec_h2": "Seguridad Confiable",
+  "sec_p": "Basado en la estabilidad de Debian con componentes modernos.",
+  "sec_b1": "Secure Boot con cadena firmada",
+  "sec_b2": "Actualizaciones de seguridad automáticas (configurable)",
+  "sec_b3": "Identidad del sistema y marca del proveedor",
+
+  "ready_h2": "Ya Casi Está",
+  "ready_p": "Cuando termine la instalación, reinicia para finalizar la configuración y conocer a Solvy.",
+  "ready_b1": "Completa GNOME Initial Setup",
+  "ready_b2": "El onboarding de Solvy se ejecuta una vez (primer inicio de sesión)",
+  "ready_b3": "Empieza a crear con Solvionyx OS"
+}

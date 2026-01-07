@@ -23,3 +23,8 @@ images:
 # Use a QML slideshow (we add show.qml + ImageSlide.qml below)
 slideshow: "show.qml"
 slideshowAPI: 2
+
+---
+componentName: Solvionyx OS
+welcomeStyleCalamares: true
+slideshow: slideshow/slideshow.conf
