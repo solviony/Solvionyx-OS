@@ -1,5 +1,21 @@
-!/bin/bash1
+#!/usr/bin/env bash
+
+###############################################################################
+# SAFE TEMP DIRECTORY (prevents dpkg/tar failures)
+###############################################################################
+export TMPDIR=/var/tmp
+export TEMP=/var/tmp
+export TMP=/var/tmp
+export DPKG_TMPDIR=/var/tmp
+export TAR_TMPDIR=/var/tmp
+
+# Ensure permissions (safe even if already exists)
+mkdir -p /var/tmp
+chmod 1777 /var/tmp
+
+###############################################################################
 # Solvionyx OS Aurora Builder v6 Ultra — OEM + UKI + TPM + Secure Boot
+###############################################################################
 set -euo pipefail
 
 export GIT_TERMINAL_PROMPT=0
@@ -15,6 +31,13 @@ need_cmd() { command -v "$1" >/dev/null 2>&1; }
 # PARAMETERS
 ###############################################################################
 EDITION="${1:-gnome}"
+
+###############################################################################
+# SAFE TEMP DIRECTORY (prevents dpkg/tar tmp failures)
+###############################################################################
+export TMPDIR=/var/tmp
+sudo mkdir -p /var/tmp
+sudo chmod 1777 /var/tmp
 
 ###############################################################################
 # PATHS (repo-relative)
@@ -34,6 +57,19 @@ SOLVY_SRC="$REPO_ROOT/solvy"
 ###############################################################################
 SOLVIONYX_LOGO="$BRANDING_SRC/logo/solvionyx-logo.png"
 [ -f "$SOLVIONYX_LOGO" ] || fail "Missing canonical logo: $SOLVIONYX_LOGO"
+
+###############################################################################
+# WALLPAPER (Aurora default)
+###############################################################################
+AURORA_WALL="$BRANDING_SRC/wallpapers/aurora-default.png"
+
+# CI-safe fallback
+if [ ! -f "$AURORA_WALL" ]; then
+  AURORA_WALL="$(ls "$BRANDING_SRC/wallpapers/"* 2>/dev/null | head -n1 || true)"
+fi
+
+# FINAL SAFETY NET — REQUIRED FOR set -u
+: "${AURORA_WALL:=}"
 
 ###############################################################################
 # DIRECTORIES
@@ -398,1114 +434,6 @@ EOL
 EOF
 
 ###############################################################################
-# GNOME INITIAL SETUP — SOLVIONYX BRANDING (FIRST BOOT USER CREATION)
-###############################################################################
-log "Branding GNOME Initial Setup (Solvionyx)"
-
-# 1) GNOME Initial Setup installer branding (logo)
-sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup/branding"
-
-sudo install -m 0644 \
-  "$BRANDING_SRC/logo/Installer logo.png" \
-  "$CHROOT_DIR/usr/share/gnome-initial-setup/branding/logo.png"
-
-# 2) Rename Initial Setup experience
-sudo install -d "$CHROOT_DIR/usr/share/applications"
-
-sudo tee "$CHROOT_DIR/usr/share/applications/org.gnome.InitialSetup.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Welcome to Solvionyx OS
-Comment=Set up your Solvionyx device
-Exec=gnome-initial-setup
-Icon=solvionyx
-NoDisplay=true
-Categories=GNOME;System;
-EOF
-
-# 3) System icons (desktop / light / dark)
-sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
-
-sudo install -m 0644 \
-  "$BRANDING_SRC/logo/Desktop icon.png" \
-  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx.png"
-
-sudo install -m 0644 \
-  "$BRANDING_SRC/logo/OS default logo light mode.png" \
-  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx-light.png"
-
-sudo install -m 0644 \
-  "$BRANDING_SRC/logo/OS default logo dark mode.png" \
-  "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvionyx-dark.png"
-
-# 4) Terminal / CLI branding (optional but clean)
-sudo install -d "$CHROOT_DIR/usr/share/pixmaps"
-
-sudo install -m 0644 \
-  "$BRANDING_SRC/logo/Terminal logo.png" \
-  "$CHROOT_DIR/usr/share/pixmaps/solvionyx-terminal.png"
-
-# 5) Refresh icon cache
-sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
-
-###############################################################################
-# SOLVY — FIRST LOGIN ONBOARDING (POST GNOME INITIAL SETUP)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Installing Solvy first-login onboarding chain"
-
-  # Install first-login script
-  sudo install -d "$CHROOT_DIR/usr/lib/solvionyx"
-  sudo tee "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh" >/dev/null <<'EOF'
-#!/bin/sh
-
-[ "$XDG_CURRENT_DESKTOP" = "GNOME" ] || exit 0
-
-DONE="$HOME/.config/gnome-initial-setup-done"
-FLAG="$HOME/.local/state/solvionyx/solvy-onboarding-done"
-
-[ -f "$DONE" ] || exit 0
-[ -f "$FLAG" ] && exit 0
-
-mkdir -p "$(dirname "$FLAG")"
-
-if command -v solvy >/dev/null 2>&1; then
-  solvy --onboarding >/dev/null 2>&1 &
-elif [ -x /usr/share/solvionyx/solvy/solvy.py ]; then
-  /usr/share/solvionyx/solvy/solvy.py --onboarding >/dev/null 2>&1 &
-fi
-
-touch "$FLAG"
-EOF
-  sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh"
-
-  # Autostart entry
-  sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
-  sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Solvy Onboarding
-Exec=/usr/lib/solvionyx/solvy-first-login.sh
-OnlyShowIn=GNOME;
-X-GNOME-Autostart-enabled=true
-NoDisplay=true
-EOF
-fi
-
-###############################################################################
-# GNOME INITIAL SETUP — SOLVIONYX BRANDING
-###############################################################################
-log "Branding GNOME Initial Setup (Solvionyx)"
-
-sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup/branding"
-
-# Preferred SVG (if you have it)
-if [ -f "$BRANDING_SRC/logo/solvionyx.svg" ]; then
-  sudo install -m 0644 \
-    "$BRANDING_SRC/logo/solvionyx.svg" \
-    "$CHROOT_DIR/usr/share/gnome-initial-setup/branding/logo.svg"
-else
-  # Fallback PNG
-  sudo install -m 0644 \
-    "$SOLVIONYX_LOGO" \
-    "$CHROOT_DIR/usr/share/gnome-initial-setup/branding/logo.png"
-fi
-
-###############################################################################
-# SOLVY ONBOARDING — RUN ON FIRST LOGIN AFTER GNOME INITIAL SETUP
-###############################################################################
-sudo install -d "$CHROOT_DIR/usr/lib/solvionyx"
-sudo tee "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh" >/dev/null <<'EOF'
-#!/bin/sh
-[ "$XDG_CURRENT_DESKTOP" = "GNOME" ] || exit 0
-
-DONE="$HOME/.config/gnome-initial-setup-done"
-FLAG="$HOME/.local/state/solvionyx/solvy-onboarding-done"
-
-[ -f "$DONE" ] || exit 0
-[ -f "$FLAG" ] && exit 0
-
-mkdir -p "$(dirname "$FLAG")"
-
-if command -v solvy >/dev/null 2>&1; then
-  solvy --onboarding >/dev/null 2>&1 &
-elif [ -x /usr/share/solvionyx/solvy/solvy.py ]; then
-  /usr/share/solvionyx/solvy/solvy.py --onboarding >/dev/null 2>&1 &
-fi
-
-touch "$FLAG"
-EOF
-sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh"
-
-sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
-sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Solvy Onboarding
-Exec=/usr/lib/solvionyx/solvy-first-login.sh
-OnlyShowIn=GNOME;
-X-GNOME-Autostart-enabled=true
-NoDisplay=true
-EOF
-
-###############################################################################
-# GNOME INITIAL SETUP — VENDOR MESSAGE
-###############################################################################
-sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup/vendor"
-
-sudo tee "$CHROOT_DIR/usr/share/gnome-initial-setup/vendor/vendor.conf" >/dev/null <<'EOF'
-[Vendor]
-Name=Solvionyx OS
-Welcome=Welcome to Solvionyx OS
-Description=Set up your Solvionyx device and get started with Solvy AI
-EOF
-
-###############################################################################
-# GNOME — Solvionyx Glass + Dock/Taskbar defaults
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Applying Solvionyx dock/taskbar + glass defaults"
-  chroot_sh <<'EOF'
-set -e
-D2D="dash-to-dock@micxgx.gmail.com"
-APPIND="appindicatorsupport@rgcjonas.gmail.com"
-JP="just-perfection-desktop@just-perfection"
-BMS="blur-my-shell@aunetx"
-
-mkdir -p /etc/dconf/db/local.d
-
-# IMPORTANT:
-# Use *unquoted* heredoc delimiter so variables expand inside the file.
-cat > /etc/dconf/db/local.d/00-solvionyx-shell <<EOL
-[org/gnome/shell]
-enabled-extensions=['${D2D}','${APPIND}','${JP}','${BMS}']
-disable-overview-on-startup=true
-favorite-apps=['solvy.desktop','solviony-store.desktop','org.gnome.Terminal.desktop','org.gnome.Nautilus.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
-
-[org/gnome/desktop/interface]
-enable-hot-corners=false
-clock-show-date=false
-clock-show-seconds=false
-
-[org/gnome/shell/extensions/dash-to-dock]
-dock-position='BOTTOM'
-extend-height=false
-dock-fixed=true
-autohide=false
-intellihide=false
-height-fraction=0.85
-center-aligned=true
-dash-max-icon-size=56
-click-action='focus-or-previews'
-show-mounts=false
-show-trash=false
-running-indicator-style='DOTS'
-transparency-mode='FIXED'
-background-opacity=0.40
-custom-background-color=true
-background-color='rgb(10,20,40)'
-apply-custom-theme=true
-custom-theme-shrink=true
-custom-theme-running-dots=true
-custom-theme-running-dots-color='rgb(0,160,255)'
-custom-theme-running-dots-border-color='rgb(0,200,255)'
-border-radius=22
-
-[org/gnome/shell/extensions/just-perfection]
-panel=false
-activities-button=false
-app-menu=false
-clock-menu=false
-workspace-switcher-size=0
-
-[org/gnome/shell/extensions/blur-my-shell]
-panel=true
-panel-opacity=0.55
-sigma=30
-
-[org/gnome/shell/extensions/blur-my-shell/panel]
-blur=true
-brightness=0.85
-EOL
-
-dconf update
-EOF
-fi
-
-###############################################################################
-# PHASE 3 — LOCK SOLVIONYX DOCK + EXTENSIONS
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Locking Solvionyx GNOME layout (dock + pinned apps + extensions)"
-  chroot_sh <<'EOF'
-set -e
-mkdir -p /etc/dconf/db/local.d/locks
-
-cat > /etc/dconf/db/local.d/locks/00-solvionyx-locks <<'EOL'
-/org/gnome/shell/enabled-extensions
-/org/gnome/shell/favorite-apps
-/org/gnome/shell/disable-overview-on-startup
-/org/gnome/shell/extensions/dash-to-dock/dock-position
-/org/gnome/shell/extensions/dash-to-dock/dock-fixed
-/org/gnome/shell/extensions/dash-to-dock/autohide
-/org/gnome/shell/extensions/dash-to-dock/intellihide
-/org/gnome/shell/extensions/dash-to-dock/extend-height
-/org/gnome/shell/extensions/dash-to-dock/center-aligned
-/org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size
-/org/gnome/shell/extensions/dash-to-dock/transparency-mode
-/org/gnome/shell/extensions/dash-to-dock/background-opacity
-EOL
-
-dconf update
-
-if [ -f /usr/share/applications/org.gnome.Extensions.desktop ]; then
-  sed -i 's/^NoDisplay=.*/NoDisplay=true/; t; $aNoDisplay=true' \
-    /usr/share/applications/org.gnome.Extensions.desktop || true
-fi
-EOF
-fi
-
-###############################################################################
-# LIVE USER + AUTOLOGIN (LIVE SESSION ONLY)
-###############################################################################
-sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
-  HOME=/root TERM="${TERM:-xterm}" \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  EDITION="$EDITION" \
-  bash -s <<'EOF'
-set -e
-
-# Create live user (ISO only)
-useradd -m -s /bin/bash -G sudo,adm,audio,video,netdev liveuser || true
-echo 'liveuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/99-liveuser
-chmod 0440 /etc/sudoers.d/99-liveuser
-
-# Autologin ONLY for live ISO
-if [ "$EDITION" = "gnome" ] && [ -d /lib/live ]; then
-  mkdir -p /etc/gdm3
-  cat > /etc/gdm3/daemon.conf <<'EOL'
-[daemon]
-AutomaticLoginEnable=true
-AutomaticLogin=liveuser
-WaylandEnable=true
-EOL
-fi
-
-EOF
-
-###############################################################################
-# GNOME INITIAL SETUP (USER-FIRST EXPERIENCE)
-###############################################################################
-log "Enabling GNOME Initial Setup for first boot"
-
-sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
-
-sudo tee "$CHROOT_DIR/etc/xdg/autostart/gnome-initial-setup.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Initial Setup
-Exec=gnome-initial-setup
-OnlyShowIn=GNOME;
-X-GNOME-Autostart-enabled=true
-EOF
-
-###############################################################################
-# GNOME INITIAL SETUP BRANDING
-###############################################################################
-log "Branding GNOME Initial Setup"
-
-sudo install -d "$CHROOT_DIR/usr/share/gnome-initial-setup"
-
-sudo install -m 0644 \
-  "$BRANDING_SRC/logo/Installer logo.png" \
-  "$CHROOT_DIR/usr/share/gnome-initial-setup/solvionyx-logo.png"
-
-sudo tee "$CHROOT_DIR/usr/share/gnome-initial-setup/vendor.conf" >/dev/null <<'EOF'
-[Vendor]
-name=Solvionyx OS
-logo=/usr/share/gnome-initial-setup/solvionyx-logo.png
-EOF
-
-###############################################################################
-# FORCE DASH-TO-DOCK TO ACT AS TASKBAR (LIVE SESSION FIX)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Forcing Dash-to-Dock to appear as taskbar for liveuser"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-USER_DB="/var/lib/dconf"
-mkdir -p "$USER_DB"
-
-# Ensure system dconf is compiled
-dconf update || true
-
-# Apply gsettings defaults for liveuser
-sudo -u liveuser DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
-  gsettings set org.gnome.shell.extensions.dash-to-dock dock-fixed true || true
-
-sudo -u liveuser DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
-  gsettings set org.gnome.shell.extensions.dash-to-dock autohide false || true
-
-sudo -u liveuser DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
-  gsettings set org.gnome.shell.extensions.dash-to-dock intellihide false || true
-
-sudo -u liveuser DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
-  gsettings set org.gnome.shell.extensions.dash-to-dock dock-position BOTTOM || true
-'
-fi
-
-###############################################################################
-# GNOME — SOLVIONYX UI DEFAULTS
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Applying Solvionyx GNOME UI defaults"
-  chroot_sh <<'EOF'
-set -euo pipefail
-glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
-
-mkdir -p /etc/dconf/db/local.d /etc/dconf/db/local.d/locks
-
-cat > /etc/dconf/db/local.d/00-solvionyx-shell <<'EOL'
-
-[org/gnome/shell]
-enabled-extensions=['dash-to-dock@micxgx.gmail.com','just-perfection-desktop@just-perfection','blur-my-shell@aunetx']
-disable-overview-on-startup=true
-favorite-apps=['solviony-store.desktop','org.gnome.Terminal.desktop','org.gnome.Nautilus.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
-
-[org/gnome/desktop/interface]
-enable-hot-corners=false
-clock-show-date=false
-clock-show-seconds=false
-EOL
-
-cat > /etc/dconf/db/local.d/10-solvionyx-dock <<'EOL'
-[org/gnome/shell/extensions/dash-to-dock]
-dock-position='BOTTOM'
-extend-height=false
-dock-fixed=true
-autohide=false
-intellihide=false
-transparency-mode='FIXED'
-background-opacity=0.40
-dash-max-icon-size=56
-center-aligned=true
-show-mounts=false
-show-trash=false
-running-indicator-style='DOTS'
-apply-custom-theme=true
-custom-theme-shrink=true
-custom-theme-running-dots=true
-custom-theme-running-dots-color='rgb(0,160,255)'
-custom-theme-running-dots-border-color='rgb(0,200,255)'
-EOL
-
-cat > /etc/dconf/db/local.d/20-solvionyx-just-perfection <<'EOL'
-[org/gnome/shell/extensions/just-perfection]
-panel=false
-activities-button=false
-app-menu=false
-clock-menu=false
-workspace-switcher-size=0
-EOL
-
-cat > /etc/dconf/db/local.d/30-solvionyx-blur <<'EOL'
-[org/gnome/shell/extensions/blur-my-shell]
-panel=true
-panel-opacity=0.55
-sigma=28
-
-[org/gnome/shell/extensions/blur-my-shell/panel]
-blur=true
-brightness=0.85
-
-[org/gnome/shell/extensions/blur-my-shell/overview]
-blur=true
-EOL
-
-dconf update
-EOF
-fi
-
-###############################################################################
-# GNOME SHELL CSS — DOCK GLOW + QUICK SETTINGS GLASS
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Installing Solvionyx glass glow CSS"
-  sudo mkdir -p "$CHROOT_DIR/usr/share/gnome-shell/theme"
-  sudo tee "$CHROOT_DIR/usr/share/gnome-shell/theme/solvionyx-glass.css" >/dev/null <<'EOF'
-/* Solvionyx Glass + Glow */
-#dash {
-  background-color: rgba(15, 25, 45, 0.45);
-  border-radius: 22px;
-  box-shadow:
-    0 0 18px rgba(0, 160, 255, 0.25),
-    inset 0 0 1px rgba(255, 255, 255, 0.08);
-}
-.quick-settings {
-  background-color: rgba(18, 28, 48, 0.45);
-  border-radius: 22px;
-  box-shadow:
-    0 0 22px rgba(3, 158, 255, 0.25),
-    inset 0 0 1px rgba(255, 255, 255, 0.08);
-}
-.quick-settings-grid { spacing: 12px; }
-.quick-toggle { border-radius: 16px; }
-EOF
-
-THEME_CSS="$CHROOT_DIR/usr/share/gnome-shell/theme/gnome-shell.css"
-
-if [ -f "$THEME_CSS" ]; then
-  if ! grep -q 'solvionyx-glass.css' "$THEME_CSS"; then
-    sudo sed -i '1i @import url("solvionyx-glass.css");' "$THEME_CSS"
-  fi
-fi
-
-fi
-
-###############################################################################
-# PHASE 4 — FINAL SOLVIONYX DOCK ISLAND (AUTHORITATIVE OVERRIDE)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Phase 4: Applying final Solvionyx dock island layout (authoritative)"
-  chroot_sh <<'EOF'
-set -e
-mkdir -p /etc/dconf/db/local.d /etc/dconf/db/local.d/locks
-
-cat > /etc/dconf/db/local.d/99-solvionyx-phase4 <<'EOL'
-[org/gnome/shell]
-disable-overview-on-startup=true
-favorite-apps=['solvy.desktop','solviony-store.desktop','org.gnome.Nautilus.desktop','org.gnome.Terminal.desktop','org.mozilla.firefox.desktop','steam.desktop','solvionyx-control-center.desktop']
-
-[org/gnome/desktop/interface]
-enable-hot-corners=false
-clock-show-date=false
-clock-show-seconds=false
-
-[org/gnome/shell/extensions/dash-to-dock]
-dock-position='BOTTOM'
-extend-height=false
-dock-fixed=true
-autohide=false
-intellihide=false
-center-aligned=true
-height-fraction=0.92
-dash-max-icon-size=52
-icon-size-fixed=true
-transparency-mode='FIXED'
-background-opacity=0.38
-apply-custom-theme=true
-custom-theme-shrink=true
-custom-theme-running-dots=true
-custom-theme-running-dots-color='rgb(0,170,255)'
-custom-theme-running-dots-border-color='rgb(0,220,255)'
-border-radius=26
-click-action='focus-or-previews'
-show-mounts=false
-show-trash=false
-running-indicator-style='DOTS'
-EOL
-
-cat > /etc/dconf/db/local.d/locks/99-solvionyx-phase4-locks <<'EOL'
-/org/gnome/shell/favorite-apps
-/org/gnome/shell/disable-overview-on-startup
-/org/gnome/shell/extensions/dash-to-dock/dock-position
-/org/gnome/shell/extensions/dash-to-dock/dock-fixed
-/org/gnome/shell/extensions/dash-to-dock/autohide
-/org/gnome/shell/extensions/dash-to-dock/intellihide
-/org/gnome/shell/extensions/dash-to-dock/extend-height
-/org/gnome/shell/extensions/dash-to-dock/center-aligned
-/org/gnome/shell/extensions/dash-to-dock/dash-max-icon-size
-/org/gnome/shell/extensions/dash-to-dock/background-opacity
-/org/gnome/shell/extensions/dash-to-dock/border-radius
-EOL
-
-dconf update
-EOF
-fi
-
-###############################################################################
-# PHASE 5–9
-# (Kept as-is behaviorally; rewritten to chroot_sh to prevent quote/heredoc breakage)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Phase 5: Enabling Solvy system integration"
-  chroot_sh <<'EOF'
-set -e
-if [ -f /usr/share/applications/solvy.desktop ]; then
-  mkdir -p /etc/xdg/autostart
-  cat > /etc/xdg/autostart/solvy.desktop <<'EOL'
-[Desktop Entry]
-Type=Application
-Name=Solvy AI Assistant
-Exec=solvy
-Icon=solvy
-Terminal=false
-X-GNOME-Autostart-enabled=true
-Categories=Utility;AI;
-EOL
-fi
-EOF
-fi
-
-if [ "$EDITION" = "gnome" ]; then
-  log "Phase 6: Enabling Solvy live intelligence layer"
-  chroot_sh <<'EOF'
-set -e
-mkdir -p /etc/dconf/db/local.d
-cat > /etc/dconf/db/local.d/99-solvionyx-phase6 <<'EOL'
-[org/gnome/shell/extensions/dash-to-dock]
-animate-show-apps=true
-animation-time=0.18
-scroll-action="cycle-windows"
-EOL
-
-SOLVY_STATE_DIR="/run/solvionyx"
-mkdir -p "$SOLVY_STATE_DIR"
-chmod 0755 "$SOLVY_STATE_DIR"
-touch "$SOLVY_STATE_DIR/solvy-ready"
-chmod 0644 "$SOLVY_STATE_DIR/solvy-ready"
-
-mkdir -p /usr/lib/solvionyx/hooks
-cat > /usr/lib/solvionyx/hooks/system-metrics.sh <<'EOL'
-#!/bin/sh
-CPU_LOAD=$(cut -d" " -f1 /proc/loadavg 2>/dev/null || echo 0)
-MEM_USED=$(free -m 2>/dev/null | awk "/Mem:/ {print $3}" || echo 0)
-GPU_PRESENT=$(command -v nvidia-smi >/dev/null 2>&1 && echo 1 || echo 0)
-echo "cpu_load=$CPU_LOAD"
-echo "mem_used_mb=$MEM_USED"
-echo "gpu_present=$GPU_PRESENT"
-EOL
-chmod +x /usr/lib/solvionyx/hooks/system-metrics.sh
-
-if [ -f /usr/share/applications/solvy.desktop ]; then
-  mkdir -p /etc/systemd/user
-  cat > /etc/systemd/user/solvy.service <<'EOL'
-[Unit]
-Description=Solvy AI Assistant (User Session)
-After=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=solvy
-Restart=on-failure
-RestartSec=2
-
-[Install]
-WantedBy=default.target
-EOL
-fi
-
-dconf update
-EOF
-fi
-
-if [ "$EDITION" = "gnome" ]; then
-  log "Phase 7: Enabling Solvy-aware desktop intelligence"
-  chroot_sh <<'EOF'
-set -e
-SOLVY_RUNTIME="/run/solvionyx"
-SOLVY_STATE="$SOLVY_RUNTIME/solvy-state"
-mkdir -p "$SOLVY_RUNTIME"
-chmod 0755 "$SOLVY_RUNTIME"
-for f in idle listening busy onboarding; do
-  touch "$SOLVY_STATE.$f"
-  chmod 0644 "$SOLVY_STATE.$f"
-done
-
-SOLVY_INTENT="/etc/solvionyx"
-mkdir -p "$SOLVY_INTENT"
-cat > "$SOLVY_INTENT/performance-mode" <<'EOL'
-balanced
-EOL
-chmod 0644 "$SOLVY_INTENT/performance-mode"
-
-THEME_DIR="/usr/share/gnome-shell/theme"
-CSS_FILE="$THEME_DIR/solvionyx-solvy.css"
-mkdir -p "$THEME_DIR"
-cat > "$CSS_FILE" <<'EOL'
-.solvy-idle { }
-.solvy-listening { box-shadow: 0 0 18px rgba(0, 200, 255, 0.55); }
-.solvy-busy { box-shadow: 0 0 18px rgba(255, 120, 0, 0.55); }
-.solvy-pulse { animation: solvyPulse 1.8s ease-in-out infinite; }
-@keyframes solvyPulse {
-  0%   { box-shadow: 0 0 0 rgba(0,160,255,0.0); }
-  50%  { box-shadow: 0 0 20px rgba(0,160,255,0.6); }
-  100% { box-shadow: 0 0 0 rgba(0,160,255,0.0); }
-}
-EOL
-if ! grep -q "solvionyx-solvy.css" "$THEME_DIR/gnome-shell.css" 2>/dev/null; then
-  sed -i "1i @import url('solvionyx-solvy.css');" "$THEME_DIR/gnome-shell.css" || true
-fi
-
-FIRST_BOOT_FLAG="/var/lib/solvionyx/first-boot"
-mkdir -p "$(dirname "$FIRST_BOOT_FLAG")"
-touch "$FIRST_BOOT_FLAG"
-chmod 0644 "$FIRST_BOOT_FLAG"
-
-if [ -f /usr/share/applications/solvy.desktop ]; then
-  mkdir -p /etc/xdg/autostart
-  cat > /etc/xdg/autostart/solvy-onboarding.desktop <<'EOL'
-[Desktop Entry]
-Type=Application
-Name=Solvy Onboarding
-#Exec=solvy --onboarding
-Icon=solvy
-Terminal=false
-X-GNOME-Autostart-enabled=true
-OnlyShowIn=GNOME;
-EOL
-fi
-EOF
-fi
-
-if [ "$EDITION" = "gnome" ]; then
-  log "Phase 8: Enabling voice/policy/telemetry plumbing (optional)"
-  chroot_sh <<'EOF'
-set -e
-POLICY_DIR="/etc/solvionyx/policy.d"
-mkdir -p "$POLICY_DIR"
-cat > "$POLICY_DIR/00-default.policy" <<'EOL'
-[solvy]
-enabled=true
-telemetry=local
-allow-notifications=true
-allow-voice=true
-
-[performance]
-mode=balanced
-max_cpu_pct=85
-max_mem_pct=85
-prefer_gpu=true
-gpu_throttle_on_thermal=true
-
-[security]
-allow-privileged-actions=false
-EOL
-chmod 0644 "$POLICY_DIR/00-default.policy"
-
-RUNTIME_DIR="/run/solvionyx"
-EVENT_DIR="$RUNTIME_DIR/events"
-mkdir -p "$EVENT_DIR"
-chmod 0755 "$RUNTIME_DIR" "$EVENT_DIR"
-touch "$EVENT_DIR/.keep"
-chmod 0644 "$EVENT_DIR/.keep"
-
-HOOK_DIR="/usr/lib/solvionyx/hooks"
-mkdir -p "$HOOK_DIR"
-cat > "$HOOK_DIR/notify-bridge.sh" <<'EOL'
-#!/bin/sh
-command -v notify-send >/dev/null 2>&1 || exit 0
-line=$(cat 2>/dev/null || true)
-title=${line%%|*}
-body=${line#*|}
-[ -n "$title" ] || title="Solvionyx"
-[ "$body" = "$line" ] && body=""
-notify-send "$title" "$body" >/dev/null 2>&1 || true
-EOL
-chmod +x "$HOOK_DIR/notify-bridge.sh"
-
-cat > "$HOOK_DIR/gpu-telemetry.sh" <<'EOL'
-#!/bin/sh
-gpu_present=0
-gpu_temp_c=""
-gpu_util_pct=""
-if command -v nvidia-smi >/dev/null 2>&1; then
-  gpu_present=1
-  gpu_temp_c=$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 || true)
-  gpu_util_pct=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n1 || true)
-else
-  [ -d /sys/class/drm ] && ls /sys/class/drm/card* >/dev/null 2>&1 && gpu_present=1
-fi
-echo "gpu_present=$gpu_present"
-[ -n "$gpu_temp_c" ] && echo "gpu_temp_c=$gpu_temp_c"
-[ -n "$gpu_util_pct" ] && echo "gpu_util_pct=$gpu_util_pct"
-EOL
-chmod +x "$HOOK_DIR/gpu-telemetry.sh"
-
-VOICE_DIR="/etc/solvionyx/voice"
-mkdir -p "$VOICE_DIR"
-cat > "$VOICE_DIR/wakeword.conf" <<'EOL'
-enabled=true
-wake_word=solvy
-input=default
-sensitivity=0.60
-EOL
-chmod 0644 "$VOICE_DIR/wakeword.conf"
-EOF
-fi
-
-if [ "$EDITION" = "gnome" ]; then
-  log "Phase 9: Enabling cloud AI provider interfaces (OpenAI + Gemini)"
-  chroot_sh <<'EOF'
-set -e
-PROVIDER_DIR="/etc/solvionyx/ai/providers"
-mkdir -p "$PROVIDER_DIR"
-
-cat > "$PROVIDER_DIR/openai.conf" <<'EOL'
-enabled=false
-provider=openai
-api_base=https://api.openai.com/v1
-model_default=gpt-4.1-mini
-timeout_sec=30
-EOL
-chmod 0644 "$PROVIDER_DIR/openai.conf"
-
-cat > "$PROVIDER_DIR/gemini.conf" <<'EOL'
-enabled=false
-provider=gemini
-api_base=https://generativelanguage.googleapis.com
-model_default=gemini-1.5-pro
-timeout_sec=30
-EOL
-chmod 0644 "$PROVIDER_DIR/gemini.conf"
-
-KEY_DIR="/etc/solvionyx/ai/keys"
-mkdir -p "$KEY_DIR"
-chmod 0700 "$KEY_DIR"
-
-mkdir -p /etc/solvionyx/ai
-cat > /etc/solvionyx/ai/provider <<'EOL'
-local
-EOL
-chmod 0644 /etc/solvionyx/ai/provider
-
-BIN_DIR="/usr/lib/solvionyx/ai"
-mkdir -p "$BIN_DIR"
-
-cat > "$BIN_DIR/ai-provider-info.sh" <<'EOL'
-#!/bin/sh
-provider=$(sed -n "1p" /etc/solvionyx/ai/provider 2>/dev/null || echo local)
-conf="/etc/solvionyx/ai/providers/${provider}.conf"
-echo "provider=$provider"
-if [ -f "$conf" ]; then
-  awk -F= '/^model_default=/ {print "model="$2}' "$conf"
-  awk -F= '/^api_base=/ {print "api_base="$2}' "$conf"
-fi
-EOL
-chmod +x "$BIN_DIR/ai-provider-info.sh"
-
-cat > "$BIN_DIR/ai-network-check.sh" <<'EOL'
-#!/bin/sh
-if command -v nmcli >/dev/null 2>&1; then
-  nmcli -t -f STATE general status 2>/dev/null | grep -q connected && exit 0
-fi
-ping -c1 -W1 8.8.8.8 >/dev/null 2>&1 && exit 0
-exit 1
-EOL
-chmod +x "$BIN_DIR/ai-network-check.sh"
-
-POLICY_FILE="/etc/solvionyx/policy.d/00-default.policy"
-if [ -f "$POLICY_FILE" ] && ! grep -q "^\[ai\]" "$POLICY_FILE"; then
-  cat >> "$POLICY_FILE" <<'EOL'
-
-[ai]
-allow-cloud=true
-default-provider=local
-fallback-on-failure=true
-EOL
-fi
-EOF
-fi
-
-###############################################################################
-# CALAMARES CONFIG + BRANDING
-###############################################################################
-sudo install -d "$CHROOT_DIR/etc/calamares/modules/shellprocess"
-sudo install -m 0644 "$CALAMARES_SRC/settings.conf" "$CHROOT_DIR/etc/calamares/settings.conf"
-sudo install -m 0644 "$CALAMARES_SRC/modules/run_on_install.conf" \
-  "$CHROOT_DIR/etc/calamares/modules/shellprocess/run_on_install.conf"
-
-sudo install -d "$CHROOT_DIR/usr/share/calamares/branding/solvionyx"
-sudo cp -a "$CALAMARES_SRC/branding/." "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/"
-sudo install -m 0644 "$CALAMARES_SRC/branding.desc" \
-  "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc"
-
-###############################################################################
-# CALAMARES INSTALLER SOUND — CI-safe, repo-aligned
-###############################################################################
-INSTALLER_AUDIO_DIR="$BRANDING_SRC/audio/installer"
-
-# Copy installer sounds into target
-if [ -d "$INSTALLER_AUDIO_DIR" ]; then
-  sudo install -d "$CHROOT_DIR/usr/share/sounds/solvionyx"
-
-  if [ -f "$INSTALLER_AUDIO_DIR/installer-start.mp3" ]; then
-    sudo install -m 0644 \
-      "$INSTALLER_AUDIO_DIR/installer-start.mp3" \
-      "$CHROOT_DIR/usr/share/sounds/solvionyx/installer-start.mp3"
-  fi
-
-  if [ -f "$INSTALLER_AUDIO_DIR/installer-finish.mp3" ]; then
-    sudo install -m 0644 \
-      "$INSTALLER_AUDIO_DIR/installer-finish.mp3" \
-      "$CHROOT_DIR/usr/share/sounds/solvionyx/installer-finish.mp3"
-  fi
-fi
-
-# Install scripts used by Calamares shellprocess modules
-sudo install -d "$CHROOT_DIR/etc/calamares/scripts"
-
-cat > "$CHROOT_DIR/etc/calamares/scripts/solvionyx-installer-start.sh" <<'EOF'
-#!/bin/sh
-command -v paplay >/dev/null 2>&1 || exit 0
-[ -f /usr/share/sounds/solvionyx/installer-start.mp3 ] || exit 0
-paplay /usr/share/sounds/solvionyx/installer-start.mp3 >/dev/null 2>&1 &
-EOF
-
-cat > "$CHROOT_DIR/etc/calamares/scripts/solvionyx-installer-finish.sh" <<'EOF'
-#!/bin/sh
-command -v paplay >/dev/null 2>&1 || exit 0
-[ -f /usr/share/sounds/solvionyx/installer-finish.mp3 ] || exit 0
-paplay /usr/share/sounds/solvionyx/installer-finish.mp3 >/dev/null 2>&1 &
-EOF
-
-sudo chmod +x \
-  "$CHROOT_DIR/etc/calamares/scripts/solvionyx-installer-start.sh" \
-  "$CHROOT_DIR/etc/calamares/scripts/solvionyx-installer-finish.sh"
-
-# Inject start module right after "modules:"
-sudo sed -i '/^modules:/a\ \ - play-installer-start' \
-  "$CHROOT_DIR/etc/calamares/settings.conf"
-
-# Append finish module at the bottom
-echo "  - play-installer-finish" | sudo tee -a "$CHROOT_DIR/etc/calamares/settings.conf" >/dev/null
-
-###############################################################################
-# USER-FIRST SETUP — GNOME INITIAL SETUP (POST-INSTALL)
-###############################################################################
-sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-# Ensure GNOME Initial Setup runs on first boot
-mkdir -p /etc/gdm3
-cat > /etc/gdm3/custom.conf <<EOF
-[daemon]
-InitialSetupEnable=true
-EOF
-
-# Remove any leftover live autologin
-rm -f /etc/gdm3/daemon.conf || true
-
-# Mark system as first boot
-mkdir -p /var/lib/gnome-initial-setup
-touch /var/lib/gnome-initial-setup/first-login
-'
-
-###############################################################################
-# GNOME INITIAL SETUP — SOLVIONYX BRANDING
-###############################################################################
-sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-GIS_DIR="/usr/share/gnome-initial-setup"
-
-# Replace header/logo
-if [ -d "$GIS_DIR" ]; then
-  install -m 0644 /usr/share/pixmaps/solvionyx.png \
-    "$GIS_DIR/solvionyx-logo.png" || true
-fi
-
-# Override product name
-mkdir -p /etc/gnome-initial-setup
-cat > /etc/gnome-initial-setup/vendor.conf <<EOF
-[Vendor]
-Name=Solvionyx OS
-Logo=/usr/share/pixmaps/solvionyx.png
-EOF
-'
-
-###############################################################################
-# CALAMARES INSTALLER SOUND HOOKS
-###############################################################################
-log "Installing Calamares installer sounds"
-
-sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/installer"
-
-sudo tee "$CHROOT_DIR/usr/lib/solvionyx/installer/play.sh" >/dev/null <<'EOF'
-#!/bin/sh
-
-SOUND="$1"
-
-if command -v pw-play >/dev/null 2>&1; then
-  pw-play "$SOUND" >/dev/null 2>&1 &
-elif command -v paplay >/dev/null 2>&1; then
-  paplay "$SOUND" >/dev/null 2>&1 &
-fi
-EOF
-
-sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/installer/play.sh"
-
-###############################################################################
-# REMOVE LIVE USER (INSTALLED SYSTEM)
-###############################################################################
-sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-if id liveuser >/dev/null 2>&1; then
-  userdel -r liveuser || true
-fi
-
-rm -rf /home/liveuser || true
-rm -f /etc/sudoers.d/99-liveuser || true
-'
-
-###############################################################################
-# OEM FIRST BOOT — USER CREATION (GNOME INITIAL SETUP)
-###############################################################################
-if [ "$EDITION" = "gnome" ]; then
-  log "Enabling GNOME Initial Setup (first boot user creation)"
-
-  sudo chroot "$CHROOT_DIR" bash -lc '
-set -e
-
-# Force GNOME Initial Setup on first boot
-touch /etc/gnome-initial-setup-enabled
-
-# Ensure GDM is enabled
-systemctl enable gdm || true
-
-# Ensure NO autologin survives install
-if [ -f /etc/gdm3/daemon.conf ]; then
-  sed -i \
-    -e "s/^AutomaticLoginEnable=.*/AutomaticLoginEnable=false/" \
-    -e "s/^AutomaticLogin=.*/#AutomaticLogin=/" \
-    /etc/gdm3/daemon.conf || true
-fi
-'
-fi
-
-###############################################################################
-# WELCOME APP + DESKTOP CAPABILITIES
-###############################################################################
-sudo install -d "$CHROOT_DIR/usr/share/solvionyx/welcome-app"
-sudo cp -a "$WELCOME_SRC/." "$CHROOT_DIR/usr/share/solvionyx/welcome-app/" || true
-sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"*.sh 2>/dev/null || true
-sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/welcome-app/"*.py 2>/dev/null || true
-
-sudo install -d "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d"
-sudo cp -a "$BRANDING_SRC/desktop-capabilities/." \
-  "$CHROOT_DIR/usr/lib/solvionyx/desktop-capabilities.d/" || true
-
-###############################################################################
-# PHASE 11 — SOLVY FIRST-BOOT API KEY UI (OPTIONAL, CI-SAFE)
-###############################################################################
-if [ "$EDITION" = "gnome" ] && [ -d "$REPO_ROOT/solvy/onboarding" ]; then
-  log "Installing Solvy first-boot onboarding UI"
-
-  sudo install -d "$CHROOT_DIR/usr/share/solvy/onboarding"
-  sudo cp -a "$REPO_ROOT/solvy/onboarding/." \
-    "$CHROOT_DIR/usr/share/solvy/onboarding/" || true
-
-  sudo chmod +x \
-    "$CHROOT_DIR/usr/share/solvy/onboarding/solvy-onboarding.py" 2>/dev/null || true
-
-  sudo install -d "$CHROOT_DIR/usr/share/applications"
-  sudo install -m 0644 \
-    "$REPO_ROOT/solvy/onboarding/solvy-onboarding.desktop" \
-    "$CHROOT_DIR/usr/share/applications/solvy-onboarding.desktop" || true
-
-  sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
-  sudo ln -sf \
-    /usr/share/applications/solvy-onboarding.desktop \
-    "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop" || true
-
-  sudo install -d "$CHROOT_DIR/etc/solvionyx/ai/keys"
-  sudo install -d "$CHROOT_DIR/var/lib/solvionyx"
-else
-  log "Solvy onboarding UI not present — skipping (CI-safe)"
-fi
-
-###############################################################################
-# SOLVY AI ASSISTANT — OPTIONAL (CI-SAFE)
-###############################################################################
-if [ -d "$SOLVY_SRC" ]; then
-  log "Installing Solvy AI Assistant"
-
-  sudo install -d "$CHROOT_DIR/usr/share/solvionyx/solvy"
-  sudo cp -a "$SOLVY_SRC/." "$CHROOT_DIR/usr/share/solvionyx/solvy/"
-  sudo chmod +x "$CHROOT_DIR/usr/share/solvionyx/solvy/solvy.py" 2>/dev/null || true
-
-  sudo install -d "$CHROOT_DIR/usr/share/applications"
-  sudo install -m 0644 "$SOLVY_SRC/solvy.desktop" \
-    "$CHROOT_DIR/usr/share/applications/solvy.desktop" || true
-
-  sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
-  sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-autostart.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Solvy AI Assistant
-Exec=/usr/share/solvionyx/solvy/solvy.py
-Icon=solvy
-Terminal=false
-X-GNOME-Autostart-enabled=true
-Categories=Utility;System;AI;
-EOF
-
-  if [ -f "$BRANDING_SRC/logo/solvy.png" ]; then
-    sudo install -d "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps"
-    sudo install -m 0644 "$BRANDING_SRC/logo/solvy.png" \
-      "$CHROOT_DIR/usr/share/icons/hicolor/256x256/apps/solvy.png"
-    sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
-  fi
-else
-  log "Solvy source not present — skipping Solvy install (CI-safe)"
-fi
-
-###############################################################################
-# SOLVY — FIRST LOGIN ONBOARDING WRAPPER
-###############################################################################
-sudo install -d "$CHROOT_DIR/usr/lib/solvionyx"
-
-sudo tee "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh" >/dev/null <<'EOF'
-#!/bin/sh
-
-# Run only in GNOME
-[ "$XDG_CURRENT_DESKTOP" = "GNOME" ] || exit 0
-
-STATE_DIR="$HOME/.local/state/solvionyx"
-DONE_FLAG="$STATE_DIR/solvy-onboarding-done"
-GNOME_DONE="$HOME/.config/gnome-initial-setup-done"
-
-# Wait until GNOME Initial Setup has completed
-[ -f "$GNOME_DONE" ] || exit 0
-
-# Already completed?
-[ -f "$DONE_FLAG" ] && exit 0
-
-mkdir -p "$STATE_DIR"
-
-# Launch Solvy onboarding
-if command -v solvy >/dev/null 2>&1; then
-  solvy --onboarding &
-elif [ -x /usr/share/solvionyx/solvy/solvy.py ]; then
-  /usr/share/solvionyx/solvy/solvy.py --onboarding &
-fi
-
-# Mark as done
-touch "$DONE_FLAG"
-EOF
-
-sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh"
-
-###############################################################################
-# SOLVY — AUTOSTART AFTER USER CREATION (GNOME)
-###############################################################################
-sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
-
-sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop" >/dev/null <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Solvy Onboarding
-Comment=Welcome to Solvionyx OS
-Exec=/usr/lib/solvionyx/solvy-first-login.sh
-Terminal=false
-OnlyShowIn=GNOME;
-X-GNOME-Autostart-enabled=true
-EOF
-
-###############################################################################
 # SOLVIONYX CONTROL CENTER
 ###############################################################################
 log "Installing Solvionyx Control Center"
@@ -1543,19 +471,27 @@ fi
 fi
 
 ###############################################################################
-# PLYMOUTH
+# PLYMOUTH — SOLVIONYX
 ###############################################################################
-sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
-sudo cp -a "$BRANDING_SRC/plymouth/." "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/"
+log "Configuring Plymouth (Solvionyx)"
 
-cat > "$CHROOT_DIR/etc/plymouth/plymouthd.conf" <<'EOF'
+sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
+sudo cp -a "$BRANDING_SRC/plymouth/." \
+  "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/"
+
+sudo install -d "$CHROOT_DIR/etc/plymouth"
+
+sudo tee "$CHROOT_DIR/etc/plymouth/plymouthd.conf" >/dev/null <<'EOF'
 [Daemon]
 Theme=solvionyx
+ShowDelay=0
+DeviceTimeout=8
 EOF
 
 chroot_sh <<'EOF'
 set -e
-update-alternatives --install /usr/share/plymouth/themes/default.plymouth default.plymouth \
+update-alternatives --install \
+  /usr/share/plymouth/themes/default.plymouth default.plymouth \
   /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth 200 || true
 update-alternatives --set default.plymouth \
   /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth || true
@@ -2000,9 +936,36 @@ xorriso -as mkisofs \
 ###############################################################################
 # FINAL
 ###############################################################################
-rm -rf "$BUILD_DIR/chroot" "$BUILD_DIR/iso" "$BUILD_DIR/signed-iso"
+sudo rm -rf "$BUILD_DIR/chroot" "$BUILD_DIR/iso" "$BUILD_DIR/signed-iso"
 
 XZ_OPT="-T2 -6" xz "$BUILD_DIR/$SIGNED_NAME"
 sha256sum "$BUILD_DIR/$SIGNED_NAME.xz" > "$BUILD_DIR/SHA256SUMS.txt"
 
 log "BUILD COMPLETE — $EDITION"
+
+###############################################################################
+# USER-FIRST SETUP — GNOME INITIAL SETUP (POST-INSTALL, SAFE)
+###############################################################################
+if [ "$EDITION" = "gnome" ] && [ -d "$CHROOT_DIR" ]; then
+  log "Enabling GNOME Initial Setup for installed system"
+
+  sudo chroot "$CHROOT_DIR" bash -lc '
+    set -e
+
+    # Enable GNOME Initial Setup
+    mkdir -p /etc/gdm3
+    cat > /etc/gdm3/custom.conf <<EOF
+[daemon]
+InitialSetupEnable=true
+EOF
+
+    # Ensure no live autologin survives install
+    rm -f /etc/gdm3/daemon.conf || true
+
+    # Force first-login run
+    mkdir -p /var/lib/gnome-initial-setup
+    touch /var/lib/gnome-initial-setup/first-login
+  '
+else
+  log "Skipping GNOME Initial Setup enablement (chroot already cleaned)"
+fi
