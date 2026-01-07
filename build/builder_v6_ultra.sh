@@ -449,6 +449,50 @@ sudo install -m 0644 \
 sudo chroot "$CHROOT_DIR" gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
 
 ###############################################################################
+# SOLVY — FIRST LOGIN ONBOARDING (POST GNOME INITIAL SETUP)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Installing Solvy first-login onboarding chain"
+
+  # Install first-login script
+  sudo install -d "$CHROOT_DIR/usr/lib/solvionyx"
+  sudo tee "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh" >/dev/null <<'EOF'
+#!/bin/sh
+
+[ "$XDG_CURRENT_DESKTOP" = "GNOME" ] || exit 0
+
+DONE="$HOME/.config/gnome-initial-setup-done"
+FLAG="$HOME/.local/state/solvionyx/solvy-onboarding-done"
+
+[ -f "$DONE" ] || exit 0
+[ -f "$FLAG" ] && exit 0
+
+mkdir -p "$(dirname "$FLAG")"
+
+if command -v solvy >/dev/null 2>&1; then
+  solvy --onboarding >/dev/null 2>&1 &
+elif [ -x /usr/share/solvionyx/solvy/solvy.py ]; then
+  /usr/share/solvionyx/solvy/solvy.py --onboarding >/dev/null 2>&1 &
+fi
+
+touch "$FLAG"
+EOF
+  sudo chmod +x "$CHROOT_DIR/usr/lib/solvionyx/solvy-first-login.sh"
+
+  # Autostart entry
+  sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+  sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvy-onboarding.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Solvy Onboarding
+Exec=/usr/lib/solvionyx/solvy-first-login.sh
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+fi
+
+###############################################################################
 # GNOME INITIAL SETUP — SOLVIONYX BRANDING
 ###############################################################################
 log "Branding GNOME Initial Setup (Solvionyx)"
