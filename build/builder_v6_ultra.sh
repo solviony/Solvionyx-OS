@@ -305,6 +305,25 @@ rm -f /usr/sbin/policy-rc.d
 EOF
 
 ###############################################################################
+# AUTO-LAUNCH CALAMARES IN LIVE SESSION (GNOME)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Enabling Calamares auto-launch in live GNOME session"
+
+  sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
+
+  sudo tee "$CHROOT_DIR/etc/xdg/autostart/solvionyx-installer.desktop" >/dev/null <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Install Solvionyx OS
+Exec=calamares
+OnlyShowIn=GNOME;
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+fi
+
+###############################################################################
 # ENABLE AUTOMATIC SECURITY UPDATES
 ###############################################################################
 log "Enabling unattended security upgrades"
