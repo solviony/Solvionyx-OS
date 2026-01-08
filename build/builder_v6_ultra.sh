@@ -259,8 +259,15 @@ mkdir -p /tmp /var/tmp /var/cache/apt/archives/partial /var/lib/dpkg/tmp.ci
 chmod 1777 /tmp /var/tmp
 chmod 755 /var/cache/apt/archives /var/cache/apt/archives/partial /var/lib/dpkg /var/lib/dpkg/tmp.ci
 
-apt-get update
+# --- Disable kernel/initramfs triggers (CI-safe) ---
+dpkg-divert --add --rename --divert /usr/sbin/update-initramfs.disabled /usr/sbin/update-initramfs || true
+ln -sf /bin/true /usr/sbin/update-initramfs
 
+dpkg-divert --add --rename --divert /sbin/depmod.disabled /sbin/depmod || true
+ln -sf /bin/true /sbin/depmod
+
+# --- Install base system ---
+apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   sudo systemd systemd-sysv \
   linux-image-amd64 \
@@ -281,6 +288,13 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   firmware-linux firmware-linux-nonfree firmware-iwlwifi \
   live-boot live-tools \
   ${DESKTOP_PKGS_STR}
+
+# --- Restore kernel tools ---
+rm -f /usr/sbin/update-initramfs
+dpkg-divert --remove --rename /usr/sbin/update-initramfs || true
+
+rm -f /sbin/depmod
+dpkg-divert --remove --rename /sbin/depmod || true
 
 # best-effort fixups
 set +e
