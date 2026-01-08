@@ -316,6 +316,52 @@ rm -f /usr/sbin/policy-rc.d
 EOF
 
 ###############################################################################
+# LIVE SESSION SETUP (GNOME ONLY)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Configuring live GNOME session (user, autologin, Calamares)"
+
+  chroot_sh <<'EOF'
+set -e
+
+# --- Create live user ---
+id liveuser >/dev/null 2>&1 || useradd -m -s /bin/bash liveuser
+echo "liveuser:live" | chpasswd
+usermod -aG sudo,video,audio,netdev liveuser
+
+# Passwordless sudo for live user
+echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/99-liveuser
+chmod 0440 /etc/sudoers.d/99-liveuser
+
+# --- GNOME live autologin ---
+mkdir -p /etc/gdm3
+cat > /etc/gdm3/custom.conf <<EOL
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=liveuser
+InitialSetupEnable=false
+EOL
+
+# Ensure no installer leftovers break live
+rm -f /etc/gdm3/daemon.conf || true
+
+# --- Auto-launch Calamares ---
+mkdir -p /etc/xdg/autostart
+cat > /etc/xdg/autostart/calamares.desktop <<EOL
+[Desktop Entry]
+Type=Application
+Name=Install Solvionyx OS
+Exec=calamares
+Icon=calamares
+Terminal=false
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+EOL
+
+EOF
+fi
+
+###############################################################################
 # AUTO-LAUNCH CALAMARES IN LIVE SESSION (GNOME)
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
@@ -863,6 +909,7 @@ menuentry "Try Solvionyx OS Aurora (Live)" {
 }
 
 menuentry "Install Solvionyx OS Aurora" {
+  echo "Starting installer…"
   chainloader /EFI/BOOT/solvionyx.efi
 }
 EOF
