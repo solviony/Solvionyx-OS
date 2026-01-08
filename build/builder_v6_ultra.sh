@@ -286,8 +286,16 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   fwupd \
   mesa-vulkan-drivers mesa-utils \
   firmware-linux firmware-linux-nonfree firmware-iwlwifi \
-  live-boot live-tools \
+  live-boot \
   ${DESKTOP_PKGS_STR}
+
+# --- Install live-tools safely (CI-safe, no postinst execution) ---
+set +e
+mkdir -p /var/cache/apt/archives
+apt-get download live-tools
+dpkg --unpack live-tools_*.deb
+rm -f live-tools_*.deb
+set -e
 
 # --- Restore kernel tools ---
 rm -f /usr/sbin/update-initramfs
@@ -312,6 +320,7 @@ if ls /boot/vmlinuz-* >/dev/null 2>&1; then
 fi
 
 rm -f /usr/sbin/policy-rc.d
+dpkg --configure -a || true
 EOF
 
 ###############################################################################
