@@ -751,41 +751,28 @@ done
 cp "$GRUB_EFI" "$ISO_DIR/EFI/BOOT/grubx64.efi"
 
 ###############################################################################
-# OPTIONAL UKI (Secure Boot path) — DOES NOT replace normal GRUB boot
+# OPTIONAL UKI (Unified Kernel Image) — Secure Boot path (Debian-safe)
+# Does NOT replace GRUB. Skips cleanly if stub is unavailable.
 ###############################################################################
-log "Building optional UKI (for Secure Boot path, if stub exists)"
-STUB_SRC="$CHROOT_DIR/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
-UKI_IMAGE_LIVE="$UKI_DIR/solvionyx-live-uki.efi"
-UKI_IMAGE_INSTALL="$UKI_DIR/solvionyx-install-uki.efi"
+log "Checking for systemd UKI stub (optional)"
 
-CMDLINE_TRY="boot=live quiet splash"
-CMDLINE_INSTALL="boot=live quiet splash calamares"
-CMDLINE_TTY="boot=live systemd.unit=multi-user.target"
+STUB_SRC="$CHROOT_DIR/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+UKI_IMAGE="$ISO_DIR/EFI/BOOT/solvionyx-uki.efi"
+
+CMDLINE="boot=live components quiet splash calamares"
 
 if [ -f "$STUB_SRC" ]; then
-  cp "$STUB_SRC" "$UKI_DIR/linuxx64.efi.stub"
+  log "UKI stub found — building Solvionyx UKI"
 
-  # Live UKI
   objcopy \
     --add-section .osrel="$CHROOT_DIR/etc/os-release" --change-section-vma .osrel=0x20000 \
-    --add-section .cmdline=<(echo -n "$CMDLINE_TRY") --change-section-vma .cmdline=0x30000 \
+    --add-section .cmdline=<(echo -n "$CMDLINE") --change-section-vma .cmdline=0x30000 \
     --add-section .linux="$LIVE_DIR/vmlinuz" --change-section-vma .linux=0x2000000 \
     --add-section .initrd="$LIVE_DIR/initrd.img" --change-section-vma .initrd=0x3000000 \
-    "$UKI_DIR/linuxx64.efi.stub" "$UKI_IMAGE_LIVE" || true
+    "$STUB_SRC" "$UKI_IMAGE"
 
-  # Install UKI (same kernel/initrd, different cmdline)
-  objcopy \
-    --add-section .osrel="$CHROOT_DIR/etc/os-release" --change-section-vma .osrel=0x20000 \
-    --add-section .cmdline=<(echo -n "$CMDLINE_INSTALL") --change-section-vma .cmdline=0x30000 \
-    --add-section .linux="$LIVE_DIR/vmlinuz" --change-section-vma .linux=0x2000000 \
-    --add-section .initrd="$LIVE_DIR/initrd.img" --change-section-vma .initrd=0x3000000 \
-    "$UKI_DIR/linuxx64.efi.stub" "$UKI_IMAGE_INSTALL" || true
-
-  # Copy into ISO for chainloading option
-  cp "$UKI_IMAGE_LIVE" "$ISO_DIR/EFI/BOOT/solvionyx-live.efi" 2>/dev/null || true
-  cp "$UKI_IMAGE_INSTALL" "$ISO_DIR/EFI/BOOT/solvionyx-install.efi" 2>/dev/null || true
 else
-  log "EFI stub missing — skipping UKI creation (OK)."
+  log "UKI stub not present — skipping UKI (Debian-safe)"
 fi
 
 ###############################################################################
