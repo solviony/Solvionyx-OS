@@ -789,47 +789,173 @@ else
 fi
 
 ###############################################################################
-# GRUB CFG — Boot-safe menu (no chainloader for normal Try/Install)
+# UKI (Unified Kernel Image) + GRUB — Live / Install / Recovery / GPU Recovery
+# - Automatic fallback to recovery if chainloader/boot fails
+# - Branded recovery UI text
 ###############################################################################
-log "Writing GRUB menu (Try / Install / TTY fallback)"
-cat > "$ISO_DIR/EFI/BOOT/grub.cfg" <<EOF
-set timeout=5
+
+# ---- UKI COMMAND LINES ----
+# Your requested base cmdline (copy/paste ready)
+CMDLINE="boot=live components quiet splash calamares"
+
+# Generic recovery: emergency shell + safest graphics
+CMDLINE_RECOVERY="boot=live components systemd.unit=emergency.target nomodeset"
+
+# TTY fallback (no GUI)
+CMDLINE_TTY="boot=live components systemd.unit=multi-user.target nomodeset"
+
+# GPU-specific recovery
+# NVIDIA: disable nouveau and prevent modesetting issues
+CMDLINE_RECOVERY_NVIDIA="boot=live components systemd.unit=emergency.target nomodeset nouveau.modeset=0 modprobe.blacklist=nouveau,nvidiafb"
+
+# AMD: force minimal display path; keep it conservative (avoid over-aggressive flags)
+CMDLINE_RECOVERY_AMD="boot=live components systemd.unit=emergency.target nomodeset amdgpu.modeset=0 radeon.modeset=0"
+
+
+# ---- Locate kernel + initrd ----
+VMLINUX="$(ls "$CHROOT_DIR"/boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
+INITRD="$(ls "$CHROOT_DIR"/boot/initrd.img-* 2>/dev/null | head -n1 || true)"
+[ -f "$VMLINUX" ] || fail "Kernel not found"
+[ -f "$INITRD"  ] || fail "Initrd not found"
+
+# ---- EFI stub ----
+STUB_SRC="$CHROOT_DIR/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
+[ -f "$STUB_SRC" ] || fail "EFI stub missing: $STUB_SRC"
+
+# ---- Build UKIs ----
+build_uki() {
+  local out="$1"
+  local cmdline="$2"
+
+  objcopy \
+    --add-section .osrel="$CHROOT_DIR/etc/os-release" --change-section-vma .osrel=0x20000 \
+    --add-section .cmdline=<(echo -n "$cmdline")     --change-section-vma .cmdline=0x30000 \
+    --add-section .linux="$VMLINUX"                  --change-section-vma .linux=0x2000000 \
+    --add-section .initrd="$INITRD"                  --change-section-vma .initrd=0x3000000 \
+    "$STUB_SRC" "$out"
+}
+
+# Main paths
+UKI_LIVE="$ISO_DIR/EFI/BOOT/solvionyx-live.efi"
+UKI_INSTALL="$ISO_DIR/EFI/BOOT/solvionyx-install.efi"
+
+# Recovery variants
+UKI_RECOVERY="$ISO_DIR/EFI/BOOT/solvionyx-recovery.efi"
+UKI_TTY="$ISO_DIR/EFI/BOOT/solvionyx-tty.efi"
+UKI_RECOVERY_NVIDIA="$ISO_DIR/EFI/BOOT/solvionyx-recovery-nvidia.efi"
+UKI_RECOVERY_AMD="$ISO_DIR/EFI/BOOT/solvionyx-recovery-amd.efi"
+
+build_uki "$UKI_LIVE"            "$CMDLINE"
+build_uki "$UKI_INSTALL"         "$CMDLINE"
+build_uki "$UKI_RECOVERY"        "$CMDLINE_RECOVERY"
+build_uki "$UKI_TTY"             "$CMDLINE_TTY"
+build_uki "$UKI_RECOVERY_NVIDIA" "$CMDLINE_RECOVERY_NVIDIA"
+build_uki "$UKI_RECOVERY_AMD"    "$CMDLINE_RECOVERY_AMD"
+
+
+# ---- Install shim + GRUB ----
+# (Use your existing candidate logic if you prefer; this is robust across Debian paths.)
+SHIM_EFI=""
+for c in \
+  "$CHROOT_DIR/usr/lib/shim/shimx64.efi.signed" \
+  "$CHROOT_DIR/usr/lib/shim/shimx64.efi" \
+  "/usr/lib/shim/shimx64.efi.signed" \
+  "/usr/lib/shim/shimx64.efi"
+do
+  [ -f "$c" ] && SHIM_EFI="$c" && break
+done
+[ -n "$SHIM_EFI" ] || fail "shimx64.efi(.signed) not found"
+
+GRUB_EFI=""
+for c in \
+  "$CHROOT_DIR/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed" \
+  "$CHROOT_DIR/usr/lib/grub/x86_64-efi/grubx64.efi" \
+  "/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed" \
+  "/usr/lib/grub/x86_64-efi/grubx64.efi"
+do
+  [ -f "$c" ] && GRUB_EFI="$c" && break
+done
+[ -n "$GRUB_EFI" ] || fail "grubx64.efi not found"
+
+cp "$SHIM_EFI" "$ISO_DIR/EFI/BOOT/BOOTX64.EFI"
+cp "$GRUB_EFI" "$ISO_DIR/EFI/BOOT/grubx64.efi"
+
+
+###############################################################################
+# GRUB CONFIG — UKI-only + branded text + fallback-on-load-failure
+###############################################################################
+cat > "$ISO_DIR/EFI/BOOT/grub.cfg" <<'EOF'
+set timeout=6
 set default=0
+
+# If an entry fails to load/chainload/boot, GRUB will try the fallback entry index.
+# (This catches GRUB-level failures; it cannot detect kernel hangs/panics.)
+set fallback=2
 
 insmod all_video
 insmod gfxterm
 insmod png
 terminal_output gfxterm
 
-menuentry "Try Solvionyx OS Aurora (Live)" {
-  echo "Booting live session..."
-  linuxefi /live/vmlinuz ${CMDLINE_TRY}
-  initrdefi /live/initrd.img
+# Minimal branding colors (theme can override if present)
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+# Optional theme hook (safe if files absent)
+# If you later ship a GRUB theme inside the ISO, point to it here:
+# set theme=/boot/grub/themes/solvionyx/theme.txt
+
+function solvionyx_banner {
+  echo ""
+  echo "============================================================"
+  echo "                 Solvionyx OS Aurora"
+  echo "           The Engine Behind the Vision"
+  echo "============================================================"
+  echo ""
 }
 
-menuentry "Install Solvionyx OS Aurora (Live + Installer)" {
-  echo "Starting installer..."
-  linuxefi /live/vmlinuz ${CMDLINE_INSTALL}
-  initrdefi /live/initrd.img
+menuentry "Try Solvionyx OS Aurora (Live)" --id=try {
+  solvionyx_banner
+  echo "Booting Live Session..."
+  chainloader /EFI/BOOT/solvionyx-live.efi
+  boot
 }
 
-menuentry "Install (TTY Fallback)" {
-  echo "Booting TTY fallback..."
-  linuxefi /live/vmlinuz ${CMDLINE_TTY}
-  initrdefi /live/initrd.img
+menuentry "Install Solvionyx OS Aurora (Installer)" --id=install {
+  solvionyx_banner
+  echo "Launching Solvionyx Installer..."
+  chainloader /EFI/BOOT/solvionyx-install.efi
+  boot
 }
 
-# Optional UKI chainload (Secure Boot path) — only if present
-if [ -f /EFI/BOOT/solvionyx-live.efi ]; then
-  menuentry "Try (Secure Boot UKI)" {
-    chainloader /EFI/BOOT/solvionyx-live.efi
-  }
-fi
-if [ -f /EFI/BOOT/solvionyx-install.efi ]; then
-  menuentry "Install (Secure Boot UKI)" {
-    chainloader /EFI/BOOT/solvionyx-install.efi
-  }
-fi
+menuentry "Recovery Mode (Emergency Shell)" --id=recovery {
+  solvionyx_banner
+  echo "Recovery Mode: Emergency shell (safe graphics)."
+  echo "Tip: Use this if you see a black screen or GPU issues."
+  chainloader /EFI/BOOT/solvionyx-recovery.efi
+  boot
+}
+
+menuentry "Recovery Mode (NVIDIA Safe)" --id=recovery_nvidia {
+  solvionyx_banner
+  echo "NVIDIA Recovery: nouveau disabled, nomodeset enabled."
+  chainloader /EFI/BOOT/solvionyx-recovery-nvidia.efi
+  boot
+}
+
+menuentry "Recovery Mode (AMD Safe)" --id=recovery_amd {
+  solvionyx_banner
+  echo "AMD Recovery: amdgpu/radeon modeset disabled, nomodeset enabled."
+  chainloader /EFI/BOOT/solvionyx-recovery-amd.efi
+  boot
+}
+
+menuentry "Install (TTY Fallback)" --id=tty {
+  solvionyx_banner
+  echo "TTY Installer: Text-mode fallback."
+  chainloader /EFI/BOOT/solvionyx-tty.efi
+  boot
+}
 EOF
 
 ###############################################################################
