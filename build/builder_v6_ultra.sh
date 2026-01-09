@@ -607,11 +607,11 @@ printf '\nsequence:\n  - show:\n      - welcome\n      - locale\n      - keyboar
 EOF
 
 ###############################################################################
-# LIVE SESSION: Proper user, forced autologin (live only),
-# installer launcher + conditional autostart
+# LIVE SESSION: Proper user, FORCED autologin (live only),
+# installer launcher + REMOVE Debian branding
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
-  log "Configuring live GNOME (forced autologin + installer)"
+  log "Configuring live GNOME (forced autologin + Solvionyx branding)"
 
   chroot_sh <<'EOF'
 set -e
@@ -623,12 +623,11 @@ id liveuser >/dev/null 2>&1 || useradd -m -s /bin/bash liveuser
 echo "liveuser:live" | chpasswd
 usermod -aG sudo,video,audio,netdev liveuser || true
 
-# Passwordless sudo for live user
 echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/99-liveuser
 chmod 0440 /etc/sudoers.d/99-liveuser
 
 ###############################################################################
-# FORCE GDM AUTOLOGIN (LIVE ONLY)
+# FORCE GDM AUTOLOGIN (NO GREETER)
 ###############################################################################
 mkdir -p /etc/gdm3
 
@@ -642,10 +641,37 @@ InitialSetupEnable=false
 DisallowTCP=true
 EOL
 
-# Remove anything that can override or cache GDM state
+# Kill anything that can override GDM state
 rm -f /etc/gdm3/daemon.conf || true
-rm -rf /var/lib/gdm3/.config || true
 rm -rf /var/lib/gdm3/.cache || true
+rm -rf /var/lib/gdm3/.config || true
+
+###############################################################################
+# DISABLE GNOME INITIAL SETUP (CRITICAL)
+###############################################################################
+rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop || true
+rm -f /usr/share/applications/gnome-initial-setup.desktop || true
+
+###############################################################################
+# SOLVIONYX GDM / LOGIN BRANDING (REMOVE DEBIAN 12)
+###############################################################################
+mkdir -p /usr/share/pixmaps
+cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/gdm-logo.png || true
+
+mkdir -p /etc/dconf/db/gdm.d
+cat > /etc/dconf/db/gdm.d/01-solvionyx <<'EOL'
+[org/gnome/login-screen]
+logo='/usr/share/pixmaps/gdm-logo.png'
+disable-user-list=false
+
+[org/gnome/desktop/background]
+picture-uri='file:///usr/share/backgrounds/solvionyx/aurora-default.png'
+picture-uri-dark='file:///usr/share/backgrounds/solvionyx/aurora-default.png'
+primary-color='#081a33'
+secondary-color='#081a33'
+EOL
+
+dconf update || true
 
 ###############################################################################
 # CONDITIONAL INSTALLER WRAPPER
