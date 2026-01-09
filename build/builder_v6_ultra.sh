@@ -607,8 +607,7 @@ printf '\nsequence:\n  - show:\n      - welcome\n      - locale\n      - keyboar
 EOF
 
 ###############################################################################
-# LIVE SESSION: Proper user, FORCED autologin (live only),
-# installer launcher + REMOVE Debian branding
+# LIVE SESSION: Forced autologin (live only), GNOME-safe, branding-correct
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
   log "Configuring live GNOME (forced autologin + Solvionyx branding)"
@@ -617,7 +616,7 @@ if [ "$EDITION" = "gnome" ]; then
 set -e
 
 ###############################################################################
-# LIVE USER
+# LIVE USER (authoritative)
 ###############################################################################
 id liveuser >/dev/null 2>&1 || useradd -m -s /bin/bash liveuser
 echo "liveuser:live" | chpasswd
@@ -627,54 +626,77 @@ echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/99-liveuser
 chmod 0440 /etc/sudoers.d/99-liveuser
 
 ###############################################################################
-# FORCE GDM AUTOLOGIN (NO GREETER)
+# REGISTER USER WITH ACCOUNTSERVICE (GNOME REQUIRED)
+###############################################################################
+mkdir -p /var/lib/AccountsService/users
+cat > /var/lib/AccountsService/users/liveuser <<'EOL'
+[User]
+Language=en_US.UTF-8
+XSession=gnome
+SystemAccount=false
+EOL
+
+###############################################################################
+# FORCE AUTOLOGIN AT SYSTEMD LEVEL (LIVE-BOOT OVERRIDE)
+###############################################################################
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/override.conf <<'EOL'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin liveuser --noclear %I $TERM
+EOL
+
+###############################################################################
+# GDM: HARD DISABLE GREETER + INITIAL SETUP
 ###############################################################################
 mkdir -p /etc/gdm3
-
 cat > /etc/gdm3/custom.conf <<'EOL'
 [daemon]
 AutomaticLoginEnable=true
 AutomaticLogin=liveuser
 InitialSetupEnable=false
-
-[security]
-DisallowTCP=true
 EOL
 
-# Kill anything that can override GDM state
 rm -f /etc/gdm3/daemon.conf || true
-rm -rf /var/lib/gdm3/.cache || true
-rm -rf /var/lib/gdm3/.config || true
-
-###############################################################################
-# DISABLE GNOME INITIAL SETUP (CRITICAL)
-###############################################################################
+rm -rf /var/lib/gdm3/.cache /var/lib/gdm3/.config || true
 rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop || true
 rm -f /usr/share/applications/gnome-initial-setup.desktop || true
 
 ###############################################################################
-# SOLVIONYX GDM / LOGIN BRANDING (REMOVE DEBIAN 12)
+# SOLVIONYX LOGIN / GREETER BRANDING (NO DEBIAN WATERMARK)
 ###############################################################################
 mkdir -p /usr/share/pixmaps
 cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/gdm-logo.png || true
+cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/distributor-logo.png || true
 
 mkdir -p /etc/dconf/db/gdm.d
 cat > /etc/dconf/db/gdm.d/01-solvionyx <<'EOL'
 [org/gnome/login-screen]
 logo='/usr/share/pixmaps/gdm-logo.png'
 disable-user-list=false
+EOL
 
-[org/gnome/desktop/background]
-picture-uri='file:///usr/share/backgrounds/solvionyx/aurora-default.png'
-picture-uri-dark='file:///usr/share/backgrounds/solvionyx/aurora-default.png'
-primary-color='#081a33'
-secondary-color='#081a33'
+###############################################################################
+# REMOVE GNOME-SHELL DEBIAN STRING (THE REAL WATERMARK SOURCE)
+###############################################################################
+mkdir -p /usr/share/gnome-shell/theme/solvionyx
+cp /usr/share/gnome-shell/theme/gnome-shell.css \
+   /usr/share/gnome-shell/theme/solvionyx/gnome-shell.css || true
+
+sed -i \
+  -e 's/Debian 12/Solvionyx OS Aurora/g' \
+  -e 's/Debian/Solvionyx/g' \
+  /usr/share/gnome-shell/theme/solvionyx/gnome-shell.css || true
+
+cat > /etc/dconf/db/gdm.d/02-solvionyx-theme <<'EOL'
+[org/gnome/shell]
+theme-name='solvionyx'
 EOL
 
 dconf update || true
 
 ###############################################################################
-# CONDITIONAL INSTALLER WRAPPER
+# CONDITIONAL INSTALLER (CALAMARES)
 ###############################################################################
 cat > /usr/bin/solvionyx-live-installer <<'EOL'
 #!/bin/sh
@@ -686,7 +708,7 @@ EOL
 chmod +x /usr/bin/solvionyx-live-installer
 
 ###############################################################################
-# DESKTOP INSTALLER LAUNCHER
+# INSTALLER DESKTOP LAUNCHER
 ###############################################################################
 cat > /usr/share/applications/solvionyx-installer.desktop <<'EOL'
 [Desktop Entry]
@@ -701,7 +723,7 @@ StartupNotify=true
 EOL
 
 ###############################################################################
-# AUTOSTART (LIVE ONLY — gated by kernel cmdline)
+# AUTOSTART INSTALLER (LIVE ONLY)
 ###############################################################################
 mkdir -p /etc/xdg/autostart
 cat > /etc/xdg/autostart/solvionyx-installer-autostart.desktop <<'EOL'
