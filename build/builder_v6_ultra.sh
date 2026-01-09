@@ -398,11 +398,16 @@ sudo install -m 0644 "$REPO_ROOT/control-center/solvionyx-control-center.desktop
   "$CHROOT_DIR/usr/share/applications/solvionyx-control-center.desktop" 2>/dev/null || true
 
 ###############################################################################
-# PLYMOUTH — SOLVIONYX (safe)
+# PLYMOUTH — SOLVIONYX (safe + enforced)
 ###############################################################################
 log "Configuring Plymouth (Solvionyx)"
+
+# Install Solvionyx Plymouth theme
 sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
-sudo cp -a "$BRANDING_SRC/plymouth/." "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/" 2>/dev/null || true
+sudo cp -a "$BRANDING_SRC/plymouth/." \
+  "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/" 2>/dev/null || true
+
+# Plymouth config
 sudo install -d "$CHROOT_DIR/etc/plymouth"
 sudo tee "$CHROOT_DIR/etc/plymouth/plymouthd.conf" >/dev/null <<'EOF'
 [Daemon]
@@ -411,14 +416,47 @@ ShowDelay=0
 DeviceTimeout=8
 EOF
 
+# Force Plymouth theme + rebuild initramfs
 chroot_sh <<'EOF'
 set -e
 update-alternatives --install \
   /usr/share/plymouth/themes/default.plymouth default.plymouth \
   /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth 200 || true
+
 update-alternatives --set default.plymouth \
   /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth || true
+
 update-initramfs -u || true
+EOF
+
+
+###############################################################################
+# REMOVE DEBIAN BRANDING (watermark, fallback assets)
+###############################################################################
+log "Removing Debian branding and enforcing Solvionyx identity"
+
+sudo rm -f "$CHROOT_DIR/usr/share/plymouth/themes/text/debian-logo.png" || true
+sudo rm -f "$CHROOT_DIR/usr/share/pixmaps/debian-logo.png" || true
+sudo rm -f "$CHROOT_DIR/usr/share/pixmaps/debian.png" || true
+sudo rm -f "$CHROOT_DIR/usr/share/gnome-control-center/pixmaps/debian-logo.png" || true
+
+
+###############################################################################
+# FORCE SYSTEM LOGO (LSB + GNOME + Plymouth fallback)
+###############################################################################
+chroot_sh <<'EOF'
+set -e
+
+mkdir -p /usr/share/pixmaps
+
+# Canonical logo placement
+cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/distributor-logo.png || true
+cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/debian-logo.png || true
+
+# GNOME About + login screen branding
+mkdir -p /usr/share/gnome-control-center/pixmaps
+cp /usr/share/pixmaps/solvionyx.png \
+   /usr/share/gnome-control-center/pixmaps/distributor-logo.png || true
 EOF
 
 ###############################################################################
@@ -569,14 +607,18 @@ printf '\nsequence:\n  - show:\n      - welcome\n      - locale\n      - keyboar
 EOF
 
 ###############################################################################
-# LIVE SESSION: Proper user, autologin (live only), installer launcher + autostart
+# LIVE SESSION: Proper user, forced autologin (live only),
+# installer launcher + conditional autostart
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
-  log "Configuring live GNOME (user + autologin + install launcher + conditional autostart)"
+  log "Configuring live GNOME (forced autologin + installer)"
+
   chroot_sh <<'EOF'
 set -e
 
-# Create live user
+###############################################################################
+# LIVE USER
+###############################################################################
 id liveuser >/dev/null 2>&1 || useradd -m -s /bin/bash liveuser
 echo "liveuser:live" | chpasswd
 usermod -aG sudo,video,audio,netdev liveuser || true
@@ -585,17 +627,29 @@ usermod -aG sudo,video,audio,netdev liveuser || true
 echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/99-liveuser
 chmod 0440 /etc/sudoers.d/99-liveuser
 
-# GNOME live autologin (only affects live filesystem)
+###############################################################################
+# FORCE GDM AUTOLOGIN (LIVE ONLY)
+###############################################################################
 mkdir -p /etc/gdm3
+
 cat > /etc/gdm3/custom.conf <<'EOL'
 [daemon]
 AutomaticLoginEnable=true
 AutomaticLogin=liveuser
 InitialSetupEnable=false
-EOL
-rm -f /etc/gdm3/daemon.conf || true
 
-# Installer wrapper: only auto-runs when kernel cmdline contains "calamares"
+[security]
+DisallowTCP=true
+EOL
+
+# Remove anything that can override or cache GDM state
+rm -f /etc/gdm3/daemon.conf || true
+rm -rf /var/lib/gdm3/.config || true
+rm -rf /var/lib/gdm3/.cache || true
+
+###############################################################################
+# CONDITIONAL INSTALLER WRAPPER
+###############################################################################
 cat > /usr/bin/solvionyx-live-installer <<'EOL'
 #!/bin/sh
 if grep -qw calamares /proc/cmdline; then
@@ -605,7 +659,9 @@ exit 0
 EOL
 chmod +x /usr/bin/solvionyx-live-installer
 
-# Desktop launcher (Applications menu)
+###############################################################################
+# DESKTOP INSTALLER LAUNCHER
+###############################################################################
 cat > /usr/share/applications/solvionyx-installer.desktop <<'EOL'
 [Desktop Entry]
 Type=Application
@@ -618,7 +674,9 @@ Categories=System;Installer;
 StartupNotify=true
 EOL
 
-# GNOME autostart (conditional — only when "Install" entry used)
+###############################################################################
+# AUTOSTART (LIVE ONLY — gated by kernel cmdline)
+###############################################################################
 mkdir -p /etc/xdg/autostart
 cat > /etc/xdg/autostart/solvionyx-installer-autostart.desktop <<'EOL'
 [Desktop Entry]
