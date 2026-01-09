@@ -778,8 +778,6 @@ fi
 ###############################################################################
 # GRUB CONFIG — Boot-safe (Live / Install / Recovery / GPU Recovery)
 ###############################################################################
-log "Writing GRUB menu (Live / Install / Recovery)"
-
 cat > "$ISO_DIR/EFI/BOOT/grub.cfg" <<'EOF'
 set timeout=6
 set default=0
@@ -803,43 +801,43 @@ function solvionyx_banner {
 menuentry "Try Solvionyx OS Aurora (Live)" {
   solvionyx_banner
   echo "Booting Live Session..."
-  linuxefi /live/vmlinuz boot=live components quiet splash
-  initrdefi /live/initrd.img
+  linux /live/vmlinuz boot=live components quiet splash
+  initrd /live/initrd.img
 }
 
 menuentry "Install Solvionyx OS Aurora (Live + Installer)" {
   solvionyx_banner
-  echo "Starting Installer..."
-  linuxefi /live/vmlinuz boot=live components quiet splash calamares
-  initrdefi /live/initrd.img
+  echo "Launching Installer..."
+  linux /live/vmlinuz boot=live components quiet splash calamares
+  initrd /live/initrd.img
 }
 
 menuentry "Recovery Mode (Safe Graphics)" {
   solvionyx_banner
-  echo "Recovery: Safe graphics (nomodeset)"
-  linuxefi /live/vmlinuz boot=live components systemd.unit=emergency.target nomodeset
-  initrdefi /live/initrd.img
+  echo "Recovery: Safe graphics mode"
+  linux /live/vmlinuz boot=live components nomodeset systemd.unit=emergency.target
+  initrd /live/initrd.img
 }
 
 menuentry "Recovery Mode (NVIDIA Safe)" {
   solvionyx_banner
-  echo "Recovery: NVIDIA (nouveau disabled)"
-  linuxefi /live/vmlinuz boot=live components systemd.unit=emergency.target nomodeset nouveau.modeset=0 modprobe.blacklist=nouveau,nvidiafb
-  initrdefi /live/initrd.img
+  echo "Recovery: NVIDIA safe mode"
+  linux /live/vmlinuz boot=live components nomodeset nouveau.modeset=0 modprobe.blacklist=nouveau,nvidiafb
+  initrd /live/initrd.img
 }
 
 menuentry "Recovery Mode (AMD Safe)" {
   solvionyx_banner
-  echo "Recovery: AMD (amdgpu/radeon disabled)"
-  linuxefi /live/vmlinuz boot=live components systemd.unit=emergency.target nomodeset amdgpu.modeset=0 radeon.modeset=0
-  initrdefi /live/initrd.img
+  echo "Recovery: AMD safe mode"
+  linux /live/vmlinuz boot=live components nomodeset amdgpu.modeset=0 radeon.modeset=0
+  initrd /live/initrd.img
 }
 
 menuentry "Install (TTY Fallback)" {
   solvionyx_banner
-  echo "Text-mode installer fallback"
-  linuxefi /live/vmlinuz boot=live components systemd.unit=multi-user.target nomodeset
-  initrdefi /live/initrd.img
+  echo "TTY Installer Fallback"
+  linux /live/vmlinuz boot=live components systemd.unit=multi-user.target nomodeset
+  initrd /live/initrd.img
 }
 EOF
 
