@@ -607,41 +607,50 @@ printf '\nsequence:\n  - show:\n      - welcome\n      - locale\n      - keyboar
 EOF
 
 ###############################################################################
-# LIVE SESSION — Debian live-boot compliant, Solvionyx branded
+# LIVE SESSION — Debian live-boot authoritative autologin (GNOME SAFE)
 ###############################################################################
 if [ "$EDITION" = "gnome" ]; then
-  log "Configuring Solvionyx live session (Debian live-boot compliant)"
+  log "Configuring Debian live-boot autologin (Solvionyx authoritative)"
 
   chroot_sh <<'EOF'
 set -e
 
-# --- Live user ---
-id liveuser >/dev/null 2>&1 || useradd -m -s /bin/bash liveuser
-echo "liveuser:live" | chpasswd
-usermod -aG sudo,video,audio,netdev liveuser || true
+# ------------------------------------------------------------------
+# REQUIRED PACKAGES (live-boot autologin depends on these)
+# ------------------------------------------------------------------
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+  live-boot \
+  live-config \
+  live-config-systemd
 
-echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/99-liveuser
-chmod 0440 /etc/sudoers.d/99-liveuser
-
-# --- Debian live-boot autologin (THIS IS THE KEY) ---
+# ------------------------------------------------------------------
+# LIVE USER (created by live-config, NOT GDM)
+# ------------------------------------------------------------------
 mkdir -p /etc/live/config.conf.d
-cat > /etc/live/config.conf.d/01-autologin.conf <<'EOL'
+
+cat > /etc/live/config.conf.d/01-user.conf <<'EOL'
 LIVE_USER="liveuser"
 LIVE_USERNAME="liveuser"
-LIVE_USER_DEFAULT_GROUPS="audio cdrom video plugdev netdev sudo"
 LIVE_USER_FULLNAME="Solvionyx Live User"
+LIVE_USER_DEFAULT_GROUPS="audio cdrom video plugdev netdev sudo"
 EOL
 
-# --- Disable GNOME initial setup ---
+# ------------------------------------------------------------------
+# DISABLE GNOME INITIAL SETUP (LIVE SYSTEMS REQUIRE THIS)
+# ------------------------------------------------------------------
 rm -f /usr/share/applications/gnome-initial-setup.desktop || true
 rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop || true
 
-# --- GNOME branding (real source) ---
-install -d /usr/share/gnome-shell/theme
-install -m 0644 /usr/share/pixmaps/solvionyx.png \
-  /usr/share/gnome-shell/theme/distributor-logo.png
+# ------------------------------------------------------------------
+# BRANDING (GNOME reads this AFTER login)
+# ------------------------------------------------------------------
+install -d /usr/share/pixmaps
+cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/distributor-logo.png || true
 
-# --- Installer wrapper ---
+# ------------------------------------------------------------------
+# CALAMARES AUTOSTART (ONLY IF kernel cmdline says so)
+# ------------------------------------------------------------------
 cat > /usr/bin/solvionyx-live-installer <<'EOL'
 #!/bin/sh
 grep -qw calamares /proc/cmdline && exec calamares
@@ -650,10 +659,10 @@ EOL
 chmod +x /usr/bin/solvionyx-live-installer
 
 mkdir -p /etc/xdg/autostart
-cat > /etc/xdg/autostart/solvionyx-installer-autostart.desktop <<'EOL'
+cat > /etc/xdg/autostart/solvionyx-installer.desktop <<'EOL'
 [Desktop Entry]
 Type=Application
-Name=Solvionyx Installer
+Name=Install Solvionyx OS
 Exec=/usr/bin/solvionyx-live-installer
 OnlyShowIn=GNOME;
 NoDisplay=true
