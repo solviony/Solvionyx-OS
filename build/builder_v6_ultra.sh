@@ -271,7 +271,7 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   sudo systemd systemd-sysv \
   linux-image-amd64 \
-  grub-efi-amd64 grub-efi-amd64-bin \
+   grub-efi-amd64 grub-efi-amd64-bin \
   shim-signed \
   plymouth plymouth-themes \
   calamares \
@@ -370,6 +370,186 @@ if [ "$EDITION" = "gnome" ]; then
 set -e
 glib-compile-schemas /usr/share/glib-2.0/schemas >/dev/null 2>&1 || true
 gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+EOF
+fi
+
+###############################################################################
+# VISUAL SYNC — Plymouth → GDM → Desktop (Solvionyx Aurora)
+###############################################################################
+if [ "$EDITION" = "gnome" ]; then
+  log "Syncing Plymouth → GDM → Desktop visuals (Solvionyx Aurora)"
+
+  # ---------------------------------------------------------------------------
+  # Canonical paths
+  # ---------------------------------------------------------------------------
+  AURORA_BG="/usr/share/backgrounds/solvionyx/aurora-default.png"
+  LOGO="/usr/share/pixmaps/solvionyx.png"
+
+  chroot_sh <<'EOF'
+set -e
+
+###############################################################################
+# 1) GDM BACKGROUND + LOGO (dconf — update safe)
+###############################################################################
+mkdir -p /etc/dconf/db/gdm.d
+
+cat > /etc/dconf/db/gdm.d/02-solvionyx-visuals <<EOL
+[org/gnome/login-screen]
+logo='$LOGO'
+disable-user-list=false
+
+[org/gnome/desktop/background]
+picture-uri='file://$AURORA_BG'
+picture-uri-dark='file://$AURORA_BG'
+primary-color='#081a33'
+secondary-color='#081a33'
+EOL
+
+dconf update || true
+
+###############################################################################
+# 2) GDM CSS OVERRIDE (NO core file patching)
+###############################################################################
+mkdir -p /etc/gnome-shell
+
+cat > /etc/gnome-shell/solvionyx-gdm.css <<'EOL'
+/* Solvionyx GDM Visual Continuity */
+#lockDialogGroup {
+  background: #081a33 url("file:///usr/share/backgrounds/solvionyx/aurora-default.png");
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.login-dialog {
+  background-color: rgba(8, 26, 51, 0.55);
+  border-radius: 14px;
+}
+
+.login-dialog-logo {
+  background-image: url("file:///usr/share/pixmaps/solvionyx.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  height: 96px;
+  width: 96px;
+}
+EOL
+
+###############################################################################
+# 3) GNOME SHELL GDM OVERRIDE LOADER (safe)
+###############################################################################
+mkdir -p /usr/share/gnome-shell/theme
+
+cat > /usr/share/gnome-shell/theme/solvionyx-gdm.override.css <<'EOL'
+@import url("file:///etc/gnome-shell/solvionyx-gdm.css");
+EOL
+
+###############################################################################
+# 4) DESKTOP WALLPAPER DEFAULT (matches Plymouth/GDM)
+###############################################################################
+mkdir -p /etc/dconf/db/local.d
+
+cat > /etc/dconf/db/local.d/02-solvionyx-desktop <<EOL
+[org/gnome/desktop/background]
+picture-uri='file://$AURORA_BG'
+picture-uri-dark='file://$AURORA_BG'
+EOL
+
+dconf update || true
+
+EOF
+fi
+
+###############################################################################
+# GDM THEME OVERRIDE — Solvionyx (CSS, update-safe)
+###############################################################################
+log "Installing Solvionyx GDM theme override (CSS)"
+
+if [ "$EDITION" = "gnome" ]; then
+  chroot_sh <<'EOF'
+set -e
+
+# GDM uses its own GNOME Shell theme directory
+GDM_THEME_DIR="/usr/share/gnome-shell/theme"
+OVERRIDE_DIR="/etc/gnome-shell"
+CSS_FILE="$OVERRIDE_DIR/solvionyx-gdm.css"
+
+mkdir -p "$OVERRIDE_DIR"
+
+###############################################################################
+# SOLVIONYX GDM CSS OVERRIDE
+###############################################################################
+cat > "$CSS_FILE" <<'EOL'
+/* ============================================================
+ * Solvionyx OS — GDM Theme Override
+ * Update-safe CSS overlay (Debian GNOME compatible)
+ * ============================================================ */
+
+/* --- Background --- */
+#lockDialogGroup,
+.login-dialog,
+.unlock-dialog {
+  background-color: #081a33;
+  background-image: none;
+}
+
+/* --- Login box --- */
+.login-dialog {
+  border-radius: 16px;
+  padding: 32px;
+  background-color: rgba(8, 26, 51, 0.95);
+}
+
+/* --- Buttons --- */
+.button,
+.login-dialog-button {
+  border-radius: 10px;
+  background-color: #0a2a5a;
+  color: #ffffff;
+}
+
+.button:hover {
+  background-color: #103a78;
+}
+
+/* --- Text --- */
+.login-dialog-label,
+.login-dialog-prompt-label {
+  color: #ffffff;
+}
+
+/* --- User avatar --- */
+.user-icon {
+  border-radius: 999px;
+  background-color: #0a2a5a;
+}
+
+/* --- Solvionyx logo --- */
+#lockDialogGroup .login-dialog::before {
+  content: "";
+  display: block;
+  height: 96px;
+  margin-bottom: 20px;
+  background-image: url("file:///usr/share/pixmaps/solvionyx.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+EOL
+
+###############################################################################
+# FORCE GDM TO LOAD OVERRIDE
+###############################################################################
+cat > /etc/environment <<'EOL'
+GNOME_SHELL_THEME_OVERRIDE=/etc/gnome-shell/solvionyx-gdm.css
+EOL
+
+###############################################################################
+# HARD REMOVE DEBIAN GDM FALLBACK ASSETS
+###############################################################################
+rm -f "$GDM_THEME_DIR"/debian* || true
+rm -f /usr/share/pixmaps/debian-logo.png || true
+
 EOF
 fi
 
