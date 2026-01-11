@@ -104,11 +104,23 @@ trap 'umount_chroot_fs' EXIT
 # CHROOT EXEC WRAPPER
 ###############################################################################
 chroot_sh() {
+  # Allow passing a limited set of variables into env -i safely
+  # Usage:
+  #   chroot_sh VAR1="x" VAR2="y" <<'EOF' ... EOF
+  local env_kv=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      *=*) env_kv+=("$1"); shift ;;
+      *) break ;;
+    esac
+  done
+
   sudo chroot "$CHROOT_DIR" /usr/bin/env -i \
     HOME=/root \
     TERM="${TERM:-xterm}" \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     EDITION="$EDITION" \
+    "${env_kv[@]}" \
     bash -s
 }
 
@@ -126,6 +138,7 @@ ensure_host_deps() {
       debootstrap squashfs-tools xorriso binutils dosfstools coreutils xz-utils \
       gawk sed grep findutils
   fi
+
   # secureboot tools optional
   if ! need_cmd sbsign; then
     sudo apt-get update
@@ -165,6 +178,14 @@ log "Bootstrapping Debian ${DEBIAN_SUITE}"
 sudo debootstrap --arch=amd64 "$DEBIAN_SUITE" "$CHROOT_DIR" "$DEBIAN_MIRROR"
 sudo mkdir -p "$CHROOT_DIR"/{dev,dev/pts,proc,sys}
 mount_chroot_fs
+
+###############################################################################
+# Ensure DNS works in chroot
+###############################################################################
+log "Ensuring resolv.conf in chroot"
+if [ -f /etc/resolv.conf ]; then
+  sudo cp -L /etc/resolv.conf "$CHROOT_DIR/etc/resolv.conf" || true
+fi
 
 ###############################################################################
 # FIX TEMP DIRS INSIDE CHROOT (dpkg/tar safety)
@@ -266,7 +287,6 @@ ln -sf /bin/true /usr/sbin/update-initramfs
 dpkg-divert --add --rename --divert /sbin/depmod.disabled /sbin/depmod || true
 ln -sf /bin/true /sbin/depmod
 
-# --- Install base system ---
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   sudo systemd systemd-sysv \
@@ -289,7 +309,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   live-boot \
   ${DESKTOP_PKGS_STR}
 
-# --- Install live-tools safely (CI-safe, no postinst execution) ---
+# --- Install live-tools safely (best-effort) ---
 set +e
 mkdir -p /var/cache/apt/archives
 apt-get download live-tools
@@ -388,21 +408,18 @@ AURORA_BG=$AURORA_BG
 SOLVIONYX_LOGO=$LOGO
 EOF
 
-  chroot_sh <<'EOF'
+  # IMPORTANT: pass vars into env -i chroot
+  chroot_sh AURORA_BG="$AURORA_BG" SOLVIONYX_LOGO="$LOGO" <<'EOF'
 set -e
 
 AURORA_BG="${AURORA_BG:-/usr/share/backgrounds/solvionyx/aurora-default.png}"
 LOGO="${SOLVIONYX_LOGO:-/usr/share/pixmaps/solvionyx.png}"
 
-# If the canonical wallpaper is missing, fallback to first available
 if [ ! -f "$AURORA_BG" ]; then
   ALT="$(ls /usr/share/backgrounds/solvionyx/* 2>/dev/null | head -n1 || true)"
   [ -n "$ALT" ] && AURORA_BG="$ALT"
 fi
 
-###############################################################################
-# 1) GDM BACKGROUND + LOGO (dconf — update safe)
-###############################################################################
 mkdir -p /etc/dconf/db/gdm.d
 
 cat > /etc/dconf/db/gdm.d/02-solvionyx-visuals <<EOL
@@ -419,25 +436,18 @@ EOL
 
 dconf update || true
 
-###############################################################################
-# 2) GDM CSS OVERRIDE (overlay file; no core file patching)
-###############################################################################
 mkdir -p /etc/gnome-shell
-
 cat > /etc/gnome-shell/solvionyx-gdm.css <<EOL
-/* Solvionyx GDM Visual Continuity */
 #lockDialogGroup {
   background: #081a33 url("file://$AURORA_BG");
   background-size: cover;
   background-repeat: no-repeat;
   background-position: center;
 }
-
 .login-dialog {
   background-color: rgba(8, 26, 51, 0.55);
   border-radius: 14px;
 }
-
 #lockDialogGroup .login-dialog::before {
   content: "";
   display: block;
@@ -450,11 +460,7 @@ cat > /etc/gnome-shell/solvionyx-gdm.css <<EOL
 }
 EOL
 
-###############################################################################
-# 3) Desktop wallpaper default (matches Plymouth/GDM)
-###############################################################################
 mkdir -p /etc/dconf/db/local.d
-
 cat > /etc/dconf/db/local.d/02-solvionyx-desktop <<EOL
 [org/gnome/desktop/background]
 picture-uri='file://$AURORA_BG'
@@ -462,7 +468,6 @@ picture-uri-dark='file://$AURORA_BG'
 EOL
 
 dconf update || true
-
 EOF
 fi
 
@@ -470,26 +475,15 @@ fi
 # GDM THEME OVERRIDE — Solvionyx (CSS, update-safe)
 ###############################################################################
 log "Installing Solvionyx GDM theme override (CSS)"
-
 if [ "$EDITION" = "gnome" ]; then
   chroot_sh <<'EOF'
 set -e
-
-GDM_THEME_DIR="/usr/share/gnome-shell/theme"
 OVERRIDE_DIR="/etc/gnome-shell"
 CSS_FILE="$OVERRIDE_DIR/solvionyx-gdm.css"
-
 mkdir -p "$OVERRIDE_DIR"
-
-# Ensure we never leave Debian GDM branding behind
-rm -f "$GDM_THEME_DIR"/debian* || true
-rm -f /usr/share/pixmaps/debian-logo.png || true
-
-# If the CSS already exists (from Visual Sync block), do not overwrite.
 [ -f "$CSS_FILE" ] && exit 0
 
 cat > "$CSS_FILE" <<'EOL'
-/* Solvionyx OS — GDM Theme Override (fallback) */
 #lockDialogGroup,
 .login-dialog,
 .unlock-dialog {
@@ -525,7 +519,6 @@ cat > "$CSS_FILE" <<'EOL'
   background-size: contain;
 }
 EOL
-
 EOF
 fi
 
@@ -537,7 +530,11 @@ if [ "$EDITION" = "gnome" ]; then
   chroot_sh <<'EOF'
 set -e
 if [ -f /usr/share/applications/org.gnome.Software.desktop ]; then
-  sed -i 's/^NoDisplay=.*/NoDisplay=true/' /usr/share/applications/org.gnome.Software.desktop || true
+  if grep -q '^NoDisplay=' /usr/share/applications/org.gnome.Software.desktop; then
+    sed -i 's/^NoDisplay=.*/NoDisplay=true/' /usr/share/applications/org.gnome.Software.desktop || true
+  else
+    printf '\nNoDisplay=true\n' >> /usr/share/applications/org.gnome.Software.desktop
+  fi
 fi
 EOF
 fi
@@ -557,7 +554,6 @@ sudo install -m 0644 "$REPO_ROOT/control-center/solvionyx-control-center.desktop
 # PLYMOUTH — SOLVIONYX (safe + enforced)
 ###############################################################################
 log "Configuring Plymouth (Solvionyx)"
-
 sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
 sudo cp -a "$BRANDING_SRC/plymouth/." \
   "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/" 2>/dev/null || true
@@ -586,7 +582,6 @@ EOF
 # REMOVE DEBIAN BRANDING (watermark, fallback assets)
 ###############################################################################
 log "Removing Debian branding and enforcing Solvionyx identity"
-
 sudo rm -f "$CHROOT_DIR/usr/share/plymouth/themes/text/debian-logo.png" || true
 sudo rm -f "$CHROOT_DIR/usr/share/pixmaps/debian-logo.png" || true
 sudo rm -f "$CHROOT_DIR/usr/share/pixmaps/debian.png" || true
@@ -597,9 +592,7 @@ sudo rm -f "$CHROOT_DIR/usr/share/gnome-control-center/pixmaps/debian-logo.png" 
 ###############################################################################
 chroot_sh <<'EOF'
 set -e
-
 mkdir -p /usr/share/pixmaps
-
 cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/distributor-logo.png || true
 cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/debian-logo.png || true
 
@@ -656,87 +649,12 @@ fi
 # CALAMARES — OFFICIAL BRANDING + SLIDESHOW + POST-INSTALL CLEANUP
 ###############################################################################
 log "Configuring Calamares (branding + slideshow + post-install cleanup)"
-
 sudo install -d "$CHROOT_DIR/usr/share/calamares"
 sudo install -d "$CHROOT_DIR/usr/share/calamares/branding"
 sudo install -d "$CHROOT_DIR/usr/share/calamares/slideshow"
-
 if [ -d "$CALAMARES_SRC" ]; then
   sudo cp -a "$CALAMARES_SRC/." "$CHROOT_DIR/usr/share/calamares/" || true
 fi
-
-###############################################################################
-# OEM OOBE — Solvionyx First Boot User Setup (Windows/macOS style)
-###############################################################################
-log "Installing Solvionyx OEM First-Boot Experience (OOBE)"
-
-chroot_sh <<'EOF'
-set -e
-
-###############################################################################
-# 1) HARD DISABLE GNOME INITIAL SETUP (FOREVER)
-###############################################################################
-rm -f /usr/share/applications/gnome-initial-setup.desktop || true
-rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop || true
-
-###############################################################################
-# 2) INSTALL SOLVIONYX SETUP WIZARD (placeholder hook)
-###############################################################################
-install -d /usr/lib/solvionyx/oobe
-install -d /var/lib/solvionyx
-
-cat > /usr/lib/solvionyx/oobe/solvionyx-oobe.sh <<'EOL'
-#!/bin/bash
-set -e
-
-FLAG="/var/lib/solvionyx/oobe-complete"
-
-# Run once
-[ -f "$FLAG" ] && exit 0
-
-# Launch graphical wizard (replace later with Solvionyx UI)
-if command -v gnome-control-center >/dev/null 2>&1; then
-  gnome-control-center user-accounts &
-fi
-
-# TEMP: block until user exists
-while ! getent passwd | grep -q "/home"; do
-  sleep 2
-done
-
-touch "$FLAG"
-
-# Disable autologin
-rm -f /etc/gdm3/custom.conf || true
-
-# Cleanup
-rm -f /etc/xdg/autostart/solvionyx-oobe.desktop || true
-exit 0
-EOL
-
-chmod +x /usr/lib/solvionyx/oobe/solvionyx-oobe.sh
-
-###############################################################################
-# 3) AUTOSTART OOBE AT FIRST LOGIN (ROOT SESSION)
-###############################################################################
-install -d /etc/xdg/autostart
-
-cat > /etc/xdg/autostart/solvionyx-oobe.desktop <<'EOL'
-[Desktop Entry]
-Type=Application
-Name=Solvionyx Setup
-Exec=/usr/lib/solvionyx/oobe/solvionyx-oobe.sh
-OnlyShowIn=GNOME;
-NoDisplay=true
-X-GNOME-Autostart-enabled=true
-EOL
-
-###############################################################################
-# 4) ENSURE NO DEFAULT USER EXISTS
-###############################################################################
-deluser --remove-home liveuser 2>/dev/null || true
-
-EOF
 
 ###############################################################################
 # CALAMARES SETTINGS — OEM OOBE mode (NO users module)
@@ -765,9 +683,15 @@ prompt-install: false
 dont-chroot: false
 EOF
 
-# Branding descriptor
+# Ensure Calamares branding logo exists (best-effort)
+sudo install -d "$CHROOT_DIR/usr/share/calamares/branding/solvionyx"
+if [ ! -f "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/logo.png" ]; then
+  sudo install -m 0644 "$SOLVIONYX_LOGO" "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/logo.png" || true
+fi
+
+# Only create fallback branding.desc if your repo didn't provide one
 if [ ! -f "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc" ]; then
-  sudo install -d "$CHROOT_DIR/usr/share/calamares/branding/solvionyx"
+  log "WARNING: Missing Calamares branding.desc in repo copy; creating minimal fallback."
   sudo tee "$CHROOT_DIR/usr/share/calamares/branding/solvionyx/branding.desc" >/dev/null <<'EOF'
 ---
 componentName: solvionyx
@@ -793,11 +717,9 @@ fi
 ###############################################################################
 log "Installing Solvionyx OEM OOBE (first boot user creation)"
 
-# Ensure directories exist
 sudo install -d "$CHROOT_DIR/usr/libexec/solvionyx-oobe"
 sudo install -d "$CHROOT_DIR/etc/systemd/system"
 sudo install -d "$CHROOT_DIR/etc/polkit-1/rules.d"
-sudo install -d "$CHROOT_DIR/etc/xdg/autostart"
 sudo install -d "$CHROOT_DIR/usr/bin"
 sudo install -d "$CHROOT_DIR/var/lib/solvionyx"
 
@@ -807,7 +729,9 @@ sudo tee "$CHROOT_DIR/usr/libexec/solvionyx-oobe/apply-setup" >/dev/null <<'EOF'
 set -euo pipefail
 
 MARKER="/var/lib/solvionyx/oobe-complete"
-OEM_USER="${SOLVIONYX_OEM_USER:-solvionyx-oem}"
+ENABLE_MARKER="/var/lib/solvionyx/oobe-enable"
+OEM_USER_FILE="/var/lib/solvionyx/oem-user"
+SERVICE_NAME="solvionyx-oobe.service"
 
 usage() {
   echo "Usage: apply-setup --username U --password P --timezone TZ --keyboard K --locale LOCALE"
@@ -834,16 +758,13 @@ done
 [ -n "$USERNAME" ] || usage
 [ -n "$PASSWORD" ] || usage
 
-# Basic username validation (Linux useradd safe)
 if ! echo "$USERNAME" | grep -Eq '^[a-z_][a-z0-9_-]{0,31}$'; then
   echo "Invalid username. Use lowercase letters, numbers, underscore, dash."
   exit 3
 fi
 
-# Do not rerun if completed
 [ -f "$MARKER" ] && exit 0
 
-# Create user
 if id "$USERNAME" >/dev/null 2>&1; then
   echo "User already exists: $USERNAME"
   exit 4
@@ -853,38 +774,23 @@ useradd -m -s /bin/bash "$USERNAME"
 echo "$USERNAME:$PASSWORD" | chpasswd
 usermod -aG sudo,video,audio,netdev,plugdev "$USERNAME" || true
 
-# Timezone
-if command -v timedatectl >/dev/null 2>&1; then
-  timedatectl set-timezone "$TIMEZONE" || true
-fi
+command -v timedatectl >/dev/null 2>&1 && timedatectl set-timezone "$TIMEZONE" || true
+command -v localectl   >/dev/null 2>&1 && localectl set-x11-keymap "$KEYBOARD" || true
+command -v update-locale >/dev/null 2>&1 && update-locale LANG="$LOCALE" || true
+command -v localectl   >/dev/null 2>&1 && localectl set-locale LANG="$LOCALE" || true
 
-# Keyboard (X11 keymap – Debian GNOME)
-if command -v localectl >/dev/null 2>&1; then
-  localectl set-x11-keymap "$KEYBOARD" || true
-fi
-
-# Locale
-if command -v update-locale >/dev/null 2>&1; then
-  update-locale LANG="$LOCALE" || true
-fi
-if command -v localectl >/dev/null 2>&1; then
-  localectl set-locale LANG="$LOCALE" || true
-fi
-
-# Disable OEM autologin in GDM (so future boots show normal login)
 if [ -f /etc/gdm3/custom.conf ]; then
   sed -i 's/^AutomaticLoginEnable=.*/AutomaticLoginEnable=false/' /etc/gdm3/custom.conf || true
   sed -i '/^AutomaticLogin=/d' /etc/gdm3/custom.conf || true
 fi
 
-# Mark complete
 mkdir -p /var/lib/solvionyx
 touch "$MARKER"
 
-# Enable cleanup service (removes OEM user on next boot)
-systemctl enable solvionyx-oobe-cleanup.service >/dev/null 2>&1 || true
+rm -f "$ENABLE_MARKER" "$OEM_USER_FILE" || true
+systemctl disable "$SERVICE_NAME" >/dev/null 2>&1 || true
 
-# Reboot to land on normal login screen for the new user
+systemctl enable solvionyx-oobe-cleanup.service >/dev/null 2>&1 || true
 systemctl reboot
 EOF
 sudo chmod +x "$CHROOT_DIR/usr/libexec/solvionyx-oobe/apply-setup"
@@ -895,29 +801,31 @@ sudo tee "$CHROOT_DIR/usr/libexec/solvionyx-oobe/enable-oem-mode" >/dev/null <<'
 set -euo pipefail
 
 MARKER="/var/lib/solvionyx/oobe-complete"
+ENABLE_MARKER="/var/lib/solvionyx/oobe-enable"
+OEM_USER_FILE="/var/lib/solvionyx/oem-user"
+SERVICE_NAME="solvionyx-oobe.service"
 OEM_USER="${SOLVIONYX_OEM_USER:-solvionyx-oem}"
 
-# If user already completed OOBE, do nothing
 [ -f "$MARKER" ] && exit 0
 
-# Create OEM user (no password; autologin only)
+mkdir -p /var/lib/solvionyx
+echo "$OEM_USER" > "$OEM_USER_FILE"
+touch "$ENABLE_MARKER"
+
 if ! id "$OEM_USER" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "$OEM_USER"
   passwd -d "$OEM_USER" >/dev/null 2>&1 || true
   usermod -aG sudo,video,audio,netdev,plugdev "$OEM_USER" || true
 fi
 
-# Passwordless sudo for OEM session (smooth setup)
 cat > /etc/sudoers.d/90-solvionyx-oem <<EOL
 $OEM_USER ALL=(ALL) NOPASSWD:ALL
 EOL
 chmod 0440 /etc/sudoers.d/90-solvionyx-oem
 
-# Disable GNOME Initial Setup (we replace it)
 rm -f /usr/share/applications/gnome-initial-setup.desktop || true
 rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop || true
 
-# Configure GDM autologin for first boot
 mkdir -p /etc/gdm3
 cat > /etc/gdm3/custom.conf <<EOL
 [daemon]
@@ -926,19 +834,8 @@ AutomaticLogin=$OEM_USER
 InitialSetupEnable=false
 EOL
 
-# Ensure OOBE autostart exists for GNOME
-mkdir -p /etc/xdg/autostart
-cat > /etc/xdg/autostart/solvionyx-oobe.desktop <<'EOL'
-[Desktop Entry]
-Type=Application
-Name=Solvionyx Setup
-Comment=Finish setting up Solvionyx OS
-Exec=/usr/bin/solvionyx-oobe
-OnlyShowIn=GNOME;
-X-GNOME-Autostart-enabled=true
-NoDisplay=true
-EOL
-
+systemctl daemon-reload || true
+systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 exit 0
 EOF
 sudo chmod +x "$CHROOT_DIR/usr/libexec/solvionyx-oobe/enable-oem-mode"
@@ -962,13 +859,20 @@ sudo tee "$CHROOT_DIR/usr/libexec/solvionyx-oobe/cleanup" >/dev/null <<'EOF'
 set -euo pipefail
 
 MARKER="/var/lib/solvionyx/oobe-complete"
-OEM_USER="${SOLVIONYX_OEM_USER:-solvionyx-oem}"
+OEM_USER_FILE="/var/lib/solvionyx/oem-user"
+OEM_USER="${SOLVIONYX_OEM_USER:-}"
 
-# Only cleanup if OOBE finished
 [ -f "$MARKER" ] || exit 0
 
-rm -f /etc/xdg/autostart/solvionyx-oobe.desktop || true
 rm -f /etc/sudoers.d/90-solvionyx-oem || true
+rm -f /var/lib/solvionyx/oobe-enable || true
+
+if [ -z "$OEM_USER" ] && [ -f "$OEM_USER_FILE" ]; then
+  OEM_USER="$(cat "$OEM_USER_FILE" 2>/dev/null || true)"
+fi
+[ -n "$OEM_USER" ] || OEM_USER="solvionyx-oem"
+
+rm -f "$OEM_USER_FILE" || true
 
 if id "$OEM_USER" >/dev/null 2>&1; then
   pkill -u "$OEM_USER" >/dev/null 2>&1 || true
@@ -980,14 +884,13 @@ exit 0
 EOF
 sudo chmod +x "$CHROOT_DIR/usr/libexec/solvionyx-oobe/cleanup"
 
-# Polkit rule (allow pkexec for our helper in OEM session without password prompt)
+# Polkit rule
 sudo tee "$CHROOT_DIR/etc/polkit-1/rules.d/49-solvionyx-oobe.rules" >/dev/null <<'EOF'
 polkit.addRule(function(action, subject) {
   if (action.id == "org.freedesktop.policykit.exec" &&
       subject.isActive && subject.local) {
     var cmd = action.lookup("command_line");
     if (cmd && cmd.indexOf("/usr/libexec/solvionyx-oobe/apply-setup") !== -1) {
-      // Allow only during OEM phase; OEM user is created by enable-oem-mode
       if (subject.user && subject.user.indexOf("solvionyx") === 0) {
         return polkit.Result.YES;
       }
@@ -996,12 +899,10 @@ polkit.addRule(function(action, subject) {
 });
 EOF
 
-# The OOBE Wizard app (PyQt5) — runs in OEM session, calls pkexec helper
+# OOBE wizard
 sudo tee "$CHROOT_DIR/usr/bin/solvionyx-oobe" >/dev/null <<'EOF'
 #!/usr/bin/env python3
-import os
-import sys
-import subprocess
+import os, sys, subprocess
 from PyQt5 import QtWidgets
 
 MARKER = "/var/lib/solvionyx/oobe-complete"
@@ -1012,7 +913,6 @@ class OOBE(QtWidgets.QWizard):
         self.setWindowTitle("Welcome to Solvionyx OS")
         self.setWizardStyle(QtWidgets.QWizard.ModernStyle)
 
-        # Page 1: Intro
         p1 = QtWidgets.QWizardPage()
         p1.setTitle("Welcome to Solvionyx OS Aurora")
         l1 = QtWidgets.QVBoxLayout()
@@ -1023,12 +923,9 @@ class OOBE(QtWidgets.QWizard):
         p1.setLayout(l1)
         self.addPage(p1)
 
-        # Page 2: Regional
         p2 = QtWidgets.QWizardPage()
         p2.setTitle("Region & Input")
-
         self.locale = QtWidgets.QLineEdit("en_US.UTF-8")
-        # Default to system timezone if available, else a reasonable fallback
         tz_default = "Etc/UTC"
         try:
             if os.path.exists("/etc/timezone"):
@@ -1060,10 +957,8 @@ class OOBE(QtWidgets.QWizard):
         p2.setLayout(v2)
         self.addPage(p2)
 
-        # Page 3: Account
         p3 = QtWidgets.QWizardPage()
         p3.setTitle("Create Your Account")
-
         self.username = QtWidgets.QLineEdit()
         self.password = QtWidgets.QLineEdit()
         self.password.setEchoMode(QtWidgets.QLineEdit.Password)
@@ -1084,7 +979,6 @@ class OOBE(QtWidgets.QWizard):
         p3.setLayout(v3)
         self.addPage(p3)
 
-        # Page 4: Finish
         p4 = QtWidgets.QWizardPage()
         p4.setTitle("Ready to Apply")
         self.summary = QtWidgets.QLabel("")
@@ -1161,12 +1055,59 @@ if __name__ == "__main__":
 EOF
 sudo chmod +x "$CHROOT_DIR/usr/bin/solvionyx-oobe"
 
+# OOBE launcher + unit
+sudo tee "$CHROOT_DIR/usr/libexec/solvionyx-oobe/launch-oobe" >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+MARKER="/var/lib/solvionyx/oobe-complete"
+ENABLE_MARKER="/var/lib/solvionyx/oobe-enable"
+OEM_USER_FILE="/var/lib/solvionyx/oem-user"
+
+[ -f "$MARKER" ] && exit 0
+[ -f "$ENABLE_MARKER" ] || exit 0
+
+OEM_USER="solvionyx-oem"
+[ -f "$OEM_USER_FILE" ] && OEM_USER="$(cat "$OEM_USER_FILE" 2>/dev/null || true)"
+[ -n "$OEM_USER" ] || OEM_USER="solvionyx-oem"
+
+UID_NUM="$(id -u "$OEM_USER" 2>/dev/null || true)"
+[ -n "${UID_NUM:-}" ] || exit 0
+
+for _ in $(seq 1 120); do
+  [ -d "/run/user/$UID_NUM" ] && break
+  sleep 1
+done
+[ -d "/run/user/$UID_NUM" ] || exit 0
+
+DISPLAY_ENV=":0"
+[ -n "${DISPLAY:-}" ] && DISPLAY_ENV="$DISPLAY"
+
+runuser -l "$OEM_USER" -c "env DISPLAY=$DISPLAY_ENV XDG_RUNTIME_DIR=/run/user/$UID_NUM /usr/bin/solvionyx-oobe" >/dev/null 2>&1 || true
+exit 0
+EOF
+sudo chmod +x "$CHROOT_DIR/usr/libexec/solvionyx-oobe/launch-oobe"
+
+sudo tee "$CHROOT_DIR/etc/systemd/system/solvionyx-oobe.service" >/dev/null <<'EOF'
+[Unit]
+Description=Solvionyx OEM First Boot Wizard
+ConditionPathExists=/var/lib/solvionyx/oobe-enable
+After=graphical.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/solvionyx-oobe/launch-oobe
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical.target
+EOF
+
 ###############################################################################
-# Post-install module (live cleanup + enable OEM OOBE in target system)
+# Post-install module (enable OEM OOBE in installed target system)
 ###############################################################################
 sudo install -d "$CHROOT_DIR/etc/calamares/modules"
 sudo tee "$CHROOT_DIR/etc/calamares/modules/solvionyx-postinstall.conf" >/dev/null <<'EOF'
-# Runs in target system near end of install
 ---
 type: shellprocess
 timeout: 240
@@ -1209,11 +1150,13 @@ LIVE_USER_FULLNAME="Solvionyx Live User"
 LIVE_USER_DEFAULT_GROUPS="audio cdrom video plugdev netdev sudo"
 EOL
 
-rm -f /usr/share/applications/gnome-initial-setup.desktop || true
-rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop || true
-
 install -d /usr/share/pixmaps
 cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/distributor-logo.png || true
+
+# Live session must NEVER carry OEM markers
+rm -f /var/lib/solvionyx/oobe-enable /var/lib/solvionyx/oobe-complete /var/lib/solvionyx/oem-user || true
+systemctl disable solvionyx-oobe.service >/dev/null 2>&1 || true
+systemctl daemon-reload || true
 
 cat > /usr/bin/solvionyx-live-installer <<'EOL'
 #!/bin/sh
@@ -1232,11 +1175,13 @@ OnlyShowIn=GNOME;
 NoDisplay=true
 EOL
 
+rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop || true
+rm -f /usr/share/applications/gnome-initial-setup.desktop || true
 EOF
 fi
 
 ###############################################################################
-# OPTIONAL TTY FALLBACK INSTALLER (boot to multi-user, show instructions)
+# OPTIONAL TTY FALLBACK INSTALLER
 ###############################################################################
 log "Installing TTY fallback helper"
 sudo tee "$CHROOT_DIR/usr/bin/solvionyx-tty-installer" >/dev/null <<'EOF'
@@ -1292,6 +1237,20 @@ systemctl enable power-profiles-daemon >/dev/null 2>&1 || true
 EOF
 
 ###############################################################################
+# LIVE IMAGE HYGIENE (before squashfs)
+###############################################################################
+log "Cleaning apt cache + machine-id (live hygiene)"
+chroot_sh <<'EOF'
+set -e
+rm -f /etc/machine-id || true
+: > /etc/machine-id || true
+rm -f /var/lib/dbus/machine-id || true
+apt-get clean || true
+rm -rf /var/lib/apt/lists/* || true
+rm -rf /tmp/* /var/tmp/* || true
+EOF
+
+###############################################################################
 # KERNEL + INITRD (copy into ISO live dir)
 ###############################################################################
 VMLINUX="$(ls "$CHROOT_DIR"/boot/vmlinuz-* 2>/dev/null | head -n1 || true)"
@@ -1312,17 +1271,31 @@ log "Unmounting chroot virtual filesystems before SquashFS"
 umount_chroot_fs
 
 ###############################################################################
-# SQUASHFS
+# SQUASHFS (zstd if supported, else fallback xz)
 ###############################################################################
 log "Creating filesystem.squashfs"
-sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
-  -e boot \
-  -comp zstd \
-  -Xcompression-level 6 \
-  -processors 2
+SQUASH_COMP="zstd"
+if ! mksquashfs -version 2>/dev/null | grep -qi 'zstd'; then
+  log "squashfs-tools lacks zstd support; falling back to xz"
+  SQUASH_COMP="xz"
+fi
+
+if [ "$SQUASH_COMP" = "zstd" ]; then
+  sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
+    -e boot \
+    -comp zstd \
+    -Xcompression-level 6 \
+    -processors 2
+else
+  sudo mksquashfs "$CHROOT_DIR" "$LIVE_DIR/filesystem.squashfs" \
+    -e boot \
+    -comp xz \
+    -Xbcj x86 \
+    -processors 2
+fi
 
 ###############################################################################
-# EFI FILES (shim + grub) — for broad UEFI compatibility
+# EFI FILES (shim + grub)
 ###############################################################################
 log "Placing EFI bootloaders"
 
@@ -1353,31 +1326,28 @@ done
 cp "$GRUB_EFI" "$ISO_DIR/EFI/BOOT/grubx64.efi"
 
 ###############################################################################
-# OPTIONAL UKI (Unified Kernel Image) — Secure Boot path (Debian-safe)
+# OPTIONAL UKI
 ###############################################################################
 log "Checking for systemd UKI stub (optional)"
 
 STUB_SRC="$CHROOT_DIR/usr/lib/systemd/boot/efi/linuxx64.efi.stub"
 UKI_IMAGE="$ISO_DIR/EFI/BOOT/solvionyx-uki.efi"
-
 CMDLINE="boot=live components quiet splash calamares"
 
 if [ -f "$STUB_SRC" ]; then
   log "UKI stub found — building Solvionyx UKI"
-
   objcopy \
     --add-section .osrel="$CHROOT_DIR/etc/os-release" --change-section-vma .osrel=0x20000 \
     --add-section .cmdline=<(echo -n "$CMDLINE") --change-section-vma .cmdline=0x30000 \
     --add-section .linux="$LIVE_DIR/vmlinuz" --change-section-vma .linux=0x2000000 \
     --add-section .initrd="$LIVE_DIR/initrd.img" --change-section-vma .initrd=0x3000000 \
     "$STUB_SRC" "$UKI_IMAGE"
-
 else
   log "UKI stub not present — skipping UKI (Debian-safe)"
 fi
 
 ###############################################################################
-# GRUB CONFIG — Boot-safe (Live / Install / Recovery / GPU Recovery)
+# GRUB CONFIG — Boot-safe
 ###############################################################################
 cat > "$ISO_DIR/EFI/BOOT/grub.cfg" <<'EOF'
 set timeout=6
@@ -1401,42 +1371,36 @@ function solvionyx_banner {
 
 menuentry "Try Solvionyx OS Aurora (Live)" {
   solvionyx_banner
-  echo "Booting Live Session..."
   linux /live/vmlinuz boot=live components quiet splash
   initrd /live/initrd.img
 }
 
 menuentry "Install Solvionyx OS Aurora (Live + Installer)" {
   solvionyx_banner
-  echo "Launching Installer..."
   linux /live/vmlinuz boot=live components quiet splash calamares
   initrd /live/initrd.img
 }
 
 menuentry "Recovery Mode (Safe Graphics)" {
   solvionyx_banner
-  echo "Recovery: Safe graphics mode"
   linux /live/vmlinuz boot=live components nomodeset systemd.unit=emergency.target
   initrd /live/initrd.img
 }
 
 menuentry "Recovery Mode (NVIDIA Safe)" {
   solvionyx_banner
-  echo "Recovery: NVIDIA safe mode"
   linux /live/vmlinuz boot=live components nomodeset nouveau.modeset=0 modprobe.blacklist=nouveau,nvidiafb
   initrd /live/initrd.img
 }
 
 menuentry "Recovery Mode (AMD Safe)" {
   solvionyx_banner
-  echo "Recovery: AMD safe mode"
   linux /live/vmlinuz boot=live components nomodeset amdgpu.modeset=0 radeon.modeset=0
   initrd /live/initrd.img
 }
 
 menuentry "Install (TTY Fallback)" {
   solvionyx_banner
-  echo "TTY Installer Fallback"
   linux /live/vmlinuz boot=live components systemd.unit=multi-user.target nomodeset
   initrd /live/initrd.img
 }
@@ -1459,7 +1423,7 @@ rmdir /tmp/esp
 cp "$ESP_IMG" "$ISO_DIR/efi.img"
 
 ###############################################################################
-# BUILD ISO
+# BUILD ISO (UEFI bootable)
 ###############################################################################
 log "Building ISO (UEFI bootable)"
 xorriso -as mkisofs \
@@ -1485,10 +1449,10 @@ if [ -z "${SKIP_SECUREBOOT:-}" ] && need_cmd sbsign && [ -f "$SECUREBOOT_DIR/db.
   DB_KEY="$SECUREBOOT_DIR/db.key"
   DB_CRT="$SECUREBOOT_DIR/db.crt"
 
+  # Only sign what actually exists
   for f in "$SIGNED_DIR/EFI/BOOT/BOOTX64.EFI" \
            "$SIGNED_DIR/EFI/BOOT/grubx64.efi" \
-           "$SIGNED_DIR/EFI/BOOT/solvionyx-live.efi" \
-           "$SIGNED_DIR/EFI/BOOT/solvionyx-install.efi"; do
+           "$SIGNED_DIR/EFI/BOOT/solvionyx-uki.efi"; do
     [ -f "$f" ] || continue
     sbsign --key "$DB_KEY" --cert "$DB_CRT" --output "$f" "$f" || true
   done
