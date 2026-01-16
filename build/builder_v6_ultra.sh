@@ -1135,11 +1135,15 @@ if [ "$EDITION" = "gnome" ]; then
   chroot_sh <<'EOF'
 set -e
 
+# Base live packages
+
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   live-boot \
   live-config \
   live-config-systemd
+
+# Static live user config (NO logic here — required by live-config)
 
 mkdir -p /etc/live/config.conf.d
 
@@ -1150,13 +1154,69 @@ LIVE_USER_FULLNAME="Solvionyx Live User"
 LIVE_USER_DEFAULT_GROUPS="audio cdrom video plugdev netdev sudo"
 EOL
 
+# INSTALL MODE GATE — disable live user when calamares is present
+
+mkdir -p /lib/live/config
+
+cat > /lib/live/config/0030-solvionyx-install-gate <<'EOL'
+#!/bin/sh
+# Solvionyx install-mode gate for live-config
+
+case "$(cat /proc/cmdline)" in
+  *calamares*)
+    echo "[solvionyx] Installer mode detected — disabling live user"
+    export LIVE_USER=""
+    export LIVE_USERNAME=""
+    ;;
+esac
+EOL
+
+chmod +x /lib/live/config/0030-solvionyx-install-gate
+
+# STEP 2 — Auto-launch Calamares WITHOUT desktop (systemd authoritative)
+
+cat > /etc/systemd/system/solvionyx-live-installer.service <<'EOL'
+[Unit]
+Description=Solvionyx Live Installer
+ConditionKernelCommandLine=calamares
+After=display-manager.service
+Wants=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/calamares --fullscreen
+RemainAfterExit=yes
+Environment=QT_QPA_PLATFORM=xcb
+
+[Install]
+WantedBy=graphical.target
+EOL
+
+systemctl enable solvionyx-live-installer.service
+
+# STEP 3 — HARD BLOCK GNOME DESKTOP IN INSTALL MODE
+
+if grep -qw calamares /proc/cmdline; then
+  echo "[solvionyx] Suppressing GNOME desktop for installer mode"
+  rm -f /etc/xdg/autostart/*.desktop || true
+  rm -f /usr/share/applications/org.gnome.Shell.desktop || true
+fi
+
+# Branding consistency
+
 install -d /usr/share/pixmaps
 cp /usr/share/pixmaps/solvionyx.png /usr/share/pixmaps/distributor-logo.png || true
 
 # Live session must NEVER carry OEM markers
-rm -f /var/lib/solvionyx/oobe-enable /var/lib/solvionyx/oobe-complete /var/lib/solvionyx/oem-user || true
+
+rm -f /var/lib/solvionyx/oobe-enable \
+      /var/lib/solvionyx/oobe-complete \
+      /var/lib/solvionyx/oem-user || true
+
 systemctl disable solvionyx-oobe.service >/dev/null 2>&1 || true
 systemctl daemon-reload || true
+
+# Optional desktop launcher (safe, never auto-runs)
 
 cat > /usr/bin/solvionyx-live-installer <<'EOL'
 #!/bin/sh
@@ -1175,8 +1235,11 @@ OnlyShowIn=GNOME;
 NoDisplay=true
 EOL
 
+# Kill GNOME Initial Setup completely
+
 rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop || true
 rm -f /usr/share/applications/gnome-initial-setup.desktop || true
+
 EOF
 fi
 
