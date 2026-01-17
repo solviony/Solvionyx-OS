@@ -1342,6 +1342,85 @@ EOF
 fi
 
 ###############################################################################
+# LIVE SESSION — FIX RUNTIME, PAM, SUDO, PERMISSIONS (CRITICAL)
+###############################################################################
+chroot_sh <<'EOF'
+set -e
+
+# 1) ENSURE RUNTIME FILESYSTEMS (run, tmp, pts)
+
+mkdir -p /run /run/user /dev/pts /tmp /var/tmp
+chmod 755 /run
+chmod 1777 /tmp /var/tmp
+chmod 755 /dev
+chmod 755 /dev/pts
+
+# 2) SYSTEMD MOUNTS (devpts + tmpfs)
+
+cat > /etc/systemd/system/dev-pts.mount <<'EOL'
+[Unit]
+Description=DevPTS Mount
+Before=systemd-user-sessions.service
+
+[Mount]
+What=devpts
+Where=/dev/pts
+Type=devpts
+Options=gid=5,mode=620,ptmxmode=666
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+cat > /etc/systemd/system/run-tmpfs.mount <<'EOL'
+[Unit]
+Description=Runtime tmpfs
+Before=systemd-user-sessions.service
+
+[Mount]
+What=tmpfs
+Where=/run
+Type=tmpfs
+Options=mode=755,nosuid,nodev
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+systemctl enable dev-pts.mount || true
+systemctl enable run-tmpfs.mount || true
+
+# 3) FIX LIVEUSER SHELL + HOME
+
+id liveuser >/dev/null 2>&1 || useradd -m -s /bin/bash liveuser
+chsh -s /bin/bash liveuser || true
+chmod 755 /bin/bash
+chmod 755 /home/liveuser
+
+# 4) FORCE PAM SESSION INITIALIZATION (GNOME + sudo)
+
+sed -i 's/^session\s\+optional\s\+pam_systemd.so/session required pam_systemd.so/' \
+  /etc/pam.d/common-session || true
+
+# 5) ENSURE SUDO IS FUNCTIONAL
+
+echo "liveuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/99-liveuser
+chmod 0440 /etc/sudoers.d/99-liveuser
+
+# 6) CLEAN ANY POLICY BLOCKERS
+
+rm -f /usr/sbin/policy-rc.d || true
+
+# 7) RESET BROKEN LOGIN STATE
+
+rm -rf /run/user/* || true
+rm -rf /var/lib/gdm3/.cache || true
+
+systemctl daemon-reexec || true
+systemctl daemon-reload || true
+EOF
+
+###############################################################################
 # OPTIONAL TTY FALLBACK INSTALLER
 ###############################################################################
 log "Installing TTY fallback helper"
