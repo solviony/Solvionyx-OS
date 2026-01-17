@@ -551,23 +551,119 @@ sudo install -m 0644 "$REPO_ROOT/control-center/solvionyx-control-center.desktop
   "$CHROOT_DIR/usr/share/applications/solvionyx-control-center.desktop" 2>/dev/null || true
 
 ###############################################################################
-# PLYMOUTH — SOLVIONYX (safe + enforced)
+# PLYMOUTH — SOLVIONYX (OEM-grade, persistent, boot-safe)
 ###############################################################################
-log "Configuring Plymouth (Solvionyx)"
+log "Configuring Plymouth (Solvionyx OEM splash)"
+
+# Theme directory
 sudo install -d "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx"
+
+# Copy branding assets (best effort)
 sudo cp -a "$BRANDING_SRC/plymouth/." \
   "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/" 2>/dev/null || true
 
+###############################################################################
+# Ensure VALID Plymouth theme (failsafe)
+###############################################################################
+sudo tee "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/solvionyx.plymouth" >/dev/null <<'EOF'
+[Plymouth Theme]
+Name=Solvionyx
+Description=Solvionyx OS Aurora Boot
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/solvionyx
+ScriptFile=/usr/share/plymouth/themes/solvionyx/solvionyx.script
+EOF
+
+sudo tee "$CHROOT_DIR/usr/share/plymouth/themes/solvionyx/solvionyx.script" >/dev/null <<'EOF'
+# =====================================================
+# Solvionyx OS Plymouth Script (OEM-grade)
+# Live vs Installer aware progress messaging
+# =====================================================
+
+# Screen size
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+# -----------------------------------------------------
+# Background
+# -----------------------------------------------------
+wallpaper = Image("background.png");
+bg = Sprite(wallpaper);
+bg.SetPosition(
+  (screen_width - wallpaper.GetWidth()) / 2,
+  (screen_height - wallpaper.GetHeight()) / 2
+);
+
+# -----------------------------------------------------
+# Spinner
+# -----------------------------------------------------
+spinner = Spinner();
+spinner.SetPosition(
+  screen_width / 2,
+  screen_height * 0.72
+);
+
+# -----------------------------------------------------
+# Detect installer mode (kernel cmdline)
+# -----------------------------------------------------
+cmdline = KernelCommandLine();
+is_installer = false;
+
+for (i = 0; i < cmdline.length; i++) {
+  if (cmdline[i] == "calamares") {
+    is_installer = true;
+  }
+}
+
+# -----------------------------------------------------
+# Status text
+# -----------------------------------------------------
+font = Font("Sans 16");
+status = Label("", font);
+
+if (is_installer) {
+  status.SetText("Preparing Solvionyx OS installer…");
+} else {
+  status.SetText("Loading Solvionyx OS…");
+}
+
+status.SetPosition(
+  (screen_width - status.GetWidth()) / 2,
+  screen_height * 0.82
+);
+
+# -----------------------------------------------------
+# Progress hook (keeps splash alive)
+# -----------------------------------------------------
+fun progress_callback(p) {
+  if (p > 0.90) {
+    status.SetText("Almost ready…");
+  }
+}
+
+Plymouth.SetUpdateStatusFunction(progress_callback);
+EOF
+
+###############################################################################
+# Plymouth daemon config — KEEP SPLASH ALIVE
+###############################################################################
 sudo install -d "$CHROOT_DIR/etc/plymouth"
 sudo tee "$CHROOT_DIR/etc/plymouth/plymouthd.conf" >/dev/null <<'EOF'
 [Daemon]
 Theme=solvionyx
 ShowDelay=0
-DeviceTimeout=8
+DeviceTimeout=30
 EOF
 
+###############################################################################
+# Activate Plymouth (inside chroot)
+###############################################################################
 chroot_sh <<'EOF'
 set -e
+
+# Register and force Solvionyx theme
 update-alternatives --install \
   /usr/share/plymouth/themes/default.plymouth default.plymouth \
   /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth 200 || true
@@ -575,7 +671,9 @@ update-alternatives --install \
 update-alternatives --set default.plymouth \
   /usr/share/plymouth/themes/solvionyx/solvionyx.plymouth || true
 
-update-initramfs -u || true
+# Ensure plymouth hooks are embedded
+update-initramfs -u
+
 EOF
 
 ###############################################################################
