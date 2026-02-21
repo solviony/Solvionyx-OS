@@ -13,3 +13,6 @@ strings:
 images:
   productLogo: "logo.png"
   productIcon: "product.png"
+
+slideshow: "show.qml"
+slideshowAPI: 2
